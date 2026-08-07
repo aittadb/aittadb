@@ -43,7 +43,9 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       },
     }),
   );
-  assert.match(await browserRoot!.text(), /<h1>Sites Auth Broker<\/h1>/);
+  const browserRootHtml = await browserRoot!.text();
+  assert.match(browserRootHtml, /<h1>Sites Auth Broker<\/h1>/);
+  assert.match(browserRootHtml, /identity-graphic/);
   assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
 
   const cliHealth = await app.fetch(
@@ -99,6 +101,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(browserMissing?.status, 404);
   assert.match(browserMissingHtml, /<h1>Not found<\/h1>/);
   assert.match(browserMissingHtml, /class="sab-shell/);
+  assert.match(browserMissingHtml, /identity-graphic/);
 
   const forbiddenAdmin = await app.fetch(
     new Request("https://broker.example.test/admin/clients", {
