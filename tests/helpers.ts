@@ -1,5 +1,56 @@
 import type { RuntimeEnv } from "../src/types";
 
+class MemoryR2Object {
+  constructor(
+    private readonly body: Uint8Array,
+    readonly httpMetadata?: { contentType?: string },
+  ) {}
+
+  async arrayBuffer(): Promise<ArrayBuffer> {
+    const copy = new Uint8Array(this.body.byteLength);
+    copy.set(this.body);
+    return copy.buffer;
+  }
+}
+
+export class MemoryR2Bucket implements R2Bucket {
+  objects = new Map<
+    string,
+    {
+      body: Uint8Array;
+      httpMetadata?: { contentType?: string };
+      customMetadata?: Record<string, string>;
+    }
+  >();
+
+  async put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView | ReadableStream | string,
+    options?: {
+      httpMetadata?: { contentType?: string };
+      customMetadata?: Record<string, string>;
+    },
+  ): Promise<unknown> {
+    const body = await toBytes(value);
+    this.objects.set(key, {
+      body,
+      httpMetadata: options?.httpMetadata,
+      customMetadata: options?.customMetadata,
+    });
+    return {};
+  }
+
+  async get(key: string): Promise<R2ObjectBody | null> {
+    const object = this.objects.get(key);
+    if (!object) return null;
+    return new MemoryR2Object(object.body, object.httpMetadata);
+  }
+
+  async delete(key: string): Promise<void> {
+    this.objects.delete(key);
+  }
+}
+
 export async function testEnv(
   extra: Partial<RuntimeEnv> = {},
 ): Promise<RuntimeEnv> {
@@ -17,6 +68,7 @@ export async function testEnv(
     ADMIN_EMAILS: "admin@example.test",
     TEST_AUTH_EMAIL: "user@example.test",
     TEST_AUTH_FULL_NAME: "Test User",
+    BUCKET: new MemoryR2Bucket(),
     ...extra,
   };
 }
@@ -30,4 +82,15 @@ export function cookieValue(response: Response, name: string): string {
   const match = cookie.match(new RegExp(`${name}=([^;]+)`));
   if (!match) throw new Error(`Missing cookie ${name}`);
   return match[1];
+}
+
+async function toBytes(
+  value: ArrayBuffer | ArrayBufferView | ReadableStream | string,
+): Promise<Uint8Array> {
+  if (typeof value === "string") return new TextEncoder().encode(value);
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return new Uint8Array(await new Response(value).arrayBuffer());
 }

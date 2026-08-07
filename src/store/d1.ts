@@ -10,6 +10,8 @@ import type {
   LocalUser,
   RefreshTokenFamily,
   RefreshTokenRecord,
+  StorageFileMetadata,
+  StorageRecord,
   UpstreamIdentity,
 } from "../types";
 
@@ -495,6 +497,121 @@ export class D1AuthStore implements AuthStore {
     return Boolean(row);
   }
 
+  async listStorageRecords(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageRecord[]> {
+    const rows = await this.db
+      .prepare(
+        "SELECT * FROM storage_records WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC, key ASC",
+      )
+      .bind(userId, clientId)
+      .all<Row>();
+    return (rows.results ?? []).map(rowToStorageRecord);
+  }
+
+  async getStorageRecord(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<StorageRecord | null> {
+    const row = await this.db
+      .prepare(
+        "SELECT * FROM storage_records WHERE user_id = ? AND client_id = ? AND key = ?",
+      )
+      .bind(userId, clientId, key)
+      .first<Row>();
+    return row ? rowToStorageRecord(row) : null;
+  }
+
+  async upsertStorageRecord(record: StorageRecord): Promise<void> {
+    await this.db
+      .prepare(
+        "INSERT INTO storage_records (user_id, client_id, key, value_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, client_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
+      )
+      .bind(
+        record.userId,
+        record.clientId,
+        record.key,
+        record.valueJson,
+        record.createdAt,
+        record.updatedAt,
+      )
+      .run();
+  }
+
+  async deleteStorageRecord(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        "DELETE FROM storage_records WHERE user_id = ? AND client_id = ? AND key = ?",
+      )
+      .bind(userId, clientId, key)
+      .run();
+  }
+
+  async listStorageFiles(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageFileMetadata[]> {
+    const rows = await this.db
+      .prepare(
+        "SELECT * FROM storage_files WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC, key ASC",
+      )
+      .bind(userId, clientId)
+      .all<Row>();
+    return (rows.results ?? []).map(rowToStorageFile);
+  }
+
+  async getStorageFileMetadata(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<StorageFileMetadata | null> {
+    const row = await this.db
+      .prepare(
+        "SELECT * FROM storage_files WHERE user_id = ? AND client_id = ? AND key = ?",
+      )
+      .bind(userId, clientId, key)
+      .first<Row>();
+    return row ? rowToStorageFile(row) : null;
+  }
+
+  async upsertStorageFileMetadata(file: StorageFileMetadata): Promise<void> {
+    await this.db
+      .prepare(
+        "INSERT INTO storage_files (user_id, client_id, key, r2_key, content_type, size, sha256, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, client_id, key) DO UPDATE SET r2_key = excluded.r2_key, content_type = excluded.content_type, size = excluded.size, sha256 = excluded.sha256, updated_at = excluded.updated_at",
+      )
+      .bind(
+        file.userId,
+        file.clientId,
+        file.key,
+        file.r2Key,
+        file.contentType,
+        file.size,
+        file.sha256,
+        file.createdAt,
+        file.updatedAt,
+      )
+      .run();
+  }
+
+  async deleteStorageFileMetadata(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        "DELETE FROM storage_files WHERE user_id = ? AND client_id = ? AND key = ?",
+      )
+      .bind(userId, clientId, key)
+      .run();
+  }
+
   private async hydrateClient(row: Row): Promise<ClientView> {
     const redirectUris = await listColumn(
       this.db,
@@ -610,6 +727,31 @@ function rowToRefresh(row: Row): RefreshTokenRecord {
     expiresAt: Number(row.expires_at),
     usedAt: nullableNumber(row.used_at),
     revokedAt: nullableNumber(row.revoked_at),
+  };
+}
+
+function rowToStorageRecord(row: Row): StorageRecord {
+  return {
+    userId: String(row.user_id),
+    clientId: String(row.client_id),
+    key: String(row.key),
+    valueJson: String(row.value_json),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function rowToStorageFile(row: Row): StorageFileMetadata {
+  return {
+    userId: String(row.user_id),
+    clientId: String(row.client_id),
+    key: String(row.key),
+    r2Key: String(row.r2_key),
+    contentType: String(row.content_type),
+    size: Number(row.size),
+    sha256: String(row.sha256),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
   };
 }
 

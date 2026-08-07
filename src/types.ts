@@ -1,10 +1,20 @@
-export type OAuthScope = "openid" | "email" | "profile" | "offline_access";
+export type OAuthScope =
+  | "openid"
+  | "email"
+  | "profile"
+  | "offline_access"
+  | "storage.read"
+  | "storage.write"
+  | "storage.delete";
 
 export const SUPPORTED_SCOPES: readonly OAuthScope[] = [
   "openid",
   "email",
   "profile",
   "offline_access",
+  "storage.read",
+  "storage.write",
+  "storage.delete",
 ];
 
 export type ClientType = "public" | "confidential";
@@ -15,6 +25,7 @@ export type TokenFamilyStatus = "active" | "revoked";
 
 export interface RuntimeEnv {
   DB?: D1Database;
+  BUCKET?: R2Bucket;
   ISSUER_URL?: string;
   JWT_PRIVATE_JWK?: string;
   JWT_KEY_ID?: string;
@@ -149,6 +160,27 @@ export interface RefreshTokenRecord {
   revokedAt: number | null;
 }
 
+export interface StorageRecord {
+  userId: string;
+  clientId: string;
+  key: string;
+  valueJson: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StorageFileMetadata {
+  userId: string;
+  clientId: string;
+  key: string;
+  r2Key: string;
+  contentType: string;
+  size: number;
+  sha256: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface AuthStore {
   migrate(): Promise<void>;
   cleanup(now: number): Promise<void>;
@@ -220,4 +252,36 @@ export interface AuthStore {
     now: number,
   ): Promise<void>;
   isAccessTokenJtiRevoked(jti: string): Promise<boolean>;
+
+  listStorageRecords(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageRecord[]>;
+  getStorageRecord(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<StorageRecord | null>;
+  upsertStorageRecord(record: StorageRecord): Promise<void>;
+  deleteStorageRecord(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<void>;
+
+  listStorageFiles(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageFileMetadata[]>;
+  getStorageFileMetadata(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<StorageFileMetadata | null>;
+  upsertStorageFileMetadata(file: StorageFileMetadata): Promise<void>;
+  deleteStorageFileMetadata(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<void>;
 }

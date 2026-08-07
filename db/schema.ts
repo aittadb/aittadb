@@ -23,4 +23,6 @@ export const schemaTables = [
   "revoked_access_tokens",
   "audit_events",
   "rate_limit_counters",
+  "storage_records",
+  "storage_files",
 ] as const;

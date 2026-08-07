@@ -45,6 +45,7 @@ export function healthPage(status: {
   ok: boolean;
   service: string;
   d1: boolean;
+  r2?: boolean;
   _links?: Record<string, { href: string; type?: string }>;
 }): string {
   return pageDocument({
@@ -55,7 +56,7 @@ export function healthPage(status: {
       ? "The broker is reachable and ready to answer requests."
       : "The broker is reachable but one or more dependencies are unavailable.",
     tone: status.ok ? "success" : "danger",
-    body: `<section class="info-grid" aria-label="Health checks"><div><span>Status</span><strong>${status.ok ? "ok" : "unavailable"}</strong></div><div><span>Service</span><code>${escapeHtml(status.service)}</code></div><div><span>D1 binding</span><strong>${status.d1 ? "available" : "unavailable"}</strong></div></section>`,
+    body: `<section class="info-grid" aria-label="Health checks"><div><span>Status</span><strong>${status.ok ? "ok" : "unavailable"}</strong></div><div><span>Service</span><code>${escapeHtml(status.service)}</code></div><div><span>D1 binding</span><strong>${status.d1 ? "available" : "unavailable"}</strong></div><div><span>R2 binding</span><strong>${status.r2 ? "available" : "unavailable"}</strong></div></section>`,
     actions: [
       { href: "/", label: "Service" },
       { href: "/docs", label: "API docs", secondary: true },
@@ -80,6 +81,14 @@ POST /oauth/token
 POST /oauth/revoke
 POST /oauth/introspect
 GET /userinfo
+GET /storage/records
+PUT /storage/records/{key}
+GET /storage/records/{key}
+DELETE /storage/records/{key}
+GET /storage/files
+PUT /storage/files/{key}
+GET /storage/files/{key}
+DELETE /storage/files/{key}
 GET /openapi.json
 GET /docs</pre>`,
     actions: [
@@ -153,7 +162,7 @@ export function adminClientsPage(
     summary:
       "Register OAuth clients and manage grants. New confidential client secrets are shown once.",
     tone: secret ? "warning" : "default",
-    body: `${secret ? alertMessage(`New client secret, shown once: ${secret}`) : ""}<form method="post" action="/admin/clients" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="name">Client name</label><input id="name" name="name" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option></select><label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" required></textarea><label for="scopes">Allowed scopes</label><input id="scopes" name="scopes" value="openid email profile offline_access"><label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea><div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
+    body: `${secret ? alertMessage(`New client secret, shown once: ${secret}`) : ""}<form method="post" action="/admin/clients" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="name">Client name</label><input id="name" name="name" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option></select><label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" required></textarea><label for="scopes">Allowed scopes</label><input id="scopes" name="scopes" value="openid email profile offline_access storage.read storage.write storage.delete"><label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea><div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
   });
 }
 

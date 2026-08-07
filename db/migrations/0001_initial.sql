@@ -126,9 +126,38 @@ CREATE TABLE IF NOT EXISTS rate_limit_counters (
   window_start INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS storage_records (
+  user_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, client_id, key),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (client_id) REFERENCES oauth_clients(id)
+);
+
+CREATE TABLE IF NOT EXISTS storage_files (
+  user_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  r2_key TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, client_id, key),
+  FOREIGN KEY (user_id) REFERENCES users(id),
+  FOREIGN KEY (client_id) REFERENCES oauth_clients(id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_authorization_requests_expires_at ON authorization_requests(expires_at);
 CREATE INDEX IF NOT EXISTS idx_authorization_codes_expires_at ON authorization_codes(expires_at);
 CREATE INDEX IF NOT EXISTS idx_device_grants_expires_at ON device_grants(expires_at);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_revoked_access_tokens_expires_at ON revoked_access_tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_rate_limit_window_start ON rate_limit_counters(window_start);
+CREATE INDEX IF NOT EXISTS idx_storage_records_owner_updated_at ON storage_records(user_id, client_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_storage_files_owner_updated_at ON storage_files(user_id, client_id, updated_at);

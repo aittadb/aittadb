@@ -23,7 +23,7 @@ The application must use the standard Sites-compatible Vinext and TypeScript sha
 Runtime requirements:
 
 - D1 binding name: `DB`.
-- R2 binding: absent or `null` unless an actual file-storage requirement appears.
+- R2 binding name: `BUCKET` for broker file storage.
 - Web Crypto APIs for cryptography.
 - Durable authoritative state in D1 only.
 - No authoritative state in `localStorage`, `sessionStorage`, browser cookies, or process memory.
@@ -57,8 +57,11 @@ The supported local scopes for the MVP are:
 - `email`
 - `profile`
 - `offline_access`
+- `storage.read`
+- `storage.write`
+- `storage.delete`
 
-These scopes grant claims or refresh behavior from Sites Auth Broker. They do not grant access to ChatGPT or OpenAI data.
+These scopes grant claims, refresh behavior, or broker-local storage operations from Sites Auth Broker. They do not grant access to ChatGPT or OpenAI data.
 
 ## Repository Structure
 
@@ -88,6 +91,7 @@ Keep interfaces narrow and explicit:
 - Consent repository owns remembered consent grants keyed by local user, client, and exact scope set.
 - Audit repository owns minimal redacted security events.
 - Rate-limit repository owns bounded counters and enforcement state.
+- Storage repository owns broker-local JSON records, file metadata, and per-user/per-client object ownership. File bytes live in R2 behind generated object keys.
 - Crypto module owns random value generation, hashing, constant-time comparison, PKCE verification, JWT signing, JWT validation, and JWKS publication.
 - Configuration module owns environment parsing, defaults, secret presence checks, and production/test separation.
 
@@ -150,10 +154,21 @@ D1 is the durable state store. Schema and migrations must be checked in. Require
 - revoked access-token identifiers
 - minimal audit events
 - rate-limit counters when rate limiting is implemented in D1
+- storage records
+- storage file metadata
 
 Store hashes, not plaintext, for authorization codes, device codes, refresh tokens, confidential client secrets, and bearer-equivalent one-time credentials. Add expiration indexes for bounded cleanup. Cleanup must be safe during ordinary requests and must not require long background jobs.
 
 Migration changes must include schema updates, checked-in SQL, automated migration tests, documentation updates, and validation evidence in the same task.
+
+Storage rules:
+
+- JSON records are D1 data keyed by local user UUID, OAuth client ID, and logical application key.
+- File metadata is D1 data keyed by local user UUID, OAuth client ID, and logical application key.
+- File bytes are stored in R2 through binding `BUCKET`.
+- Caller-supplied logical keys must never be used as physical R2 object keys. Generate physical R2 keys server-side.
+- Storage endpoints require this service's own bearer access tokens and `storage.read`, `storage.write`, or `storage.delete` scopes as applicable.
+- Storage scopes are local Sites Auth Broker permissions only; never describe them as granting ChatGPT or OpenAI access.
 
 ## OpenAPI Rules
 
@@ -220,9 +235,11 @@ Every relevant implementation must include and test:
 
 This project is a REST API and authentication service, not a marketing website. Do not add a marketing landing page, hero, feature sections, testimonials, pricing, decorative imagery, dashboard, general profile page, or documentation portal beyond the minimal OpenAPI viewer.
 
-The root route must return concise machine-readable service metadata or redirect to minimal API docs. Normal HTML interfaces are limited to device-code entry or confirmation, consent approval or denial, concise OAuth errors, a minimal protected admin client-registration form when needed, and the minimal OpenAPI viewer.
+The root route must return concise machine-readable service metadata or redirect to minimal API docs. Normal HTML interfaces are limited to service metadata, health, device-code entry or confirmation, consent approval or denial, concise OAuth errors, a minimal protected admin client-registration form when needed, and the minimal OpenAPI viewer.
 
-Use plain semantic HTML, minimal CSS, visible focus, meaningful labels, clear validation errors, keyboard accessibility, screen-reader compatibility, and no unnecessary JavaScript.
+Use semantic HTML, visible focus, meaningful labels, clear validation errors, keyboard accessibility, screen-reader compatibility, and no unnecessary JavaScript.
+
+HTML pages must follow `docs/style-guide.md`. The interface should match the polish level expected from contemporary ChatGPT Sites generated pages while remaining a compact authentication service: strong typography, generous spacing, refined panels, purposeful local visual assets or CSS artwork, responsive layouts, and a consistent GitHub project affordance. Do not load external fonts, tracking scripts, or third-party images from application code.
 
 ## Documentation Rules
 
@@ -237,6 +254,7 @@ Create or maintain:
 - `CHANGELOG.md`
 - `.env.example`
 - architecture documentation
+- style guide
 - threat model
 - deployment guide
 - self-hosting limitations

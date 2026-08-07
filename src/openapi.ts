@@ -1,3 +1,11 @@
+const storageKeyParameter = {
+  name: "key",
+  in: "path",
+  required: true,
+  schema: { type: "string", minLength: 1, maxLength: 240 },
+  description: "Application-defined logical object key.",
+} as const;
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -128,6 +136,103 @@ export const openApiSpec = {
         },
       },
     },
+    "/storage/records": {
+      get: {
+        summary:
+          "List JSON records for the access token's local user and OAuth client",
+        description:
+          "Requires a Sites Auth Broker access token with storage.read. Records are broker-owned local storage; they do not expose ChatGPT or OpenAI data.",
+        security: [{ bearer: [] }],
+        responses: {
+          "200": { description: "Record collection" },
+          "401": { description: "Invalid bearer token" },
+          "403": { description: "Missing storage.read scope" },
+        },
+      },
+    },
+    "/storage/records/{key}": {
+      get: {
+        summary: "Read one JSON record",
+        security: [{ bearer: [] }],
+        parameters: [storageKeyParameter],
+        responses: {
+          "200": { description: "Storage record" },
+          "404": { description: "Record not found" },
+        },
+      },
+      put: {
+        summary: "Create or replace one JSON record",
+        description:
+          "Requires storage.write. The request body must be JSON and is stored in D1 under the local user UUID and client ID.",
+        security: [{ bearer: [] }],
+        parameters: [storageKeyParameter],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: true } },
+        },
+        responses: {
+          "200": { description: "Stored record" },
+          "413": { description: "Record exceeds the broker limit" },
+        },
+      },
+      delete: {
+        summary: "Delete one JSON record",
+        security: [{ bearer: [] }],
+        parameters: [storageKeyParameter],
+        responses: { "200": { description: "Deleted" } },
+      },
+    },
+    "/storage/files": {
+      get: {
+        summary:
+          "List file metadata for the access token's local user and OAuth client",
+        description:
+          "Requires storage.read. File bytes are stored in R2 and searchable metadata is stored in D1.",
+        security: [{ bearer: [] }],
+        responses: {
+          "200": { description: "File metadata collection" },
+          "401": { description: "Invalid bearer token" },
+          "403": { description: "Missing storage.read scope" },
+        },
+      },
+    },
+    "/storage/files/{key}": {
+      get: {
+        summary: "Read one file from R2",
+        security: [{ bearer: [] }],
+        parameters: [storageKeyParameter],
+        responses: {
+          "200": { description: "File bytes" },
+          "404": { description: "File not found" },
+        },
+      },
+      put: {
+        summary: "Create or replace one file in R2",
+        description:
+          "Requires storage.write. The caller's key is metadata only; the broker generates the physical R2 object key.",
+        security: [{ bearer: [] }],
+        parameters: [storageKeyParameter],
+        requestBody: {
+          required: true,
+          content: {
+            "application/octet-stream": {
+              schema: { type: "string", format: "binary" },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Stored file metadata" },
+          "413": { description: "File exceeds the broker limit" },
+          "503": { description: "R2 bucket is unavailable" },
+        },
+      },
+      delete: {
+        summary: "Delete one file from R2 and D1 metadata",
+        security: [{ bearer: [] }],
+        parameters: [storageKeyParameter],
+        responses: { "200": { description: "Deleted" } },
+      },
+    },
     "/openapi.json": {
       get: {
         summary: "OpenAPI 3.1 JSON",
@@ -171,6 +276,40 @@ export const openApiSpec = {
           },
         },
       },
+      StorageRecord: {
+        type: "object",
+        required: ["key", "value", "created_at", "updated_at", "_links"],
+        properties: {
+          key: { type: "string" },
+          value: true,
+          created_at: { type: "integer" },
+          updated_at: { type: "integer" },
+          _links: { $ref: "#/components/schemas/HypermediaLinks" },
+          actions: { type: "object", additionalProperties: true },
+        },
+      },
+      StorageFile: {
+        type: "object",
+        required: [
+          "key",
+          "content_type",
+          "size",
+          "sha256",
+          "created_at",
+          "updated_at",
+          "_links",
+        ],
+        properties: {
+          key: { type: "string" },
+          content_type: { type: "string" },
+          size: { type: "integer" },
+          sha256: { type: "string" },
+          created_at: { type: "integer" },
+          updated_at: { type: "integer" },
+          _links: { $ref: "#/components/schemas/HypermediaLinks" },
+          actions: { type: "object", additionalProperties: true },
+        },
+      },
     },
   },
 } as const;
@@ -198,7 +337,15 @@ export function oidcConfiguration(issuer: string) {
       "client_secret_basic",
       "client_secret_post",
     ],
-    scopes_supported: ["openid", "email", "profile", "offline_access"],
+    scopes_supported: [
+      "openid",
+      "email",
+      "profile",
+      "offline_access",
+      "storage.read",
+      "storage.write",
+      "storage.delete",
+    ],
     code_challenge_methods_supported: ["S256"],
     claims_supported: [
       "iss",

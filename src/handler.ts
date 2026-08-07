@@ -19,6 +19,7 @@ import {
   stylesheet,
 } from "./http";
 import { oidcConfiguration, openApiSpec } from "./openapi";
+import { storageEndpoint } from "./storage";
 import {
   adminClientsPage,
   authUiCss,
@@ -200,6 +201,27 @@ async function route(
           encoding: "application/x-www-form-urlencoded",
           parameters: ["token", "token_type_hint"],
         },
+        listStorageRecords: {
+          method: "GET",
+          href: `${config.issuerUrl}/storage/records`,
+          authorization: "Bearer access token with storage.read",
+        },
+        putStorageRecord: {
+          method: "PUT",
+          href: `${config.issuerUrl}/storage/records/{key}`,
+          encoding: "application/json",
+          authorization: "Bearer access token with storage.write",
+        },
+        listStorageFiles: {
+          method: "GET",
+          href: `${config.issuerUrl}/storage/files`,
+          authorization: "Bearer access token with storage.read",
+        },
+        putStorageFile: {
+          method: "PUT",
+          href: `${config.issuerUrl}/storage/files/{key}`,
+          authorization: "Bearer access token with storage.write",
+        },
       },
     };
     return acceptsHtml(request)
@@ -211,6 +233,7 @@ async function route(
       ok: true,
       service: "sites-auth-broker",
       d1: Boolean(store),
+      r2: Boolean(env.BUCKET),
       _links: {
         self: { href: `${config.issuerUrl}/health` },
         service: { href: config.issuerUrl },
@@ -279,6 +302,9 @@ async function route(
   }
   if (url.pathname === "/userinfo" && request.method === "GET") {
     return userInfoEndpoint(request, config, store);
+  }
+  if (url.pathname.startsWith("/storage/")) {
+    return storageEndpoint(request, url, env, store, config);
   }
   if (url.pathname === "/device" && request.method === "GET") {
     const csrf = randomToken(24);
@@ -726,7 +752,10 @@ async function adminClientsPost(
     type: form.get("type") === "confidential" ? "confidential" : "public",
     name: form.get("name") || "",
     redirectUris: splitLines(form.get("redirect_uris") || ""),
-    scopes: parseScopes(form.get("scopes") || "openid email profile"),
+    scopes: parseScopes(
+      form.get("scopes") ||
+        "openid email profile offline_access storage.read storage.write storage.delete",
+    ),
     origins: splitLines(form.get("origins") || ""),
   };
   const result = await createClientRegistration(input, store, nowSeconds());
@@ -798,6 +827,7 @@ function isBrokerRoute(pathname: string): boolean {
     pathname === "/authorize" ||
     pathname.startsWith("/oauth/") ||
     pathname === "/userinfo" ||
+    pathname.startsWith("/storage/") ||
     pathname === "/openapi.json" ||
     pathname === "/docs" ||
     pathname === "/device" ||
@@ -819,6 +849,7 @@ function isCorsControlledRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/oauth/") ||
     pathname === "/userinfo" ||
+    pathname.startsWith("/storage/") ||
     pathname === "/openapi.json" ||
     pathname === "/.well-known/openid-configuration" ||
     pathname === "/.well-known/jwks.json"
