@@ -1,4 +1,9 @@
-import type { AuthorizationRequest, ClientView, DeviceGrant } from "./types";
+import type {
+  AuthorizationRequest,
+  ClientView,
+  DeviceGrant,
+  LocalUser,
+} from "./types";
 
 interface PageAction {
   href: string;
@@ -59,11 +64,36 @@ export function serviceHomePage(metadata: {
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID, issues its own OAuth, OIDC, and JWT tokens, and provides client-isolated storage. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID, issues its own OAuth, OIDC, and JWT tokens, and provides client-isolated storage. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Service operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB session</strong><span>Sign in and inspect the local identity created by this service.</span></a><a href="/device"><strong>Device confirmation</strong><span>Enter and approve a code created by a real device authorization.</span></a><a href="/authorize"><strong>Authorization code</strong><span>Start the production OAuth authorization endpoint with PKCE.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Use scoped D1-backed application data operations.</span></a><a href="/storage/files"><strong>File objects</strong><span>Use scoped D1 metadata and R2 object operations.</span></a><a href="/admin/clients"><strong>OAuth clients</strong><span>Register and manage clients when the signed-in email is allowed.</span></a></div></section>`,
     actions: [
-      { href: "/docs", label: "API docs" },
+      { href: "/session", label: "Sign in to AittaDB" },
+      { href: "/docs", label: "API docs", secondary: true },
       { href: "/openapi.json", label: "OpenAPI JSON", secondary: true },
       { href: "/health", label: "Health", secondary: true },
+    ],
+  });
+}
+
+export function sessionPage(user: LocalUser): string {
+  return pageDocument({
+    title: "My AittaDB session",
+    eyebrow: "Authenticated identity",
+    heading: "My AittaDB session",
+    summary:
+      "This is the local identity AittaDB created after ChatGPT sign-in inside ChatGPT Sites.",
+    visualEyebrow: "Identity boundary",
+    visualHeading: "Signed in upstream. Independent here.",
+    visualSummary:
+      "Your ChatGPT credential stays inside the Sites boundary. AittaDB stores a separate immutable subject for its own sessions and application data.",
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Being signed in does not itself grant application storage access; OAuth clients still need your explicit consent and the required local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/oauth/device_authorization"><strong>Device authorization</strong><span>Create a real device and user code for a registered client.</span></a><a href="/authorize"><strong>Authorization code</strong><span>Run the real PKCE authorization flow for a registered client.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Work with token-scoped D1 application records.</span></a><a href="/storage/files"><strong>File objects</strong><span>Work with token-scoped R2 application files.</span></a><a href="/userinfo"><strong>UserInfo</strong><span>Inspect claims returned for an AittaDB access token.</span></a><a href="/admin/clients"><strong>OAuth clients</strong><span>Open the allowlist-protected client administration route.</span></a></div></section>`,
+    actions: [
+      { href: "/device", label: "Enter device code" },
+      {
+        href: "/signout-with-chatgpt?return_to=%2F",
+        label: "Sign out",
+        secondary: true,
+      },
+      { href: "/", label: "Service home", secondary: true },
     ],
   });
 }
@@ -110,6 +140,7 @@ export function docsPage(): string {
       "Discovery, authorization, tokens, records, and objects remain explicit parts of the same application boundary.",
     body: `<p class="note">The canonical machine-readable OpenAPI 3.1 document is available as JSON. ChatGPT supplies the upstream sign-in inside ChatGPT Sites; downstream OAuth and OIDC tokens and stored application data belong only to AittaDB.</p><pre id="spec" aria-label="OpenAPI summary">GET /
 GET /health
+GET /session
 GET /.well-known/openid-configuration
 GET /.well-known/jwks.json
 GET /authorize
@@ -368,6 +399,10 @@ export function authUiCss(): string {
   .info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:24px 0}
   .info-grid div{min-width:0;padding:15px;border:1px solid #dbe3eb;border-radius:6px;background:#fff;box-shadow:0 9px 22px rgba(11,35,74,.055)}
   .info-grid span{display:block;margin-bottom:6px;color:#68768a;font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0}
+  .operation-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:14px 0 24px}
+  .operation-grid>a{min-width:0;display:grid;gap:6px;padding:15px;border:1px solid #dbe3eb;border-radius:6px;background:#fff;color:#0b234a;text-decoration:none;box-shadow:0 9px 22px rgba(11,35,74,.055);transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease}
+  .operation-grid>a:hover{border-color:#159ca6;box-shadow:0 13px 28px rgba(21,156,166,.14);transform:translateY(-1px)}
+  .operation-grid strong{font-size:.94rem}.operation-grid span{color:#647287;font-size:.82rem;line-height:1.42}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
   label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
   input,textarea,select{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
@@ -392,7 +427,7 @@ export function authUiCss(): string {
   .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}
   .repo-link{flex:none;font-weight:760;text-decoration-thickness:1px;text-underline-offset:3px}
   @media (max-width:860px){body.aittadb-page{padding:14px}.aittadb-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}h1{font-size:2.75rem}}
-  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}h1{font-size:2.35rem}.info-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
+  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
   `;
 }
 

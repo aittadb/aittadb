@@ -14,6 +14,8 @@ Current releases are source-available under FSL-1.1-MIT. Each released version c
 
 GitHub at `https://github.com/aittadb/aittadb` is the canonical source of truth for this repository. Work in the current Git repository. Do not create a second canonical source tree. Preserve existing files, package-manager choices, lockfiles, local user changes, and repository instructions.
 
+The canonical public service origin is `https://aittadb.com`. Hosted issuer metadata, absolute hypermedia links, Open Graph metadata, OAuth verification URIs, and OIDC discovery must use that origin through the configured `ISSUER_URL`. The legacy `chatgpt.site` hostname may continue to route at the platform level, but it is not the canonical issuer or public URL.
+
 Use feature branches for all implementation work. The initial MVP branch is `codex/initial-implementation`. Do not push directly to `main`, do not merge branches, and do not deploy, publish, create a production checkpoint, or change Sites access settings without explicit user approval.
 
 ## Sites Runtime Compatibility
@@ -105,6 +107,7 @@ Keep interfaces narrow and explicit:
 - Storage repository owns AittaDB JSON records, file metadata, and per-user/per-client object ownership. File bytes live in R2 behind generated object keys.
 - Crypto module owns random value generation, hashing, constant-time comparison, PKCE verification, JWT signing, JWT validation, and JWKS publication.
 - Configuration module owns environment parsing, defaults, secret presence checks, and production/test separation.
+- Representation negotiation owns the HTML-versus-JSON boundary. It may render browser forms and readable results, but it must call the same route validation, domain services, repositories, and cryptographic interfaces as the canonical API operation. Do not build mock or duplicate "demo" authentication or storage logic.
 
 ## TypeScript and Coding Conventions
 
@@ -146,6 +149,7 @@ OAuth rules:
 - Require explicit consent unless remembered consent exactly covers the client and requested scopes.
 - Return standard OAuth error formats and content types.
 - Browser-facing responses and errors must use the shared content-negotiated HTML page shell when the client prefers `text/html`. JSON API errors must include hypermedia `_links` and `actions`; token success responses must remain OAuth/OIDC protocol-compatible.
+- Browser helpers for protocol endpoints must be explicit HTML representations of the real endpoint. They must not weaken client authentication, redirect matching, PKCE, consent, scopes, token handling, rate limits, or other protocol checks. Browser-only state-changing forms require same-origin and CSRF validation without changing standards-compliant non-browser API requests.
 - Browser UI styles must be served from same-origin stylesheet routes such as `/auth-ui.css`; do not rely on inline `<style>` blocks that are blocked by the strict CSP.
 
 ## Database and Migration Rules
@@ -183,9 +187,9 @@ Storage rules:
 
 ## OpenAPI Rules
 
-Maintain one canonical OpenAPI 3.1 specification in `openapi/`. Serve it as JSON from `/openapi.json` and provide a minimal interactive viewer at `/docs`.
+Maintain one canonical OpenAPI 3.1 specification in `src/openapi.ts`. Serve it as JSON from `/openapi.json` and provide a self-hosted Swagger UI at `/docs`. Swagger assets must be served from the AittaDB origin, load the canonical spec rather than a second generated copy, work under the strict CSP, and introduce no CDN or runtime third-party dependency.
 
-The OpenAPI spec must describe every REST endpoint, parameters, request bodies, responses, OAuth errors, schemas, authentication requirements, and examples. It must distinguish ChatGPT Sites browser authentication from tokens issued by AittaDB. Validate OpenAPI in CI and test that documented routes and implemented routes do not silently diverge.
+The OpenAPI spec must describe every REST endpoint, parameters, request bodies, responses, OAuth errors, schemas, authentication requirements, examples, and supported HTML representations. It must distinguish ChatGPT Sites browser authentication from tokens issued by AittaDB. Validate OpenAPI in CI and test that documented routes and implemented routes do not silently diverge.
 
 ## Configuration and Secrets
 
@@ -204,6 +208,8 @@ Important configuration includes:
 - token polling interval
 - allowed CORS origins where applicable
 - production/test environment marker
+
+For the canonical hosted service, `ISSUER_URL` must be exactly `https://aittadb.com` with no path or trailing slash. Changing the issuer is an operational token-boundary change: previously issued JWTs with another `iss` value will no longer validate under the new configuration and this must be called out during deployment acceptance.
 
 Build tooling must prefer the ignored checkout-local `.openai/hosting.json` when it exists and fall back to the checked-in `.openai/hosting.example.json` only for clean-checkout validation. The safe template is not deployable configuration and must never substitute for creating a fork-specific Sites project before deployment.
 
@@ -246,15 +252,25 @@ Every relevant implementation must include and test:
 
 ## Minimal Web Interface
 
-This project is a REST API and authentication service, not a marketing website. Do not add a marketing landing page, hero, feature sections, testimonials, pricing, decorative imagery, dashboard, general profile page, or documentation portal beyond the minimal OpenAPI viewer.
+This project is a hosted application backend with REST APIs and authentication, not a marketing website. Do not add a marketing landing page, feature sections, testimonials, pricing, a general dashboard, a general profile page, or a documentation portal beyond the OpenAPI viewer and focused operational interfaces.
 
-The root route must return concise machine-readable service metadata or redirect to minimal API docs. Normal HTML interfaces are limited to service metadata, health, device-code entry or confirmation, consent approval or denial, concise OAuth errors, a minimal protected admin client-registration form when needed, and the minimal OpenAPI viewer.
+The root route is public. It must return concise hypermedia service metadata to API clients and a polished service entry page to browsers. It must explain the ChatGPT sign-in boundary and link to the real session, OAuth/OIDC, storage, health, OpenAPI, and administrator routes. Public discovery and authorization initiation must not require authentication; protected routes must start the actual Sites-owned ChatGPT sign-in flow when identity is required.
+
+The browser interface is not a simulated demo. Every sign-in, device grant, authorization, token, UserInfo, revocation, introspection, JSON-record, file-storage, and administrator action exposed from the interface must execute the production route and domain logic with the same validation and durable state as its API representation. Do not create separate mock users, sample-only grants, fake tokens, fake storage, or browser-only authorization shortcuts.
+
+Every API endpoint must provide a useful content-aware HTML representation when a browser explicitly prefers `text/html`, while preserving its canonical JSON, OAuth, OIDC, or binary behavior for API clients. Read-only endpoints may render structured values and raw-JSON links. State-changing or credential-bearing operations must use focused forms, never place credentials or bearer values in URLs, validate CSRF and same origin for browser-only submissions, and render secrets only in a deliberate one-time result where the underlying protocol requires returning them. Binary file downloads may remain binary after an authenticated browser operation, but their collection and item routes must provide working HTML controls for listing, upload, download, and deletion.
+
+The protected local session view is an authentication boundary and operational identity view, not a general account profile. It may show the signed-in user's own email, display name, and immutable AittaDB subject UUID, explain that AittaDB creates its own identity and sessions, and link to real operations available to that user. Authorization must continue to come from server-side policy, client grants, and scopes; never from display name or merely being signed in.
 
 Use semantic HTML, visible focus, meaningful labels, clear validation errors, keyboard accessibility, screen-reader compatibility, and no unnecessary JavaScript.
 
 HTML pages must follow `docs/style-guide.md`. The interface should match the polish level expected from contemporary ChatGPT Sites generated pages while remaining a compact application-backend service: strong typography, generous spacing, refined panels, purposeful local visual assets or CSS artwork, responsive layouts, and a consistent GitHub project affordance. Do not load runtime fonts, tracking scripts, or images from third-party origins.
 
 The shared browser shell uses `public/aittadb-mark.svg`, the AittaDB wordmark, the self-hosted Inter variable font, and `public/aittadb-boundary.jpg`. Render `Aitta` at Inter weight `750` in midnight navy `#0B234A`, `DB` at Inter weight `750` in red-orange `#F04A32`, and icon accents in teal `#159CA6`; use `Inter, system-ui, "Segoe UI", sans-serif` as the font stack. Keep decorative artwork free of text, logos, secrets, PII, and deployment identifiers; render it with empty alternative text and page-specific adjacent copy. `public/og.png` is the canonical social card, and root-page Open Graph metadata must construct its absolute URL from the configured issuer. New HTML response types must define content-aware visual copy and use the shared shell unless a documented protocol constraint prevents HTML.
+
+## Current Implementation State
+
+The core AittaDB OAuth/OIDC issuer, ChatGPT Sites identity adapter, D1 persistence, R2-backed per-user/per-client storage APIs, security controls, OpenAPI document, tests, CI, shared branded HTML shell, public operation map, and protected local-session view are implemented on `codex/initial-implementation`. The remaining browser representation and hosted-domain acceptance work is authoritative in unchecked `PLAN.md` items `TASK-035` through `TASK-037`. Do not describe those items as complete until each integrated interface, implementation, tests, documentation, validation evidence, deployment checks, and plan checkbox satisfy its full definition of done.
 
 ## Documentation Rules
 

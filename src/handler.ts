@@ -2,7 +2,7 @@ import { loadConfig } from "./config";
 import { nowSeconds, publicJwk, randomToken, sha256 } from "./crypto";
 import { D1AuthStore } from "./store/d1";
 import type { RuntimeEnv, AuthStore, ClientRegistrationInput } from "./types";
-import { requireSitesIdentity } from "./identity";
+import { readSitesIdentity, requireSitesIdentity } from "./identity";
 import {
   addSecurityHeaders,
   acceptsHtml,
@@ -30,6 +30,7 @@ import {
   docsPage,
   errorPage,
   healthPage,
+  sessionPage,
   serviceHomePage,
 } from "./pages";
 import {
@@ -169,8 +170,27 @@ async function route(
           href: `${config.issuerUrl}/admin/clients`,
           type: "text/html",
         },
+        session: {
+          href: `${config.issuerUrl}/session`,
+          type: "text/html",
+        },
+        deviceVerification: {
+          href: `${config.issuerUrl}/device`,
+          type: "text/html",
+        },
+        storageRecords: {
+          href: `${config.issuerUrl}/storage/records`,
+        },
+        storageFiles: {
+          href: `${config.issuerUrl}/storage/files`,
+        },
       },
       actions: {
+        authenticate: {
+          method: "GET",
+          href: `${config.issuerUrl}/session`,
+          authentication: "ChatGPT sign-in inside ChatGPT Sites",
+        },
         authorize: {
           method: "GET",
           href: `${config.issuerUrl}/authorize`,
@@ -275,6 +295,9 @@ async function route(
   if (!store)
     return oauthError("database_unavailable", "Database is unavailable", 503);
 
+  if (url.pathname === "/session" && request.method === "GET") {
+    return localSessionEndpoint(request, env, store, config);
+  }
   if (url.pathname === "/authorize" && request.method === "GET") {
     return createAuthorizeRequest(url, config, store);
   }
@@ -341,6 +364,90 @@ async function route(
     return adminClientsPost(request, env, config, store);
   }
   return oauthError("not_found", "No AittaDB route matches this request", 404);
+}
+
+async function localSessionEndpoint(
+  request: Request,
+  env: RuntimeEnv,
+  store: AuthStore,
+  config: ReturnType<typeof loadConfig>,
+): Promise<Response> {
+  const identity = readSitesIdentity(request, env);
+  if (!identity) {
+    if (acceptsHtml(request))
+      return requireSitesIdentity(request, env) as Response;
+    return json(
+      {
+        error: "login_required",
+        error_description:
+          "ChatGPT sign-in inside ChatGPT Sites is required for this browser session",
+        _links: {
+          service: { href: config.issuerUrl, type: "text/html" },
+          signIn: {
+            href: `${config.issuerUrl}/signin-with-chatgpt?return_to=%2Fsession`,
+            type: "text/html",
+          },
+          docs: { href: `${config.issuerUrl}/docs`, type: "text/html" },
+        },
+        actions: {
+          authenticate: {
+            method: "GET",
+            href: `${config.issuerUrl}/session`,
+            authentication: "ChatGPT sign-in inside ChatGPT Sites",
+          },
+        },
+      },
+      { status: 401 },
+    );
+  }
+
+  const user = await store.findOrCreateUser(identity, nowSeconds());
+  const session = {
+    authenticated: true,
+    user: {
+      sub: user.id,
+      email: user.email,
+      name: user.displayName,
+      created_at: user.createdAt,
+      updated_at: user.updatedAt,
+    },
+    upstreamSignIn: "ChatGPT sign-in inside ChatGPT Sites",
+    sessionIssuer: "AittaDB",
+    credentialsForwarded: false,
+    _links: {
+      self: { href: `${config.issuerUrl}/session` },
+      service: { href: config.issuerUrl, type: "text/html" },
+      deviceAuthorization: {
+        href: `${config.issuerUrl}/oauth/device_authorization`,
+        type: "text/html",
+      },
+      authorize: { href: `${config.issuerUrl}/authorize`, type: "text/html" },
+      userinfo: { href: `${config.issuerUrl}/userinfo`, type: "text/html" },
+      storageRecords: {
+        href: `${config.issuerUrl}/storage/records`,
+        type: "text/html",
+      },
+      storageFiles: {
+        href: `${config.issuerUrl}/storage/files`,
+        type: "text/html",
+      },
+      adminClients: {
+        href: `${config.issuerUrl}/admin/clients`,
+        type: "text/html",
+      },
+      signOut: {
+        href: `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`,
+        type: "text/html",
+      },
+    },
+    actions: {
+      signOut: {
+        method: "GET",
+        href: `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`,
+      },
+    },
+  };
+  return acceptsHtml(request) ? html(sessionPage(user)) : json(session);
 }
 
 async function finalizeResponse(
@@ -821,6 +928,7 @@ function isAittaDBRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/session" ||
     pathname === "/auth-ui.css" ||
     pathname === "/.well-known/openid-configuration" ||
     pathname === "/.well-known/jwks.json" ||
