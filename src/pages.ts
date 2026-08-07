@@ -192,7 +192,7 @@ function pageDocument(options: PageOptions): string {
         )
         .join("")}</nav>`
     : "";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(options.title)}</title>${pageStyles()}</head><body class="sab-page"><main class="sab-shell tone-${tone}"><section class="brand-rail" aria-hidden="true"><div class="brand-card"><span class="brand-mark"><span></span></span><span>Sites Auth Broker</span></div><div class="identity-graphic"><div class="credential-card source-card"><span>Sites identity</span><strong>email signal</strong></div><div class="flow-line"><span></span><span></span><span></span></div><div class="credential-card broker-card"><span>Broker session</span><strong>OAuth / OIDC</strong></div><div class="token-stack"><span></span><span></span><span></span></div></div><p class="brand-note">Local tokens. Standard protocols. No ChatGPT credentials forwarded.</p></section><section class="content-panel"><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div></section></main></body></html>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(options.title)}</title>${pageStyles()}</head><body class="sab-page"><main class="sab-shell tone-${tone}"><section class="brand-rail"><div class="brand-card" aria-hidden="true"><span class="brand-mark"><span></span></span><span>Sites Auth Broker</span></div><div class="identity-graphic" aria-hidden="true"><div class="credential-card source-card"><span>Sites identity</span><strong>email signal</strong></div><div class="flow-line"><span></span><span></span><span></span></div><div class="credential-card broker-card"><span>Broker session</span><strong>OAuth / OIDC</strong></div><div class="token-stack"><span></span><span></span><span></span></div></div><div class="brand-footer"><p class="brand-note">Local tokens. Standard protocols. No ChatGPT credentials forwarded.</p><a class="repo-badge" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer"><span>GitHub</span><strong>sendanor/sites-auth-broker</strong><em>source-available</em></a></div></section><section class="content-panel"><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer">Project source: <a href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">sendanor/sites-auth-broker on GitHub</a></footer></section></main></body></html>`;
 }
 
 function adminAction(
@@ -218,7 +218,7 @@ body.sab-page{margin:0;min-height:100vh;background:#edf3f4;color:#172033;font-fa
 .brand-rail{position:relative;padding:34px;color:#f8fafc;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(155deg,#102236 0%,#173d48 48%,#245f5f 100%);overflow:hidden}
 .brand-rail:before{content:"";position:absolute;inset:0;background:linear-gradient(145deg,rgba(91,205,190,.28),transparent 42%),linear-gradient(25deg,transparent 48%,rgba(241,178,98,.24)),repeating-linear-gradient(135deg,rgba(255,255,255,.08) 0 1px,transparent 1px 18px)}
 .brand-rail:after{content:"";position:absolute;left:34px;right:34px;bottom:116px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent)}
-.brand-card,.identity-graphic,.brand-note{position:relative}
+.brand-card,.identity-graphic,.brand-footer{position:relative}
 .brand-card{display:flex;gap:13px;align-items:center;font-weight:800;letter-spacing:0}
 .brand-mark{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.96);display:grid;place-items:center;box-shadow:0 16px 34px rgba(0,0,0,.18)}
 .brand-mark span{width:20px;height:20px;border:3px solid #236f80;border-top-color:#f1b262;border-radius:50%;display:block}
@@ -234,9 +234,17 @@ body.sab-page{margin:0;min-height:100vh;background:#edf3f4;color:#172033;font-fa
 .token-stack{display:grid;gap:10px;margin:10px 34px 0 68px}
 .token-stack span{height:9px;border-radius:999px;background:rgba(248,250,252,.22)}
 .token-stack span:nth-child(1){width:82%}.token-stack span:nth-child(2){width:58%;background:rgba(113,210,195,.4)}.token-stack span:nth-child(3){width:72%;background:rgba(241,178,98,.38)}
+.brand-footer{display:grid;gap:16px}
 .brand-note{margin:0;color:rgba(248,250,252,.78);font-size:.95rem}
-.content-panel{display:grid;place-items:center;padding:clamp(28px,5vw,58px);background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(248,250,252,.92))}
-.content-frame{width:min(100%,660px)}
+.repo-badge{display:grid;grid-template-columns:1fr;gap:2px;width:min(100%,270px);box-sizing:border-box;border:1px solid rgba(255,255,255,.22);border-radius:16px;padding:13px 14px;background:rgba(255,255,255,.1);color:#f8fafc;text-decoration:none;box-shadow:0 16px 38px rgba(0,0,0,.16);backdrop-filter:blur(16px)}
+.repo-badge:hover{background:rgba(255,255,255,.15)}
+.repo-badge span{font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.13em;color:rgba(248,250,252,.68)}
+.repo-badge strong{font-size:.96rem;letter-spacing:0;overflow-wrap:anywhere}
+.repo-badge em{font-style:normal;font-size:.82rem;color:rgba(248,250,252,.72)}
+.content-panel{display:grid;grid-template-rows:1fr auto;align-items:center;padding:clamp(28px,5vw,58px);background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(248,250,252,.92))}
+.content-frame{width:min(100%,660px);justify-self:center}
+.page-footer{align-self:end;justify-self:center;width:min(100%,660px);margin-top:32px;padding-top:18px;border-top:1px solid #dbe4ef;color:#657488;font-size:.92rem}
+.page-footer a{font-weight:800}
 .eyebrow{margin:0 0 10px;color:#1b7283;font-size:.76rem;font-weight:850;text-transform:uppercase;letter-spacing:.14em}
 h1{margin:0;color:#101828;font-size:clamp(2.45rem,4.6vw,4.45rem);line-height:.96;letter-spacing:0}
 h2{margin:34px 0 14px;font-size:1.18rem;color:#142033}

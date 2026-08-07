@@ -46,6 +46,11 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   const browserRootHtml = await browserRoot!.text();
   assert.match(browserRootHtml, /<h1>Sites Auth Broker<\/h1>/);
   assert.match(browserRootHtml, /identity-graphic/);
+  assert.match(
+    browserRootHtml,
+    /https:\/\/github\.com\/sendanor\/sites-auth-broker/,
+  );
+  assert.match(browserRootHtml, /sendanor\/sites-auth-broker on GitHub/);
   assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
 
   const cliHealth = await app.fetch(
