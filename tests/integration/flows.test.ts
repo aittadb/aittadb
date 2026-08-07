@@ -71,6 +71,45 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   assert.match(await browserHealth!.text(), /<h1>Service health<\/h1>/);
   assert.match(browserHealth!.headers.get("content-type") ?? "", /^text\/html/);
+
+  const apiMissing = await app.fetch(
+    new Request("https://broker.example.test/missing", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(apiMissing?.status, 404);
+  const apiMissingJson = (await apiMissing?.json()) as {
+    error: string;
+    _links: { docs: { href: string } };
+    actions: { token: { method: string } };
+  };
+  assert.equal(apiMissingJson.error, "not_found");
+  assert.equal(apiMissingJson._links.docs.href, "/docs");
+  assert.equal(apiMissingJson.actions.token.method, "POST");
+
+  const browserMissing = await app.fetch(
+    new Request("https://broker.example.test/missing", {
+      headers: {
+        accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    }),
+  );
+  const browserMissingHtml = await browserMissing!.text();
+  assert.equal(browserMissing?.status, 404);
+  assert.match(browserMissingHtml, /<h1>Not found<\/h1>/);
+  assert.match(browserMissingHtml, /class="sab-shell/);
+
+  const forbiddenAdmin = await app.fetch(
+    new Request("https://broker.example.test/admin/clients", {
+      headers: {
+        accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    }),
+  );
+  assert.equal(forbiddenAdmin?.status, 403);
+  assert.match(await forbiddenAdmin!.text(), /<h1>Forbidden<\/h1>/);
 });
 
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {
@@ -103,7 +142,14 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   const deviceJson = (await device?.json()) as {
     device_code: string;
     user_code: string;
+    _links: { verification: { href: string } };
+    actions: { poll: { method: string } };
   };
+  assert.equal(
+    deviceJson._links.verification.href,
+    "https://broker.example.test/device",
+  );
+  assert.equal(deviceJson.actions.poll.method, "POST");
 
   const pending = await app.fetch(
     new Request("https://broker.example.test/oauth/token", {
@@ -116,10 +162,14 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
       }),
     }),
   );
-  assert.equal(
-    ((await pending?.json()) as { error: string }).error,
-    "authorization_pending",
-  );
+  const pendingJson = (await pending?.json()) as {
+    error: string;
+    _links: { docs: { href: string } };
+    actions: { token: { method: string } };
+  };
+  assert.equal(pendingJson.error, "authorization_pending");
+  assert.equal(pendingJson._links.docs.href, "/docs");
+  assert.equal(pendingJson.actions.token.method, "POST");
 
   const entry = await app.fetch(
     new Request(

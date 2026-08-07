@@ -130,6 +130,7 @@ OAuth rules:
 - Never pass an external URL directly as a Sites `return_to` value.
 - Require explicit consent unless remembered consent exactly covers the client and requested scopes.
 - Return standard OAuth error formats and content types.
+- Browser-facing responses and errors must use the shared content-negotiated HTML page shell when the client prefers `text/html`. JSON API errors must include hypermedia `_links` and `actions`; token success responses must remain OAuth/OIDC protocol-compatible.
 
 ## Database and Migration Rules
 

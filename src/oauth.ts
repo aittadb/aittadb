@@ -211,6 +211,22 @@ export async function createDeviceAuthorization(
       verification_uri_complete: `${verificationUri}?user_code=${encodeURIComponent(userCode)}`,
       expires_in: config.deviceCodeTtlSeconds,
       interval: config.devicePollIntervalSeconds,
+      _links: {
+        verification: { href: verificationUri, type: "text/html" },
+        token: {
+          href: `${config.issuerUrl}/oauth/token`,
+          type: "application/json",
+        },
+        service: { href: config.issuerUrl, type: "text/html" },
+      },
+      actions: {
+        poll: {
+          method: "POST",
+          href: `${config.issuerUrl}/oauth/token`,
+          encoding: "application/x-www-form-urlencoded",
+          parameters: ["grant_type", "device_code", "client_id"],
+        },
+      },
     }),
     {
       status: 200,
