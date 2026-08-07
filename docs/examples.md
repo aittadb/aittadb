@@ -42,3 +42,11 @@ curl -s -X POST "$ISSUER_URL/oauth/token" \
 ## Downstream JWT Verification
 
 Fetch `$ISSUER_URL/.well-known/jwks.json`, select the configured `kid`, require `alg` `ES256`, and validate `iss`, `aud`, `exp`, `iat`, optional `nbf`, signature, and `jti` revocation policy.
+
+## Local Key Generation
+
+```sh
+make generate-local-jwt-key
+```
+
+The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is ignored by Git.

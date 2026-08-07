@@ -23,11 +23,11 @@ Current releases are source-available under FSL-1.1-MIT. Each released version c
 ```sh
 npm ci
 cp .env.example .env
-npm run keys:generate
+make generate-local-jwt-key
 npm run validate
 ```
 
-Put generated key values into local environment variables or Sites secrets. Do not commit real key material.
+`make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material.
 
 ## Required Configuration
 
