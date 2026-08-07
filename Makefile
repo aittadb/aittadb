@@ -1,4 +1,4 @@
-.PHONY: generate-local-jwt-key validate
+.PHONY: generate-local-admin-access-key generate-local-jwt-key validate
 
 LOCAL_SECRET_DIR := .secrets
 LOCAL_JWT_KEY_FILE := $(LOCAL_SECRET_DIR)/jwt-signing-key.json
@@ -8,6 +8,9 @@ generate-local-jwt-key:
 	@node --import tsx scripts/generate-keypair.ts --out "$(LOCAL_JWT_KEY_FILE)"
 	@chmod 600 "$(LOCAL_JWT_KEY_FILE)"
 	@printf 'Generated local JWT signing key at %s\n' "$(LOCAL_JWT_KEY_FILE)"
+
+generate-local-admin-access-key:
+	@npm run --silent admin-key:generate
 
 validate:
 	npm run validate

@@ -21,7 +21,9 @@
 # misc
 .DS_Store
 *.pem
-.secrets/
+
+# generated local credentials
+/.secrets/
 
 # debug
 npm-debug.log*
