@@ -6,6 +6,62 @@ import { createClientRegistration } from "../../src/oauth";
 import { nowSeconds, sha256 } from "../../src/crypto";
 import { cookieValue, form, testEnv } from "../helpers";
 
+test("metadata routes negotiate HTML for browsers and JSON for API clients", async () => {
+  const env = await testEnv();
+  const app = createAuthBrokerWithStore(env, new MemoryAuthStore());
+
+  const apiRoot = await app.fetch(
+    new Request("https://broker.example.test/", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(
+    apiRoot?.headers.get("content-type"),
+    "application/json; charset=utf-8",
+  );
+  const apiRootJson = (await apiRoot?.json()) as {
+    service: string;
+    _links: { docs: { href: string }; oidcConfiguration: { href: string } };
+    actions: { deviceAuthorization: { method: string } };
+  };
+  assert.equal(apiRootJson.service, "Sites Auth Broker");
+  assert.equal(
+    apiRootJson._links.docs.href,
+    "https://broker.example.test/docs",
+  );
+  assert.equal(
+    apiRootJson._links.oidcConfiguration.href,
+    "https://broker.example.test/.well-known/openid-configuration",
+  );
+  assert.equal(apiRootJson.actions.deviceAuthorization.method, "POST");
+
+  const browserRoot = await app.fetch(
+    new Request("https://broker.example.test/", {
+      headers: {
+        accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    }),
+  );
+  assert.match(await browserRoot!.text(), /<h1>Sites Auth Broker<\/h1>/);
+  assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
+
+  const cliHealth = await app.fetch(
+    new Request("https://broker.example.test/health", {
+      headers: { accept: "*/*" },
+    }),
+  );
+  const cliHealthJson = (await cliHealth?.json()) as {
+    ok: boolean;
+    _links: { service: { href: string } };
+  };
+  assert.equal(cliHealthJson.ok, true);
+  assert.equal(
+    cliHealthJson._links.service.href,
+    "https://broker.example.test",
+  );
+});
+
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {
   const env = await testEnv({ DEVICE_POLL_INTERVAL_SECONDS: "1" });
   const store = new MemoryAuthStore();

@@ -1,5 +1,26 @@
 import type { AuthorizationRequest, ClientView, DeviceGrant } from "./types";
 
+export function serviceHomePage(metadata: {
+  service: string;
+  issuer: string;
+  docs: string;
+  openapi: string;
+  officialOpenAIProduct: boolean;
+  _links?: Record<string, { href: string; type?: string }>;
+  actions?: Record<string, unknown>;
+}): string {
+  return `<html lang="en"><head><title>${escapeHtml(metadata.service)}</title></head><body class="auth-page"><main class="auth-panel"><h1>${escapeHtml(metadata.service)}</h1><p>Independent OAuth 2.0, OpenID Connect, and JWT sessions from ChatGPT Sites identity.</p><p>This is not an official OpenAI product, and its tokens are issued only by Sites Auth Broker.</p><dl><dt>Issuer</dt><dd><code>${escapeHtml(metadata.issuer)}</code></dd><dt>Official OpenAI product</dt><dd>${metadata.officialOpenAIProduct ? "yes" : "no"}</dd></dl><div class="actions"><a class="button" href="/docs">API docs</a><a class="button secondary" href="/openapi.json">OpenAPI JSON</a><a class="button secondary" href="/health">Health</a></div></main></body></html>`;
+}
+
+export function healthPage(status: {
+  ok: boolean;
+  service: string;
+  d1: boolean;
+  _links?: Record<string, { href: string; type?: string }>;
+}): string {
+  return `<html lang="en"><head><title>Service health</title></head><body class="auth-page"><main class="auth-panel"><h1>Service health</h1><dl><dt>Status</dt><dd>${status.ok ? "ok" : "unavailable"}</dd><dt>Service</dt><dd><code>${escapeHtml(status.service)}</code></dd><dt>D1 binding</dt><dd>${status.d1 ? "available" : "unavailable"}</dd></dl><div class="actions"><a class="button" href="/">Service</a><a class="button secondary" href="/docs">API docs</a></div></main></body></html>`;
+}
+
 export function docsPage(): string {
   return `<html lang="en"><head><title>Sites Auth Broker API</title></head><body class="auth-page"><main class="auth-panel"><h1>Sites Auth Broker API</h1><p>This service issues its own OAuth 2.0, OpenID Connect, and JWT tokens from ChatGPT Sites server-side identity. It is not an official OpenAI project.</p><p><a href="/openapi.json">OpenAPI JSON</a></p><pre id="spec" aria-label="OpenAPI summary">GET /health
 GET /.well-known/openid-configuration

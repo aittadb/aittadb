@@ -5,6 +5,7 @@ import type { RuntimeEnv, AuthStore, ClientRegistrationInput } from "./types";
 import { requireSitesIdentity } from "./identity";
 import {
   addSecurityHeaders,
+  acceptsHtml,
   bearerToken,
   cors,
   csrfCookie,
@@ -24,6 +25,8 @@ import {
   deviceEntryPage,
   docsPage,
   errorPage,
+  healthPage,
+  serviceHomePage,
 } from "./pages";
 import {
   approveAuthorizationRequest,
@@ -108,16 +111,94 @@ async function route(
   config: ReturnType<typeof loadConfig>,
 ): Promise<Response> {
   if (url.pathname === "/" && request.method === "GET") {
-    return json({
+    const metadata = {
       service: "Sites Auth Broker",
       issuer: config.issuerUrl,
       docs: `${config.issuerUrl}/docs`,
       openapi: `${config.issuerUrl}/openapi.json`,
       officialOpenAIProduct: false,
-    });
+      _links: {
+        self: { href: config.issuerUrl },
+        health: { href: `${config.issuerUrl}/health` },
+        docs: { href: `${config.issuerUrl}/docs`, type: "text/html" },
+        openapi: {
+          href: `${config.issuerUrl}/openapi.json`,
+          type: "application/json",
+        },
+        oidcConfiguration: {
+          href: `${config.issuerUrl}/.well-known/openid-configuration`,
+          type: "application/json",
+        },
+        jwks: {
+          href: `${config.issuerUrl}/.well-known/jwks.json`,
+          type: "application/json",
+        },
+        adminClients: {
+          href: `${config.issuerUrl}/admin/clients`,
+          type: "text/html",
+        },
+      },
+      actions: {
+        authorize: {
+          method: "GET",
+          href: `${config.issuerUrl}/authorize`,
+          parameters: [
+            "response_type",
+            "client_id",
+            "redirect_uri",
+            "scope",
+            "state",
+            "nonce",
+            "code_challenge",
+            "code_challenge_method",
+          ],
+        },
+        deviceAuthorization: {
+          method: "POST",
+          href: `${config.issuerUrl}/oauth/device_authorization`,
+          encoding: "application/x-www-form-urlencoded",
+          parameters: ["client_id", "scope"],
+        },
+        token: {
+          method: "POST",
+          href: `${config.issuerUrl}/oauth/token`,
+          encoding: "application/x-www-form-urlencoded",
+          parameters: ["grant_type"],
+        },
+        revoke: {
+          method: "POST",
+          href: `${config.issuerUrl}/oauth/revoke`,
+          encoding: "application/x-www-form-urlencoded",
+          parameters: ["token", "token_type_hint"],
+        },
+        introspect: {
+          method: "POST",
+          href: `${config.issuerUrl}/oauth/introspect`,
+          encoding: "application/x-www-form-urlencoded",
+          parameters: ["token", "token_type_hint"],
+        },
+      },
+    };
+    return acceptsHtml(request)
+      ? html(serviceHomePage(metadata))
+      : json(metadata);
   }
   if (url.pathname === "/health" && request.method === "GET") {
-    return json({ ok: true, service: "sites-auth-broker", d1: Boolean(store) });
+    const status = {
+      ok: true,
+      service: "sites-auth-broker",
+      d1: Boolean(store),
+      _links: {
+        self: { href: `${config.issuerUrl}/health` },
+        service: { href: config.issuerUrl },
+        docs: { href: `${config.issuerUrl}/docs`, type: "text/html" },
+        openapi: {
+          href: `${config.issuerUrl}/openapi.json`,
+          type: "application/json",
+        },
+      },
+    };
+    return acceptsHtml(request) ? html(healthPage(status)) : json(status);
   }
   if (
     url.pathname === "/.well-known/openid-configuration" &&
