@@ -11,3 +11,4 @@
 - Added current signed-in session modes for UserInfo and isolated record/file storage, backed by a hidden non-administrable browser client and the canonical token validators.
 - Hardened storage non-disclosure and cross-user/client isolation, made file downloads attachment-safe, isolated AittaDB shell styles from Swagger UI controls, and added focused regression coverage.
 - Removed request-time D1 schema work, packaged reviewed SQL migrations into Sites deployment artifacts, bypassed application startup for static assets, bounded cleanup scheduling, and parallelized client metadata hydration.
+- Corrected browser form origin validation for canonical custom domains and Sites same-origin dispatch behavior without allowing arbitrary cross-origin submissions.
