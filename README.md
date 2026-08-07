@@ -6,7 +6,7 @@
 
 **An application backend that runs entirely on ChatGPT Sites.**
 
-AittaDB provides authentication, persistent data, object storage, and a path toward persistent events through a single self-contained ChatGPT Sites deployment. It is designed for applications that need backend capabilities without requiring separate application servers, database servers, object-storage services, or authentication infrastructure.
+AittaDB currently provides authentication, persistent JSON data, and object storage through a single self-contained ChatGPT Sites deployment. Persistent events and long-polling delivery are planned and are not part of the current MVP. AittaDB is designed for third-party applications that need backend capabilities without requiring separate application servers, database servers, object-storage services, or authentication infrastructure.
 
 > **Experimental:** AittaDB is under active development. Its interfaces and operational requirements may change before a stable release.
 
@@ -43,7 +43,7 @@ The goal is to let developers build persistent, authenticated applications witho
 
 In Finnish, an _aitta_ is a traditional detached storehouse on a farmstead. It was built to keep grain, food, tools, and other valuable supplies safe and available.
 
-AittaDB follows the same idea for software: a dependable place for an application's identity, data, files, and events.
+AittaDB follows the same idea for software: a dependable place for an application's identity, data, and files today, with persistent events planned.
 
 ## MVP Capabilities
 
@@ -101,9 +101,9 @@ npm run validate
 - `GET /openapi.json`
 - `GET /docs`
 
-The public service root does not require authentication because issuer discovery and OAuth initiation must work before sign-in. Its browser operation map links to the real production routes, not a separate demo. `/session` starts Sites-owned ChatGPT sign-in when needed and then shows the immutable local AittaDB subject created for the signed-in user. That session can use its own browser-storage namespace, but it does not grant any third-party OAuth client a scope or access to that namespace.
+The public service root does not require authentication because service discovery and OAuth initiation must work before sign-in. Its browser operation map links to real user-facing production routes, not a separate demo. Sign-in-flow internals such as authorization, consent, token exchange, revocation, and introspection remain available at their canonical URLs and through the API docs, but are not promoted as normal user operations. `/session` starts Sites-owned ChatGPT sign-in when needed and then shows the immutable local AittaDB subject created for the signed-in user. That sign-in can use its own durable AittaDB namespace, but it does not grant any third-party OAuth client a scope or access to that namespace.
 
-Browser-facing routes and errors use content negotiation. Browsers that prefer `text/html` receive consistent authentication-service HTML views, while API clients that request JSON, or send generic CLI-style `Accept: */*`, receive canonical machine responses. Browser forms invoke the same identity, OAuth/OIDC, D1, and R2 services as API clients and do not use mock users, fake tokens, or browser-only storage. JSON metadata and JSON errors are hypermedia-oriented and advertise `_links` and `actions` so clients can discover available operations instead of hard-coding every route. OAuth token success responses remain protocol-standard for API clients.
+Browser-facing routes and errors use content negotiation. Browsers that prefer `text/html` receive consistent application-backend HTML views, while API clients that request JSON, or send generic CLI-style `Accept: */*`, receive canonical machine responses. Browser forms invoke the same identity, OAuth/OIDC, D1, and R2 services as API clients and do not use mock users, fake tokens, or browser-only storage. JSON metadata and JSON errors are hypermedia-oriented and advertise `_links` and `actions` so clients can discover available operations instead of hard-coding every route. OAuth token success responses remain protocol-standard for API clients.
 
 `/docs` is a self-hosted Swagger UI backed directly by the canonical `/openapi.json`. Its assets are pinned and served from AittaDB without a CDN. Browser forms are also available directly on the authorization, device authorization, token, revocation, introspection, and UserInfo routes; state-changing browser submissions are same-origin and CSRF protected, and credential values are never placed in URLs.
 
@@ -117,7 +117,7 @@ Client applications may request `storage.read`, `storage.write`, and `storage.de
 
 Storage is isolated by the immutable AittaDB user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2 at `/storage/files/{key}`. Caller-provided keys are logical metadata; AittaDB generates physical R2 object keys.
 
-The signed-in browser uses a reserved, hidden AittaDB client ID, so personal browser-session data remains separate even from an OAuth client belonging to the same local user. That reserved client cannot be selected by device authorization, Authorization Code, token exchange, or administrator operations. AittaDB exposes no generic SQL, internal-table, physical R2-key, environment, binding, or deployment-secret API.
+The signed-in browser uses a reserved, hidden AittaDB client ID, so the user's durable signed-in AittaDB namespace remains separate even from an OAuth client belonging to the same local user. That reserved client cannot be selected by device authorization, Authorization Code, token exchange, or administrator operations. AittaDB exposes no generic SQL, internal-table, physical R2-key, environment, binding, or deployment-secret API.
 
 ## ChatGPT Sites Sign-In Boundary
 

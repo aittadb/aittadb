@@ -168,6 +168,8 @@ async function route(
   if (url.pathname === "/" && request.method === "GET") {
     const metadata = {
       service: "AittaDB",
+      description:
+        "A hosted application backend for third-party apps, with ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage.",
       issuer: config.issuerUrl,
       docs: `${config.issuerUrl}/docs`,
       openapi: `${config.issuerUrl}/openapi.json`,
@@ -179,6 +181,13 @@ async function route(
         credentialsForwarded: false,
       },
       sessionIssuer: "AittaDB",
+      capabilities: [
+        "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
+        "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
+        "D1-backed JSON records isolated by AittaDB user and client",
+        "R2-backed files with D1 metadata isolated by AittaDB user and client",
+      ],
+      plannedCapabilities: ["Persistent events and long-polling delivery"],
       _links: {
         self: { href: config.issuerUrl },
         health: { href: `${config.issuerUrl}/health` },

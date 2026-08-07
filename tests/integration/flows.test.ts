@@ -24,6 +24,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   const apiRootJson = (await apiRoot?.json()) as {
     service: string;
+    description: string;
     upstreamSignIn: {
       source: string;
       identitySignal: string;
@@ -31,6 +32,8 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       credentialsForwarded: boolean;
     };
     sessionIssuer: string;
+    capabilities: string[];
+    plannedCapabilities: string[];
     _links: {
       docs: { href: string };
       oidcConfiguration: { href: string };
@@ -42,6 +45,10 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     };
   };
   assert.equal(apiRootJson.service, "AittaDB");
+  assert.match(
+    apiRootJson.description,
+    /hosted application backend for third-party apps/i,
+  );
   assert.equal(
     apiRootJson.upstreamSignIn.source,
     "ChatGPT sign-in inside ChatGPT Sites",
@@ -53,6 +60,15 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiRootJson.upstreamSignIn.stableSubjectSupplied, false);
   assert.equal(apiRootJson.upstreamSignIn.credentialsForwarded, false);
   assert.equal(apiRootJson.sessionIssuer, "AittaDB");
+  assert.deepEqual(apiRootJson.capabilities, [
+    "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
+    "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
+    "D1-backed JSON records isolated by AittaDB user and client",
+    "R2-backed files with D1 metadata isolated by AittaDB user and client",
+  ]);
+  assert.deepEqual(apiRootJson.plannedCapabilities, [
+    "Persistent events and long-polling delivery",
+  ]);
   assert.equal(Object.hasOwn(apiRootJson, "tokenAuthority"), false);
   assert.equal(
     apiRootJson._links.docs.href,
@@ -97,13 +113,27 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   assert.match(browserRootHtml, /name="twitter:card"/);
   assert.match(browserRootHtml, /ChatGPT sign-in/);
+  assert.match(
+    browserRootHtml,
+    /hosted application backend for third-party apps/i,
+  );
+  assert.match(browserRootHtml, /Persistent events are planned/);
   assert.match(browserRootHtml, /separate local UUID/);
-  assert.match(browserRootHtml, /tokens are not OpenAI or ChatGPT tokens/);
+  assert.match(
+    browserRootHtml,
+    /credentials and stored data are not OpenAI or ChatGPT credentials or data/,
+  );
   assert.match(browserRootHtml, /Session issuer/);
   assert.match(browserRootHtml, /href="\/session"/);
-  assert.match(browserRootHtml, /href="\/device"/);
   assert.match(browserRootHtml, /href="\/storage\/records"/);
   assert.match(browserRootHtml, /href="\/storage\/files"/);
+  assert.match(browserRootHtml, /href="\/docs"/);
+  assert.doesNotMatch(browserRootHtml, /href="\/authorize"/);
+  assert.doesNotMatch(browserRootHtml, /href="\/device"/);
+  assert.doesNotMatch(
+    browserRootHtml,
+    /Independent OAuth and OpenID Connect sessions with per-user application data/,
+  );
   assert.doesNotMatch(browserRootHtml, /Token authority/i);
   assert.doesNotMatch(browserRootHtml, /Sites identity/);
   assert.doesNotMatch(browserRootHtml, /Sites Auth Broker/);
@@ -306,8 +336,12 @@ test("public home enters the real protected local AittaDB session", async () => 
   assert.match(browserHtml, /user@example\.test/);
   assert.match(browserHtml, /AittaDB subject/);
   assert.match(browserHtml, /href="\/signout-with-chatgpt\?return_to=%2F"/);
-  assert.match(browserHtml, /current session can access its own/);
-  assert.match(browserHtml, /Use this session's isolated D1 records/);
+  assert.match(browserHtml, /current sign-in can access its own persistent/);
+  assert.match(browserHtml, /Use this identity's isolated D1 records/);
+  assert.match(browserHtml, /Open my records/);
+  assert.doesNotMatch(browserHtml, /href="\/authorize"/);
+  assert.doesNotMatch(browserHtml, /href="\/device"/);
+  assert.doesNotMatch(browserHtml, /href="\/oauth\/device_authorization"/);
 
   const apiSession = await app.fetch(
     new Request("https://aittadb.example.test/session", {
@@ -1837,7 +1871,8 @@ test("current signed-in session drives UserInfo and isolated record and file ope
   const recordHtml = await recordForm!.text();
   assert.match(recordHtml, /option value="session" selected/);
   assert.match(recordHtml, /Current signed-in session/);
-  assert.match(recordHtml, /personal browser-session namespace/);
+  assert.match(recordHtml, /private signed-in AittaDB namespace/);
+  assert.match(recordHtml, /durable D1 data/);
 
   const sessionWrite = await app.fetch(
     new Request("https://aittadb.example.test/storage/records", {
