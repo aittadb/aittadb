@@ -9,6 +9,8 @@ import type {
   LocalUser,
   RefreshTokenFamily,
   RefreshTokenRecord,
+  StorageFileMetadata,
+  StorageRecord,
   UpstreamIdentity,
 } from "../types";
 
@@ -24,6 +26,8 @@ export class MemoryAuthStore implements AuthStore {
   families = new Map<string, RefreshTokenFamily>();
   refreshTokens = new Map<string, RefreshTokenRecord>();
   revokedJtis = new Map<string, number>();
+  storageRecords = new Map<string, StorageRecord>();
+  storageFiles = new Map<string, StorageFileMetadata>();
   counters = new Map<string, { count: number; windowStart: number }>();
   audits: Array<{ type: string; data: Record<string, unknown>; now: number }> =
     [];
@@ -259,6 +263,76 @@ export class MemoryAuthStore implements AuthStore {
   async isAccessTokenJtiRevoked(jti: string): Promise<boolean> {
     return this.revokedJtis.has(jti);
   }
+
+  async listStorageRecords(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageRecord[]> {
+    return Array.from(this.storageRecords.values())
+      .filter(
+        (record) => record.userId === userId && record.clientId === clientId,
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));
+  }
+
+  async getStorageRecord(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<StorageRecord | null> {
+    return this.storageRecords.get(storageKey(userId, clientId, key)) ?? null;
+  }
+
+  async upsertStorageRecord(record: StorageRecord): Promise<void> {
+    const key = storageKey(record.userId, record.clientId, record.key);
+    const existing = this.storageRecords.get(key);
+    this.storageRecords.set(key, {
+      ...record,
+      createdAt: existing?.createdAt ?? record.createdAt,
+    });
+  }
+
+  async deleteStorageRecord(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<void> {
+    this.storageRecords.delete(storageKey(userId, clientId, key));
+  }
+
+  async listStorageFiles(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageFileMetadata[]> {
+    return Array.from(this.storageFiles.values())
+      .filter((file) => file.userId === userId && file.clientId === clientId)
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));
+  }
+
+  async getStorageFileMetadata(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<StorageFileMetadata | null> {
+    return this.storageFiles.get(storageKey(userId, clientId, key)) ?? null;
+  }
+
+  async upsertStorageFileMetadata(file: StorageFileMetadata): Promise<void> {
+    const key = storageKey(file.userId, file.clientId, file.key);
+    const existing = this.storageFiles.get(key);
+    this.storageFiles.set(key, {
+      ...file,
+      createdAt: existing?.createdAt ?? file.createdAt,
+    });
+  }
+
+  async deleteStorageFileMetadata(
+    userId: string,
+    clientId: string,
+    key: string,
+  ): Promise<void> {
+    this.storageFiles.delete(storageKey(userId, clientId, key));
+  }
 }
 
 function stripSecret(
@@ -274,4 +348,8 @@ function stripSecret(
     origins: [...client.origins],
     createdAt: client.createdAt,
   };
+}
+
+function storageKey(userId: string, clientId: string, key: string): string {
+  return `${userId}:${clientId}:${key}`;
 }

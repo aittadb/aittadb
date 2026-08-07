@@ -50,3 +50,34 @@ make generate-local-jwt-key
 ```
 
 The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is ignored by Git.
+
+## Broker Storage
+
+Register a client that is allowed to request `storage.read`, `storage.write`, and `storage.delete`. After the user approves those local scopes, use the returned access token with the storage API.
+
+Store a JSON record in D1:
+
+```sh
+curl -s -X PUT "$ISSUER_URL/storage/records/app/settings" \
+  -H "authorization: Bearer $ACCESS_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{"theme":"midnight","compact":true}'
+```
+
+Read it back:
+
+```sh
+curl -s "$ISSUER_URL/storage/records/app/settings" \
+  -H "authorization: Bearer $ACCESS_TOKEN"
+```
+
+Store file bytes in R2 with metadata in D1:
+
+```sh
+curl -s -X PUT "$ISSUER_URL/storage/files/notes/hello.txt" \
+  -H "authorization: Bearer $ACCESS_TOKEN" \
+  -H 'content-type: text/plain' \
+  --data-binary @hello.txt
+```
+
+The logical key in the URL is application metadata. Sites Auth Broker generates the physical R2 key and isolates data by local user UUID and OAuth client ID.

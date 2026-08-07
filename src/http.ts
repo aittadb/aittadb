@@ -149,7 +149,7 @@ export function cors(
     return oauthError("invalid_request", "Origin is not allowed", 403);
   headers.set("access-control-allow-origin", origin);
   headers.set("vary", "Origin");
-  headers.set("access-control-allow-methods", "GET,POST,OPTIONS");
+  headers.set("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
   headers.set("access-control-allow-headers", "authorization,content-type");
   return headers;
 }

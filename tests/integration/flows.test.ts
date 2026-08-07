@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { loadConfig } from "../../src/config";
 import { createAuthBrokerWithStore } from "../../src/handler";
 import { MemoryAuthStore } from "../../src/store/memory";
-import { createClientRegistration } from "../../src/oauth";
+import { createClientRegistration, issueTokens } from "../../src/oauth";
 import { nowSeconds, sha256 } from "../../src/crypto";
 import { cookieValue, form, testEnv } from "../helpers";
 
@@ -405,4 +406,186 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
     ((await secondUse?.json()) as { error: string }).error,
     "invalid_grant",
   );
+});
+
+test("broker storage API stores D1 records and R2 files for the local user and client", async () => {
+  const env = await testEnv();
+  const config = loadConfig(env, env.ISSUER_URL!);
+  const store = new MemoryAuthStore();
+  const app = createAuthBrokerWithStore(env, store);
+  const now = nowSeconds();
+  const user = await store.findOrCreateUser(
+    {
+      email: "user@example.test",
+      fullName: "Test User",
+      displayName: "Test User",
+    },
+    now,
+  );
+  const { client } = await createClientRegistration(
+    {
+      type: "public",
+      name: "Storage App",
+      redirectUris: ["https://client.example.test/callback"],
+      scopes: ["storage.read", "storage.write", "storage.delete"],
+      origins: ["https://client.example.test"],
+    },
+    store,
+    now,
+  );
+  const tokenSet = await issueTokens({
+    config,
+    store,
+    user,
+    client,
+    scope: "storage.read storage.write storage.delete",
+    includeRefresh: false,
+    now,
+  });
+  const accessToken = String(tokenSet.access_token);
+
+  const recordPut = await app.fetch(
+    new Request("https://broker.example.test/storage/records/app/settings", {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ theme: "midnight", count: 1 }),
+    }),
+  );
+  assert.equal(recordPut?.status, 200);
+  const recordPutJson = (await recordPut?.json()) as {
+    key: string;
+    value: { theme: string; count: number };
+    _links: { self: { href: string } };
+    actions: { replace: { method: string } };
+  };
+  assert.equal(recordPutJson.key, "app/settings");
+  assert.equal(recordPutJson.value.theme, "midnight");
+  assert.equal(recordPutJson._links.self.href, "/storage/records/app/settings");
+  assert.equal(recordPutJson.actions.replace.method, "PUT");
+
+  const recordList = await app.fetch(
+    new Request("https://broker.example.test/storage/records", {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  );
+  const recordListJson = (await recordList?.json()) as {
+    records: Array<{ key: string }>;
+    actions: { put: { href: string } };
+  };
+  assert.deepEqual(
+    recordListJson.records.map((record) => record.key),
+    ["app/settings"],
+  );
+  assert.equal(
+    recordListJson.actions.put.href,
+    "https://broker.example.test/storage/records/{key}",
+  );
+
+  const { client: writeOnlyClient } = await createClientRegistration(
+    {
+      type: "public",
+      name: "Write Only",
+      redirectUris: ["https://write.example.test/callback"],
+      scopes: ["storage.write"],
+      origins: [],
+    },
+    store,
+    now,
+  );
+  const writeOnlyTokens = await issueTokens({
+    config,
+    store,
+    user,
+    client: writeOnlyClient,
+    scope: "storage.write",
+    includeRefresh: false,
+    now,
+  });
+  const missingScope = await app.fetch(
+    new Request("https://broker.example.test/storage/records/app/settings", {
+      headers: {
+        authorization: `Bearer ${String(writeOnlyTokens.access_token)}`,
+      },
+    }),
+  );
+  assert.equal(missingScope?.status, 403);
+  assert.equal(
+    ((await missingScope?.json()) as { error: string }).error,
+    "insufficient_scope",
+  );
+
+  const filePut = await app.fetch(
+    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
+      method: "PUT",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "text/plain",
+      },
+      body: "hello storage",
+    }),
+  );
+  assert.equal(filePut?.status, 200);
+  const filePutJson = (await filePut?.json()) as {
+    key: string;
+    content_type: string;
+    size: number;
+    sha256: string;
+  };
+  assert.equal(filePutJson.key, "notes/hello.txt");
+  assert.equal(filePutJson.content_type, "text/plain");
+  assert.equal(filePutJson.size, 13);
+  assert.ok(filePutJson.sha256);
+
+  const fileGet = await app.fetch(
+    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  );
+  assert.equal(fileGet?.status, 200);
+  assert.equal(fileGet?.headers.get("content-type"), "text/plain");
+  assert.equal(await fileGet?.text(), "hello storage");
+
+  const fileList = await app.fetch(
+    new Request("https://broker.example.test/storage/files", {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  );
+  assert.deepEqual(
+    ((await fileList?.json()) as { files: Array<{ key: string }> }).files.map(
+      (file) => file.key,
+    ),
+    ["notes/hello.txt"],
+  );
+
+  const deleteRecord = await app.fetch(
+    new Request("https://broker.example.test/storage/records/app/settings", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  );
+  assert.equal(
+    ((await deleteRecord?.json()) as { deleted: boolean }).deleted,
+    true,
+  );
+
+  const deleteFile = await app.fetch(
+    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  );
+  assert.equal(
+    ((await deleteFile?.json()) as { deleted: boolean }).deleted,
+    true,
+  );
+
+  const missingFile = await app.fetch(
+    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
+      headers: { authorization: `Bearer ${accessToken}` },
+    }),
+  );
+  assert.equal(missingFile?.status, 404);
 });

@@ -18,6 +18,7 @@ Current releases are source-available under FSL-1.1-MIT. Each released version c
 - ES256 JWT signing through Web Crypto with a configured private JWK.
 - Opaque hashed refresh tokens with rotation and reuse detection.
 - D1-backed durable state with checked-in migrations.
+- Per-user, per-client broker storage: JSON records in D1 and file bytes in R2.
 - Minimal Sites-protected browser forms for device approval, consent, and admin client bootstrap.
 
 ## Local Setup
@@ -38,6 +39,7 @@ npm run validate
 - `JWT_PRIVATE_JWK`: ES256 P-256 private JWK JSON.
 - `ADMIN_EMAILS`: comma-separated exact admin email allowlist.
 - D1 binding named `DB`.
+- R2 binding named `BUCKET` for `/storage/files/*`.
 
 ## API Endpoints
 
@@ -50,12 +52,26 @@ npm run validate
 - `POST /oauth/revoke`
 - `POST /oauth/introspect`
 - `GET /userinfo`
+- `GET /storage/records`
+- `PUT /storage/records/{key}`
+- `GET /storage/records/{key}`
+- `DELETE /storage/records/{key}`
+- `GET /storage/files`
+- `PUT /storage/files/{key}`
+- `GET /storage/files/{key}`
+- `DELETE /storage/files/{key}`
 - `GET /openapi.json`
 - `GET /docs`
 
 Browser-facing routes and errors use content negotiation. Browsers that prefer `text/html` receive consistent authentication-service HTML views for metadata, health, device entry, consent, administration, and error/outcome pages. API clients that request JSON, or send generic CLI-style `Accept: */*`, receive JSON. JSON metadata and JSON errors are hypermedia-oriented and advertise `_links` and `actions` so clients can discover available operations instead of hard-coding every route. OAuth token success responses remain protocol-standard and do not add decorative browser content.
 
 The browser UI uses a shared responsive auth-service shell with an identity-to-token visual treatment served from the same-origin `/auth-ui.css` stylesheet. It does not load external fonts, imagery, or third-party client scripts from application code.
+
+## Broker Storage
+
+Client applications may request `storage.read`, `storage.write`, and `storage.delete` local scopes. These scopes authorize storage only inside Sites Auth Broker. They do not grant access to ChatGPT, OpenAI, conversations, files, Projects, connectors, subscriptions, billing, or API quota.
+
+Storage is isolated by the immutable local user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2 at `/storage/files/{key}`. Caller-provided keys are logical metadata; the broker generates physical R2 object keys.
 
 ## Sites Boundary
 

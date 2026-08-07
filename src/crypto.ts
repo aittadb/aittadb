@@ -40,11 +40,11 @@ export function uuid(): string {
   return crypto.randomUUID();
 }
 
-export async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
+export async function sha256(value: string | Uint8Array): Promise<string> {
+  const data =
+    typeof value === "string" ? new TextEncoder().encode(value) : value;
+  const bytes = new Uint8Array(data);
+  const digest = await crypto.subtle.digest("SHA-256", bytes.buffer);
   return base64UrlEncode(new Uint8Array(digest));
 }
 

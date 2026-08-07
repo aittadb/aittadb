@@ -10,6 +10,10 @@ const requiredPaths = [
   "/oauth/revoke",
   "/oauth/introspect",
   "/userinfo",
+  "/storage/records",
+  "/storage/records/{key}",
+  "/storage/files",
+  "/storage/files/{key}",
   "/openapi.json",
   "/docs",
 ];
