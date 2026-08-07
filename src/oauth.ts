@@ -11,6 +11,7 @@ import {
   verifyPkceS256,
 } from "./crypto";
 import { oauthError, parseBasicAuth } from "./http";
+import { HYPERMEDIA_API_VERSION, action, field, link } from "./hypermedia";
 import { isBrowserSessionClientId } from "./system-client";
 import type {
   AppConfig,
@@ -212,28 +213,47 @@ export async function createDeviceAuthorization(
       verification_uri_complete: `${verificationUri}?user_code=${encodeURIComponent(userCode)}`,
       expires_in: config.deviceCodeTtlSeconds,
       interval: config.devicePollIntervalSeconds,
-      _links: {
-        verification: { href: verificationUri, type: "text/html" },
-        token: {
-          href: `${config.issuerUrl}/oauth/token`,
+      api_version: HYPERMEDIA_API_VERSION,
+      links: [
+        link("verification", verificationUri, { type: "text/html" }),
+        link("token", `${config.issuerUrl}/oauth/token`, {
           type: "application/json",
-        },
-        service: { href: config.issuerUrl, type: "text/html" },
-      },
-      actions: {
-        poll: {
-          method: "POST",
-          href: `${config.issuerUrl}/oauth/token`,
-          encoding: "application/x-www-form-urlencoded",
-          parameters: ["grant_type", "device_code", "client_id"],
-        },
-      },
+        }),
+        link("service", config.issuerUrl),
+      ],
+      actions: [
+        action(
+          "poll-device-token",
+          "Poll device token",
+          "POST",
+          `${config.issuerUrl}/oauth/token`,
+          {
+            type: "application/x-www-form-urlencoded",
+            fields: [
+              field("grant_type", "Grant type", "string", "body", {
+                required: true,
+                value: "urn:ietf:params:oauth:grant-type:device_code",
+              }),
+              field("device_code", "Device code", "string", "body", {
+                required: true,
+                secret: true,
+                value: deviceCode,
+              }),
+              field("client_id", "Client ID", "string", "body", {
+                required: true,
+                value: client.id,
+              }),
+            ],
+          },
+        ),
+      ],
     }),
     {
       status: 200,
       headers: {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
+        "aittadb-api-version": HYPERMEDIA_API_VERSION,
       },
     },
   );
@@ -274,10 +294,15 @@ export async function pollDeviceToken(
     return oauthError("access_denied", "The user denied the request", 400);
   if (grant.status !== "approved" || !grant.userId)
     return oauthError("invalid_grant", "Device grant unavailable");
-  const user = await store.getUser(grant.userId);
+  const consumed = await store.consumeDeviceGrant(
+    grant.deviceCodeHash,
+    authenticatedClient.id,
+    now,
+  );
+  if (!consumed?.userId)
+    return oauthError("invalid_grant", "Device grant unavailable");
+  const user = await store.getUser(consumed.userId);
   if (!user) return oauthError("invalid_grant", "Device grant unavailable");
-  grant.status = "used";
-  await store.updateDeviceGrant(grant);
   return jsonToken(
     await issueTokens({
       config,
@@ -372,10 +397,16 @@ export async function approveAuthorizationRequest(
   user: LocalUser,
   store: AuthStore,
   now: number,
-): Promise<string> {
-  authRequest.status = "approved";
-  authRequest.userId = user.id;
-  await store.updateAuthorizationRequest(authRequest);
+): Promise<string | null> {
+  if (
+    !(await store.transitionAuthorizationRequest(
+      authRequest.id,
+      "approved",
+      user.id,
+      now,
+    ))
+  )
+    return null;
   await store.saveConsent(
     user.id,
     authRequest.clientId,
@@ -397,6 +428,19 @@ export async function approveAuthorizationRequest(
   return code;
 }
 
+export async function denyAuthorizationRequest(
+  authRequest: AuthorizationRequest,
+  store: AuthStore,
+  now: number,
+): Promise<boolean> {
+  return store.transitionAuthorizationRequest(
+    authRequest.id,
+    "denied",
+    null,
+    now,
+  );
+}
+
 export async function exchangeAuthorizationCode(
   form: URLSearchParams,
   config: AppConfig,
@@ -406,13 +450,11 @@ export async function exchangeAuthorizationCode(
   const now = nowSeconds();
   const code = await store.consumeAuthorizationCode(
     await sha256(form.get("code") || ""),
+    client.id,
+    form.get("redirect_uri") || "",
     now,
   );
-  if (
-    !code ||
-    code.clientId !== client.id ||
-    code.redirectUri !== form.get("redirect_uri")
-  ) {
+  if (!code) {
     return oauthError("invalid_grant", "Invalid authorization code");
   }
   if (
@@ -449,10 +491,10 @@ export async function rotateRefreshToken(
   const now = nowSeconds();
   const existing = await store.consumeRefreshToken(
     await sha256(form.get("refresh_token") || ""),
+    client.id,
     now,
   );
-  if (!existing || existing.clientId !== client.id)
-    return oauthError("invalid_grant", "Invalid refresh token");
+  if (!existing) return oauthError("invalid_grant", "Invalid refresh token");
   const user = await store.getUser(existing.userId);
   if (!user) return oauthError("invalid_grant", "Invalid refresh token");
   const refreshToken = randomToken(48);
@@ -495,6 +537,11 @@ export async function verifyAccessToken(
       now: nowSeconds(),
     },
   );
+  if (
+    verified.claims.token_use !== "access" ||
+    typeof verified.claims.jti !== "string"
+  )
+    throw new Error("invalid_token_use");
   if (await store.isAccessTokenJtiRevoked(verified.claims.jti))
     throw new Error("revoked_token");
   return verified;

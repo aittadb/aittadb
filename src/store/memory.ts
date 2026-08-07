@@ -104,6 +104,10 @@ export class MemoryAuthStore implements AuthStore {
     return this.users.get(id) ?? null;
   }
 
+  async countUsers(): Promise<number> {
+    return this.users.size;
+  }
+
   async createClient(
     input: ClientRegistrationInput,
     secretHash: string | null,
@@ -167,55 +171,114 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   async createDeviceGrant(grant: DeviceGrant): Promise<void> {
-    this.devices.set(grant.deviceCodeHash, grant);
+    this.devices.set(grant.deviceCodeHash, { ...grant });
     this.devicesByUserCodeHash.set(grant.userCodeHash, grant.deviceCodeHash);
   }
 
   async getDeviceGrantByDeviceHash(hash: string): Promise<DeviceGrant | null> {
-    return this.devices.get(hash) ?? null;
+    const grant = this.devices.get(hash);
+    return grant ? { ...grant } : null;
   }
 
   async getDeviceGrantByUserCodeHash(
     hash: string,
   ): Promise<DeviceGrant | null> {
     const deviceHash = this.devicesByUserCodeHash.get(hash);
-    return deviceHash ? (this.devices.get(deviceHash) ?? null) : null;
+    const grant = deviceHash ? this.devices.get(deviceHash) : null;
+    return grant ? { ...grant } : null;
   }
 
   async updateDeviceGrant(grant: DeviceGrant): Promise<void> {
-    this.devices.set(grant.deviceCodeHash, grant);
+    const stored = this.devices.get(grant.deviceCodeHash);
+    if (!stored) return;
+    this.devices.set(grant.deviceCodeHash, {
+      ...stored,
+      lastPollAt: grant.lastPollAt,
+      slowDownCount: grant.slowDownCount,
+    });
+  }
+
+  async transitionDeviceGrant(
+    userCodeHash: string,
+    status: "approved" | "denied",
+    userId: string | null,
+    now: number,
+  ): Promise<DeviceGrant | null> {
+    const deviceHash = this.devicesByUserCodeHash.get(userCodeHash);
+    const grant = deviceHash ? this.devices.get(deviceHash) : null;
+    if (!grant || grant.status !== "pending" || grant.expiresAt <= now)
+      return null;
+    const updated = { ...grant, status, userId };
+    this.devices.set(updated.deviceCodeHash, updated);
+    return { ...updated };
+  }
+
+  async consumeDeviceGrant(
+    deviceCodeHash: string,
+    clientId: string,
+    now: number,
+  ): Promise<DeviceGrant | null> {
+    const grant = this.devices.get(deviceCodeHash);
+    if (
+      !grant ||
+      grant.clientId !== clientId ||
+      grant.status !== "approved" ||
+      !grant.userId ||
+      grant.expiresAt <= now
+    )
+      return null;
+    const consumed = { ...grant, status: "used" as const };
+    this.devices.set(deviceCodeHash, consumed);
+    return { ...consumed };
   }
 
   async createAuthorizationRequest(
     request: AuthorizationRequest,
   ): Promise<void> {
-    this.authRequests.set(request.id, request);
+    this.authRequests.set(request.id, { ...request });
   }
 
   async getAuthorizationRequest(
     id: string,
   ): Promise<AuthorizationRequest | null> {
-    return this.authRequests.get(id) ?? null;
+    const request = this.authRequests.get(id);
+    return request ? { ...request } : null;
   }
 
-  async updateAuthorizationRequest(
-    request: AuthorizationRequest,
-  ): Promise<void> {
-    this.authRequests.set(request.id, request);
+  async transitionAuthorizationRequest(
+    id: string,
+    status: "approved" | "denied",
+    userId: string | null,
+    now: number,
+  ): Promise<boolean> {
+    const request = this.authRequests.get(id);
+    if (!request || request.status !== "pending" || request.expiresAt <= now)
+      return false;
+    this.authRequests.set(id, { ...request, status, userId });
+    return true;
   }
 
   async createAuthorizationCode(code: AuthorizationCode): Promise<void> {
-    this.authCodes.set(code.codeHash, code);
+    this.authCodes.set(code.codeHash, { ...code });
   }
 
   async consumeAuthorizationCode(
     hash: string,
+    clientId: string,
+    redirectUri: string,
     now: number,
   ): Promise<AuthorizationCode | null> {
     const code = this.authCodes.get(hash);
-    if (!code || code.consumedAt || code.expiresAt <= now) return null;
+    if (
+      !code ||
+      code.clientId !== clientId ||
+      code.redirectUri !== redirectUri ||
+      code.consumedAt ||
+      code.expiresAt <= now
+    )
+      return null;
     code.consumedAt = now;
-    return code;
+    return { ...code };
   }
 
   async hasConsent(
@@ -235,19 +298,26 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   async createRefreshFamily(family: RefreshTokenFamily): Promise<void> {
-    this.families.set(family.id, family);
+    this.families.set(family.id, { ...family });
   }
 
   async createRefreshToken(token: RefreshTokenRecord): Promise<void> {
-    this.refreshTokens.set(token.tokenHash, token);
+    this.refreshTokens.set(token.tokenHash, { ...token });
   }
 
   async consumeRefreshToken(
     hash: string,
+    clientId: string,
     now: number,
   ): Promise<RefreshTokenRecord | null> {
     const token = this.refreshTokens.get(hash);
-    if (!token || token.expiresAt <= now || token.revokedAt) return null;
+    if (
+      !token ||
+      token.clientId !== clientId ||
+      token.expiresAt <= now ||
+      token.revokedAt
+    )
+      return null;
     const family = this.families.get(token.familyId);
     if (!family || family.status !== "active") return null;
     if (token.usedAt) {
@@ -258,7 +328,7 @@ export class MemoryAuthStore implements AuthStore {
       return null;
     }
     token.usedAt = now;
-    return token;
+    return { ...token };
   }
 
   async revokeRefreshFamily(familyId: string, now: number): Promise<void> {
@@ -269,9 +339,15 @@ export class MemoryAuthStore implements AuthStore {
     }
   }
 
-  async revokeRefreshToken(hash: string, now: number): Promise<void> {
+  async revokeRefreshToken(
+    hash: string,
+    clientId: string,
+    now: number,
+  ): Promise<boolean> {
     const token = this.refreshTokens.get(hash);
-    if (token) token.revokedAt = now;
+    if (!token || token.clientId !== clientId) return false;
+    await this.revokeRefreshFamily(token.familyId, now);
+    return true;
   }
 
   async revokeAccessTokenJti(jti: string, expiresAt: number): Promise<void> {

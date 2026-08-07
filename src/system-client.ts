@@ -9,6 +9,7 @@ export const BROWSER_SESSION_CLIENT: ClientView = Object.freeze({
   disabledAt: null,
   redirectUris: Object.freeze([]),
   scopes: Object.freeze([
+    "openid",
     "email",
     "profile",
     "storage.read",

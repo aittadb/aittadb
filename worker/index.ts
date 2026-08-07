@@ -20,8 +20,6 @@ export interface Env {
   REFRESH_TOKEN_TTL_SECONDS?: string;
   ALLOWED_CORS_ORIGINS?: string;
   NODE_ENV?: string;
-  TEST_AUTH_EMAIL?: string;
-  TEST_AUTH_FULL_NAME?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {

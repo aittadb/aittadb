@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readSitesIdentity, safeRelativeReturnPath } from "../../src/identity";
+import {
+  readSitesIdentity,
+  requireSitesIdentity,
+  safeRelativeReturnPath,
+  sitesIdentityProvider,
+} from "../../src/identity";
 import {
   cors,
   csrfTokenForRequest,
@@ -16,7 +21,7 @@ test("parses Sites identity headers with percent-encoded UTF-8 name", () => {
       "oai-authenticated-user-full-name-encoding": "percent-encoded-utf-8",
     },
   });
-  assert.deepEqual(readSitesIdentity(request, {}), {
+  assert.deepEqual(readSitesIdentity(request), {
     email: "person@example.test",
     fullName: "Ada Lovelace",
     displayName: "Ada Lovelace",
@@ -31,9 +36,34 @@ test("falls back to email when full-name encoding is unsupported", () => {
       "oai-authenticated-user-full-name-encoding": "legacy",
     },
   });
+  assert.equal(readSitesIdentity(request)?.displayName, "person@example.test");
+});
+
+test("rejects missing or malformed Sites email headers", () => {
   assert.equal(
-    readSitesIdentity(request, {})?.displayName,
-    "person@example.test",
+    readSitesIdentity(new Request("https://aittadb.example.test/session")),
+    null,
+  );
+  assert.equal(
+    readSitesIdentity(
+      new Request("https://aittadb.example.test/session", {
+        headers: { "oai-authenticated-user-email": "not-an-email" },
+      }),
+    ),
+    null,
+  );
+});
+
+test("redirects missing Sites identity only to a safe same-origin continuation", () => {
+  const response = requireSitesIdentity(
+    new Request("https://aittadb.example.test/session?next=1"),
+    sitesIdentityProvider,
+  );
+  assert.ok(response instanceof Response);
+  assert.equal(response.status, 302);
+  assert.equal(
+    response.headers.get("location"),
+    "https://aittadb.example.test/signin-with-chatgpt?return_to=%2Fsession%3Fnext%3D1",
   );
 });
 
@@ -45,6 +75,14 @@ test("rejects unsafe return paths", () => {
 });
 
 test("accepts null origin only with same-origin fetch metadata", () => {
+  assert.equal(
+    requireSameOrigin(
+      new Request("https://aittadb.example.test/admin/clients", {
+        method: "POST",
+      }),
+    ),
+    false,
+  );
   assert.equal(
     requireSameOrigin(
       new Request("https://aittadb.example.test/admin/clients", {

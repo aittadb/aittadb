@@ -57,7 +57,12 @@ test("public requests perform no D1 work and runtime requests never apply schema
 
   const session = await app.fetch(
     new Request("https://aittadb.example.test/session", {
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        "oai-authenticated-user-email": "user@example.test",
+        "oai-authenticated-user-full-name": "Test%20User",
+        "oai-authenticated-user-full-name-encoding": "percent-encoded-utf-8",
+      },
     }),
   );
   assert.equal(session?.status, 200);

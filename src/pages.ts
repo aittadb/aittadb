@@ -2,6 +2,7 @@ import type {
   AuthorizationRequest,
   ClientView,
   DeviceGrant,
+  DeviceGrantStatus,
   LocalUser,
 } from "./types";
 
@@ -34,26 +35,27 @@ export interface PageOptions {
   scripts?: string;
 }
 
-export function serviceHomePage(metadata: {
-  service: string;
-  description: string;
-  hostingPlatform: string;
-  issuer: string;
-  docs: string;
-  openapi: string;
-  officialOpenAIProduct: boolean;
-  upstreamSignIn: {
-    source: string;
-    identitySignal: string;
-    stableSubjectSupplied: boolean;
-    credentialsForwarded: boolean;
-  };
-  sessionIssuer: string;
-  capabilities: readonly string[];
-  plannedCapabilities: readonly string[];
-  _links?: Record<string, { href: string; type?: string }>;
-  actions?: Record<string, unknown>;
-}): string {
+export function serviceHomePage(
+  metadata: {
+    service: string;
+    description: string;
+    hostingPlatform: string;
+    issuer: string;
+    docs: string;
+    openapi: string;
+    officialOpenAIProduct: boolean;
+    upstreamSignIn: {
+      source: string;
+      identitySignal: string;
+      stableSubjectSupplied: boolean;
+      credentialsForwarded: boolean;
+    };
+    sessionIssuer: string;
+    capabilities: readonly string[];
+    plannedCapabilities: readonly string[];
+  },
+  options: { showAdmin?: boolean; signedIn?: boolean } = {},
+): string {
   return pageDocument({
     title: metadata.service,
     eyebrow: "Hosted application backend",
@@ -68,9 +70,14 @@ export function serviceHomePage(metadata: {
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Persistent storage</span><strong>D1 records + R2 files</strong></div></section><p class="note"><strong>AittaDB is deployed as an application on OpenAI-hosted ChatGPT Sites.</strong> The Sites platform provides its managed runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Third-party apps, services, and agents use AittaDB's HTTP APIs for identity, sessions, persistent JSON records, and files. Persistent events are planned and are not available in the current MVP.</p><p class="note"><strong>ChatGPT supplies browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID and issues its own OAuth, OIDC, and JWT credentials. It never forwards ChatGPT credentials, and its credentials and stored data are not OpenAI or ChatGPT credentials or data. AittaDB itself is independent and is not affiliated with, endorsed by, or an official product of OpenAI.</p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>Sign in to view your AittaDB identity and reach your private records and files.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients when the signed-in email is allowlisted.</span></a></div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Persistent storage</span><strong>D1 records + R2 files</strong></div></section><p class="note"><strong>This public AittaDB instance runs on OpenAI-hosted ChatGPT Sites.</strong> AittaDB is reusable software: developers can deploy an independent instance in their own ChatGPT Sites project to provide authentication, JSON records, and file storage to their applications. Each instance creates its own identities and credentials, never forwards ChatGPT credentials, and remains independent from OpenAI. Persistent events are planned. <a class="note-cta" href="https://github.com/aittadb/aittadb#built-for-chatgpt-sites">How AittaDB works</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>Sign in to view your AittaDB identity and reach your private records and files.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/statistics"><strong>Service statistics</strong><span>View the public aggregate identity count without exposing personal information.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
-      { href: "/session", label: "Sign in to AittaDB" },
+      options.signedIn
+        ? {
+            href: "/signout-with-chatgpt?return_to=%2F",
+            label: "Sign out",
+          }
+        : { href: "/session", label: "Sign in to AittaDB" },
       { href: "/docs", label: "API docs", secondary: true },
       {
         href: "/openapi.json?format=json",
@@ -82,7 +89,7 @@ export function serviceHomePage(metadata: {
   });
 }
 
-export function sessionPage(user: LocalUser): string {
+export function sessionPage(user: LocalUser, showAdmin = false): string {
   return pageDocument({
     title: "My AittaDB session",
     eyebrow: "Authenticated identity",
@@ -93,7 +100,7 @@ export function sessionPage(user: LocalUser): string {
     visualHeading: "Your AittaDB identity, records, and files.",
     visualSummary:
       "ChatGPT establishes the upstream sign-in. AittaDB uses its own immutable user ID for sessions and persistent storage.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a><a href="/admin/clients"><strong>Application clients</strong><span>Manage OAuth clients only when this signed-in email is allowlisted.</span></a></div></section>`,
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
       { href: "/storage/records", label: "Open my records" },
       { href: "/storage/files", label: "Open my files", secondary: true },
@@ -131,6 +138,25 @@ export function healthPage(status: {
     body: `<section class="info-grid" aria-label="Health checks"><div><span>Status</span><strong>${status.ok ? "ok" : "unavailable"}</strong></div><div><span>Service</span><code>${escapeHtml(status.service)}</code></div><div><span>D1 binding</span><strong>${status.d1 ? "available" : "unavailable"}</strong></div><div><span>R2 binding</span><strong>${status.r2 ? "available" : "unavailable"}</strong></div></section>`,
     actions: [
       { href: "/", label: "Service" },
+      { href: "/docs", label: "API docs", secondary: true },
+    ],
+  });
+}
+
+export function statisticsPage(identityCount: number): string {
+  return pageDocument({
+    title: "Service statistics",
+    eyebrow: "Public aggregate",
+    heading: "Service statistics",
+    summary:
+      "A privacy-preserving count of local identities created by this AittaDB instance.",
+    visualEyebrow: "Independent identity",
+    visualHeading: "One count, no personal details.",
+    visualSummary:
+      "This aggregate reports how many durable AittaDB identities exist without exposing names, email addresses, subjects, activity, or application data.",
+    body: `<section class="info-grid" aria-label="AittaDB statistics"><div><span>Local identities</span><strong>${escapeHtml(String(identityCount))}</strong></div><div><span>Privacy</span><strong>Aggregate count only</strong></div></section><p class="note">The count belongs to this independent AittaDB deployment. It does not describe ChatGPT or OpenAI users and contains no personal information.</p>`,
+    actions: [
+      { href: "/", label: "Service home" },
       { href: "/docs", label: "API docs", secondary: true },
     ],
   });
@@ -242,26 +268,44 @@ export function adminClientsPage(
   });
 }
 
-export function deviceOutcomePage(status: "approved" | "denied"): string {
+export function deviceOutcomePage(
+  status: Exclude<DeviceGrantStatus, "pending">,
+): string {
   const approved = status === "approved";
+  const used = status === "used";
+  const title = approved
+    ? "Device approved"
+    : used
+      ? "Device request completed"
+      : "Device denied";
   return pageDocument({
-    title: approved ? "Device approved" : "Device denied",
+    title,
     eyebrow: "Device authorization",
-    heading: approved ? "Device approved" : "Device denied",
+    heading: title,
     summary: approved
       ? "Return to the application that displayed this code. It can now complete the AittaDB token exchange."
-      : "The application request was denied. No AittaDB credentials will be issued for this device code.",
-    statusLabel: approved ? "Request approved" : "Request denied",
-    tone: approved ? "success" : "warning",
+      : used
+        ? "This device code has already completed its one-time AittaDB token exchange."
+        : "The application request was denied. No AittaDB credentials will be issued for this device code.",
+    statusLabel: approved
+      ? "Request approved"
+      : used
+        ? "Request completed"
+        : "Request denied",
+    tone: approved || used ? "success" : "warning",
     visualEyebrow: approved
       ? "Authorization complete"
       : "Authorization stopped",
     visualHeading: approved
       ? "Approved. The device can continue."
-      : "Denied. No credentials cross this boundary.",
+      : used
+        ? "Completed. This code cannot be used again."
+        : "Denied. No credentials cross this boundary.",
     visualSummary: approved
       ? "The application can finish its standards-based exchange without receiving any upstream ChatGPT credential."
-      : "AittaDB records the denial so the polling application receives the standard access_denied response.",
+      : used
+        ? "AittaDB consumed the approval exactly once and will reject another exchange for this code."
+        : "AittaDB records the denial so the polling application receives the standard access_denied response.",
     body: `<section class="info-grid" aria-label="Device outcome"><div><span>Status</span><strong>${status}</strong></div><div><span>Next step</span><strong>${approved ? "Return to the application" : "Close this page"}</strong></div></section>`,
     actions: [
       { href: "/", label: "Service" },
@@ -331,7 +375,7 @@ export function pageDocument(options: PageOptions): string {
     ? `<meta name="description" content="${escapeHtml(options.social.description)}"><link rel="canonical" href="${escapeHtml(options.social.url)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(options.title)}"><meta property="og:description" content="${escapeHtml(options.social.description)}"><meta property="og:url" content="${escapeHtml(options.social.url)}"><meta property="og:image" content="${escapeHtml(options.social.imageUrl)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="AittaDB: ChatGPT sign-in, app-ready identity and data."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(options.title)}"><meta name="twitter:description" content="${escapeHtml(options.social.description)}"><meta name="twitter:image" content="${escapeHtml(options.social.imageUrl)}">`
     : "";
   const layout = options.layout ?? "default";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application backend")}</p><h2>${escapeHtml(options.visualHeading ?? "Hosted identity, data, and files for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate user, its own credentials, and isolated persistent storage without forwarding ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Identity + sessions</strong></div><div><span>App data</span><strong>JSON + files</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">Identity / Data / Files</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main>${options.scripts ?? ""}</body></html>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application backend")}</p><h2>${escapeHtml(options.visualHeading ?? "Hosted identity, data, and files for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate user, its own credentials, and isolated persistent storage without forwarding ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Identity + sessions</strong></div><div><span>App data</span><strong>JSON + files</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">Identity / Data / Files / Events</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main>${options.scripts ?? ""}</body></html>`;
 }
 
 function brandWordmark(): string {
@@ -412,6 +456,33 @@ export function authUiJs(): string {
     });
     updateAction();
   });
+  document.querySelectorAll("[data-file-drop-zone]").forEach((zone) => {
+    const input = zone.querySelector('input[type="file"]');
+    const status = zone.querySelector("[data-file-drop-status]");
+    if (!input) return;
+    const updateStatus = () => {
+      const file = input.files && input.files[0];
+      if (status) status.textContent = file ? file.name : "Choose a file, or drag and drop it here.";
+    };
+    ["dragenter", "dragover"].forEach((name) => {
+      zone.addEventListener(name, (event) => {
+        event.preventDefault();
+        zone.classList.add("drag-active");
+      });
+    });
+    ["dragleave", "drop"].forEach((name) => {
+      zone.addEventListener(name, () => zone.classList.remove("drag-active"));
+    });
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      if (event.dataTransfer && event.dataTransfer.files.length) {
+        input.files = event.dataTransfer.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+    input.addEventListener("change", updateStatus);
+    updateStatus();
+  });
 })();\n`;
 }
 
@@ -455,6 +526,7 @@ export function authUiCss(): string {
   .content-frame>h2,.content-frame>section>h2,.table-wrap>h2{margin:32px 0 14px;color:#13284b;font-size:1.18rem;letter-spacing:0}
   .summary{max-width:60ch;margin:17px 0 28px;color:#53637a;font-size:1.08rem}
   .note,.notice{border:1px solid #bce1e4;border-left:4px solid var(--accent);background:var(--accent-soft);padding:14px 16px;border-radius:6px;color:#173d52}
+  .note-cta{display:inline-block;margin:8px 0 0;padding:7px 11px;border:1px solid #159ca6;border-radius:5px;background:#fff;color:#0b5666;font-weight:700;text-decoration:none}.note-cta:hover{background:#eaf8f8}.note-cta:focus-visible{outline:3px solid rgba(21,156,166,.3);outline-offset:2px}
   .tone-warning .notice,.tone-warning .note{border-color:#ead5ac;color:#5f451c}.tone-danger .notice,.tone-danger .note{border-color:#efc6bf;color:#702f26}.tone-success .notice,.tone-success .note{border-color:#bfdccb;color:#244c37}
   .info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:24px 0}
   .info-grid div{min-width:0;padding:15px;border:1px solid #dbe3eb;border-radius:6px;background:#fff;box-shadow:0 9px 22px rgba(11,35,74,.055)}
@@ -464,7 +536,8 @@ export function authUiCss(): string {
   .operation-grid>a:hover{border-color:#159ca6;box-shadow:0 13px 28px rgba(21,156,166,.14);transform:translateY(-1px)}
   .operation-grid strong{font-size:.94rem}.operation-grid span{color:#647287;font-size:.82rem;line-height:1.42}
   .resource-address{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 14px;margin:22px 0 30px;padding:16px 0;border-top:1px solid #dbe3eb;border-bottom:1px solid #dbe3eb}.resource-address span{color:#68768a;font-size:.72rem;font-weight:800;text-transform:uppercase}.resource-address code{min-width:0;overflow-wrap:anywhere;color:#183764}
-  .resource-workbench{margin-top:28px}.resource-operation{padding:22px 0;border-top:1px solid #dbe3eb}.resource-operation:last-of-type{border-bottom:1px solid #dbe3eb}.resource-operation>header{display:flex;align-items:flex-start;gap:13px;margin-bottom:8px}.resource-operation>header div{min-width:0}.resource-operation h3{margin:0;color:#13284b;font-size:1rem;letter-spacing:0}.resource-operation header p{margin:5px 0 0;color:#647287;font-size:.88rem}.method-badge{flex:none;min-width:58px;border:1px solid #99cdd1;border-radius:4px;background:#e7f6f7;color:#0b6f77;padding:4px 7px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.72rem;font-weight:800}.method-put{border-color:#f0b6aa;background:#fff0ed;color:#a82c1d}.method-delete{border-color:#e8aaa3;background:#fdecea;color:#94231c}
+  .storage-state{margin:8px 0 34px}.storage-state>h2,.storage-state-heading h2{margin:0 0 8px;color:#13284b;font-size:1.18rem}.storage-state-heading p,.storage-status p{margin:0;color:#647287}.storage-status{border-left:4px solid var(--accent);padding:14px 16px;background:#eef9fa;border-radius:6px}.empty-state{margin:10px 0;padding:20px;border:1px dashed #b9c5d2;border-radius:6px;background:#f7f9fb;color:#5e6c80}.record-value{white-space:pre-wrap;overflow:auto;max-height:420px;border:1px solid #ccd6e0;border-radius:6px;background:#f7f9fb;color:#183764;padding:16px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86rem}.table-value{display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.table-link{font-weight:750;text-underline-offset:3px}
+  .resource-workbench{margin-top:28px}.resource-operation{padding:22px 0;border-top:1px solid #dbe3eb}.resource-operation:last-of-type{border-bottom:1px solid #dbe3eb}.resource-operation>header{display:flex;align-items:flex-start;gap:13px;margin-bottom:8px}.resource-operation>header div{min-width:0}.resource-operation h3{margin:0;color:#13284b;font-size:1rem;letter-spacing:0}.resource-operation header p{margin:5px 0 0;color:#647287;font-size:.88rem}.method-badge{flex:none;min-width:58px;border:1px solid #99cdd1;border-radius:4px;background:#e7f6f7;color:#0b6f77;padding:4px 7px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.72rem;font-weight:800}.method-post{border-color:#9eb6d3;background:#eef4fb;color:#183764}.method-put{border-color:#f0b6aa;background:#fff0ed;color:#a82c1d}.method-delete{border-color:#e8aaa3;background:#fdecea;color:#94231c}
   .resource-operation .stacked-form{margin-top:16px}.resource-operation .stacked-form .actions{margin-top:20px}
   .content-frame>code,.content-frame>p code,.content-frame>section code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
   .content-frame>label,.stacked-form label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
@@ -473,6 +546,7 @@ export function authUiCss(): string {
   .stacked-form input,.stacked-form textarea,.stacked-form select,.content-frame>textarea{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
   .stacked-form input:hover,.stacked-form textarea:hover,.stacked-form select:hover,.content-frame>textarea:hover{border-color:#71839a}
   .stacked-form input:focus,.stacked-form textarea:focus,.stacked-form select:focus,.content-frame>textarea:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
+  .file-drop-zone{margin-top:18px;padding:16px;border:2px dashed #9eb0c3;border-radius:6px;background:#f7f9fb;transition:border-color .16s ease,background-color .16s ease}.file-drop-zone.drag-active{border-color:#159ca6;background:#e7f6f7}.file-drop-zone label{margin-top:0}.file-drop-zone p{margin:9px 0 0;color:#647287;font-size:.85rem}.file-drop-zone input[type=file]{background:#fff}
   .stacked-form textarea,.content-frame>textarea{min-height:104px;resize:vertical}
   textarea.credential-input,textarea.credential-output{min-height:88px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8rem;overflow-wrap:anywhere}.credential-output{background:#f4f7fa;color:#243954}
   .content-frame>p>a,.content-frame>section a,.content-frame>.actions>a,.page-footer a{color:var(--accent-strong)}

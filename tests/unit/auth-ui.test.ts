@@ -175,3 +175,101 @@ test("auth UI reveals only active fields and safely targets item URLs", () => {
   navigationForm.dispatch("input");
   assert.equal(navigationForm.actionValue(), "/storage/files");
 });
+
+test("auth UI progressively enhances file drag and drop", () => {
+  const input = {
+    files: [] as Array<{ name: string }>,
+    listeners: new Map<string, Array<() => void>>(),
+    addEventListener(name: string, listener: () => void): void {
+      const listeners = this.listeners.get(name) ?? [];
+      listeners.push(listener);
+      this.listeners.set(name, listeners);
+    },
+    dispatchEvent(event: { type: string }): boolean {
+      for (const listener of this.listeners.get(event.type) ?? []) listener();
+      return true;
+    },
+  };
+  const status = { textContent: "" };
+  const classes = new Set<string>();
+  const listeners = new Map<
+    string,
+    Array<
+      (event: {
+        preventDefault(): void;
+        dataTransfer?: { files: Array<{ name: string }> };
+      }) => void
+    >
+  >();
+  const zone = {
+    classList: {
+      add(value: string): void {
+        classes.add(value);
+      },
+      remove(value: string): void {
+        classes.delete(value);
+      },
+    },
+    querySelector(selector: string): typeof input | typeof status | null {
+      if (selector === 'input[type="file"]') return input;
+      if (selector === "[data-file-drop-status]") return status;
+      return null;
+    },
+    addEventListener(
+      name: string,
+      listener: (event: {
+        preventDefault(): void;
+        dataTransfer?: { files: Array<{ name: string }> };
+      }) => void,
+    ): void {
+      const current = listeners.get(name) ?? [];
+      current.push(listener);
+      listeners.set(name, current);
+    },
+    dispatch(
+      name: string,
+      event: {
+        preventDefault(): void;
+        dataTransfer?: { files: Array<{ name: string }> };
+      },
+    ): void {
+      for (const listener of listeners.get(name) ?? []) listener(event);
+    },
+  };
+  const document = {
+    querySelectorAll(selector: string): readonly unknown[] {
+      return selector === "[data-file-drop-zone]" ? [zone] : [];
+    },
+  };
+  class FakeDomEvent {
+    constructor(
+      readonly type: string,
+      readonly options: { bubbles?: boolean } = {},
+    ) {}
+  }
+
+  vm.runInNewContext(authUiJs(), {
+    document,
+    encodeURIComponent,
+    Event: FakeDomEvent,
+    window: { location: { assign() {} } },
+  });
+
+  assert.equal(status.textContent, "Choose a file, or drag and drop it here.");
+  let prevented = false;
+  zone.dispatch("dragover", {
+    preventDefault(): void {
+      prevented = true;
+    },
+  });
+  assert.equal(prevented, true);
+  assert.equal(classes.has("drag-active"), true);
+
+  zone.dispatch("drop", {
+    preventDefault() {},
+    dataTransfer: { files: [{ name: "report.pdf" }] },
+  });
+  assert.equal(classes.has("drag-active"), false);
+  assert.equal(input.files[0]?.name, "report.pdf");
+  assert.equal(status.textContent, "report.pdf");
+});

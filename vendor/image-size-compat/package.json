@@ -1,0 +1,16 @@
+{
+  "name": "image-size",
+  "version": "2.0.3-aittadb.0",
+  "description": "Narrow image-size compatibility adapter for Vinext metadata builds",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "dependencies": {
+    "image-dimensions": "2.5.1"
+  }
+}

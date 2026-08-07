@@ -5,18 +5,25 @@ import {
 } from "./browser-session";
 import {
   acceptsHtml,
+  acceptsJson,
   bearerToken,
   csrfCookie,
   csrfTokenForRequest,
   csrfTokenMatches,
   html,
+  isJsonMediaType,
   oauthError,
   readForm,
   redirect,
   requireSameOrigin,
 } from "./http";
+import {
+  HYPERMEDIA_API_VERSION,
+  HYPERMEDIA_MEDIA_TYPE,
+  requestedHypermediaVersion,
+} from "./hypermedia";
+import type { UpstreamIdentityProvider } from "./identity";
 import { errorPage } from "./pages";
-import { protocolErrorPage } from "./protocol-pages";
 import {
   encodeStorageKey,
   isValidStorageKey,
@@ -24,6 +31,7 @@ import {
   MAX_RECORD_BYTES,
   storageAttachmentDisposition,
   storageEndpoint,
+  type StorageRepresentationContext,
 } from "./storage";
 import {
   fileStorageFormPage,
@@ -36,7 +44,7 @@ const MAX_RECORD_FORM_BYTES = MAX_RECORD_BYTES * 3 + 16_384;
 const MAX_FILE_FORM_BYTES = MAX_FILE_BYTES + 256 * 1024;
 
 type StorageKind = "records" | "files";
-type StorageMethod = "GET" | "PUT" | "DELETE";
+type StorageMethod = "GET" | "POST" | "PUT" | "DELETE";
 type StorageResource = { type: "collection" } | { type: "item"; key: string };
 
 interface BrowserStorageOperation {
@@ -45,43 +53,130 @@ interface BrowserStorageOperation {
   scope: BrowserSessionScope;
 }
 
+interface BrowserStorageRequest {
+  headers: Headers;
+  representation?: StorageRepresentationContext;
+}
+
+const SESSION_STORAGE_SCOPES: readonly BrowserSessionScope[] = [
+  "storage.read",
+  "storage.write",
+  "storage.delete",
+];
+
+const SESSION_REPRESENTATION: StorageRepresentationContext = {
+  actionScopes: SESSION_STORAGE_SCOPES,
+  authorizationScheme: "sites-session",
+};
+
 export async function storageBrowserEndpoint(
   request: Request,
   url: URL,
   env: RuntimeEnv,
   store: AuthStore,
   config: AppConfig,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response | null> {
   const kind = storageKind(url.pathname);
   if (!kind) return null;
   const resource = storageResource(url.pathname, kind);
   if (!resource) return null;
 
-  if (request.method === "GET" && acceptsHtml(request)) {
-    if (!bearerToken(request)) {
-      if (resource.type === "collection" && url.searchParams.has("key")) {
-        const key = url.searchParams.get("key") ?? "";
-        if (!isValidStorageKey(key)) {
-          return renderStorageResponse(
-            oauthError(
-              "invalid_request",
-              "A valid logical storage key is required",
-            ),
-            kind,
-            "navigate",
-            collectionPath(kind),
-          );
-        }
-        return redirect(
-          `${collectionPath(kind)}/${encodeStorageKey(key)}`,
-          303,
+  if (request.method === "GET" && !bearerToken(request)) {
+    const htmlRequested = acceptsHtml(request);
+    const vendorRequested = requestedHypermediaVersion(request).requested;
+    const compatibilityJsonRequested = acceptsJson(request);
+    const signedIn = hasBrowserSession(request, identityProvider);
+    if (
+      htmlRequested &&
+      resource.type === "collection" &&
+      url.searchParams.has("key")
+    ) {
+      const key = url.searchParams.get("key") ?? "";
+      if (!isValidStorageKey(key)) {
+        return renderStorageResponse(
+          oauthError(
+            "invalid_request",
+            "A valid logical storage key is required",
+          ),
+          kind,
+          "navigate",
+          collectionPath(kind),
+          request,
+          signedIn,
         );
       }
+      return redirect(`${collectionPath(kind)}/${encodeStorageKey(key)}`, 303);
+    }
+    if (
+      signedIn &&
+      (htmlRequested || vendorRequested || compatibilityJsonRequested)
+    ) {
+      const csrf = csrfTokenForRequest(request);
+      const representation: StorageRepresentationContext = htmlRequested
+        ? SESSION_REPRESENTATION
+        : { ...SESSION_REPRESENTATION, csrfToken: csrf };
+      const accessToken = await issueBrowserSessionAccessToken(
+        request,
+        identityProvider,
+        store,
+        config,
+        ["storage.read"],
+      );
+      if (accessToken instanceof Response) {
+        return htmlRequested
+          ? renderStorageResponse(
+              accessToken,
+              kind,
+              "read",
+              url.pathname,
+              request,
+              true,
+            )
+          : accessToken;
+      }
+      const target = canonicalStorageUrl(url);
+      const response = await storageEndpoint(
+        new Request(target, {
+          method: "GET",
+          headers: storageHeaders(accessToken),
+        }),
+        target,
+        env,
+        store,
+        config,
+        representation,
+      );
+      if (htmlRequested) {
+        return renderStorageResponse(
+          response,
+          kind,
+          resource.type === "collection" ? "list" : "read",
+          target.pathname,
+          request,
+          true,
+        );
+      }
+      response.headers.set("set-cookie", csrfCookie(csrf));
+      return response;
+    }
+    if (htmlRequested) {
       return storageFormResponse(
         request,
         kind,
         resource.type === "item" ? resource.key : "",
-        hasBrowserSession(request, env),
+        false,
+      );
+    }
+  }
+
+  if (request.method === "GET" && acceptsHtml(request)) {
+    if (!bearerToken(request)) {
+      return storageFormResponse(
+        request,
+        kind,
+        resource.type === "item" ? resource.key : "",
+        hasBrowserSession(request, identityProvider),
       );
     }
     const operation = browserOperation(kind, resource, "GET");
@@ -91,23 +186,47 @@ export async function storageBrowserEndpoint(
       kind,
       operation?.name ?? "read",
       url.pathname,
+      request,
+      hasBrowserSession(request, identityProvider),
     );
   }
 
   if (request.method !== "POST") return null;
 
+  const browserContentType = request.headers.get("content-type") ?? "";
+  if (
+    !browserContentType.includes("application/x-www-form-urlencoded") &&
+    !browserContentType.includes("multipart/form-data")
+  ) {
+    return null;
+  }
+
   if (!requireSameOrigin(request, config.issuerUrl)) {
-    return html(
-      errorPage("Invalid request", "Same-origin form submission is required", {
-        status: 403,
-      }),
-      { status: 403 },
+    return storageSecurityError(
+      request,
+      "Same-origin form submission is required",
     );
   }
 
   return kind === "records"
-    ? handleRecordForm(request, url, resource, env, store, config)
-    : handleFileForm(request, url, resource, env, store, config);
+    ? handleRecordForm(
+        request,
+        url,
+        resource,
+        env,
+        store,
+        config,
+        identityProvider,
+      )
+    : handleFileForm(
+        request,
+        url,
+        resource,
+        env,
+        store,
+        config,
+        identityProvider,
+      );
 }
 
 async function handleRecordForm(
@@ -117,20 +236,22 @@ async function handleRecordForm(
   env: RuntimeEnv,
   store: AuthStore,
   config: AppConfig,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/x-www-form-urlencoded")) {
-    return methodNotAllowed(resourceMethods(resource));
+    return methodNotAllowed(resourceMethods("records", resource));
   }
   let form: URLSearchParams;
   try {
     form = await readForm(request, MAX_RECORD_FORM_BYTES);
   } catch (error) {
-    return storageFormReadError(error, "records", url.pathname);
+    return storageFormReadError(error, "records", url.pathname, request);
   }
   if (form.get("ui") !== "1")
-    return methodNotAllowed(resourceMethods(resource));
-  if (!csrfTokenMatches(request, form.get("csrf_token"))) return csrfError();
+    return methodNotAllowed(resourceMethods("records", resource));
+  if (!csrfTokenMatches(request, form.get("csrf_token")))
+    return storageSecurityError(request, "CSRF validation failed");
 
   const operation = browserOperation("records", resource, form.get("_method"));
   if (!operation) {
@@ -142,25 +263,30 @@ async function handleRecordForm(
       "records",
       "invalid",
       url.pathname,
+      request,
+      hasBrowserSession(request, identityProvider),
     );
   }
-  const headers = await browserStorageHeaders(
+  const authorized = await browserStorageHeaders(
     request,
     form.get("auth_mode"),
     form.get("access_token") || "",
     operation.scope,
-    env,
     store,
     config,
+    identityProvider,
   );
-  if (headers instanceof Response) {
+  if (authorized instanceof Response) {
     return renderStorageResponse(
-      headers,
+      authorized,
       "records",
       operation.name,
       url.pathname,
+      request,
+      hasBrowserSession(request, identityProvider),
     );
   }
+  const { headers } = authorized;
   let body: string | undefined;
   if (operation.method === "PUT") {
     headers.set("content-type", "application/json");
@@ -173,12 +299,15 @@ async function handleRecordForm(
     env,
     store,
     config,
+    authorized.representation,
   );
   return renderStorageResponse(
     response,
     "records",
     operation.name,
     target.pathname,
+    request,
+    hasBrowserSession(request, identityProvider),
   );
 }
 
@@ -189,40 +318,27 @@ async function handleFileForm(
   env: RuntimeEnv,
   store: AuthStore,
   config: AppConfig,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
   const contentType = request.headers.get("content-type") ?? "";
   const multipart = contentType.includes("multipart/form-data");
   const urlEncoded = contentType.includes("application/x-www-form-urlencoded");
   if (!multipart && !urlEncoded)
-    return methodNotAllowed(resourceMethods(resource));
-
-  const contentLength = Number(request.headers.get("content-length") || "0");
-  if (
-    multipart &&
-    Number.isFinite(contentLength) &&
-    contentLength > MAX_FILE_FORM_BYTES
-  ) {
-    return renderStorageResponse(
-      oauthError("invalid_request", "Storage file form is too large", 413),
-      "files",
-      "upload",
-      url.pathname,
-    );
-  }
+    return methodNotAllowed(resourceMethods("files", resource));
 
   let form: FormData | URLSearchParams;
   try {
     form = multipart
-      ? await request.formData()
+      ? await readBoundedMultipartForm(request, MAX_FILE_FORM_BYTES)
       : await readForm(request, MAX_RECORD_FORM_BYTES);
   } catch (error) {
-    return storageFormReadError(error, "files", url.pathname);
+    return storageFormReadError(error, "files", url.pathname, request);
   }
   if (stringEntry(form.get("ui")) !== "1") {
-    return methodNotAllowed(resourceMethods(resource));
+    return methodNotAllowed(resourceMethods("files", resource));
   }
   if (!csrfTokenMatches(request, stringEntry(form.get("csrf_token")))) {
-    return csrfError();
+    return storageSecurityError(request, "CSRF validation failed");
   }
 
   const operation = browserOperation(
@@ -239,9 +355,14 @@ async function handleFileForm(
       "files",
       "invalid",
       url.pathname,
+      request,
+      hasBrowserSession(request, identityProvider),
     );
   }
-  if (operation.method === "PUT" && !multipart) {
+  if (
+    (operation.method === "PUT" || operation.method === "POST") &&
+    !multipart
+  ) {
     return renderStorageResponse(
       oauthError(
         "invalid_request",
@@ -251,28 +372,33 @@ async function handleFileForm(
       "files",
       operation.name,
       url.pathname,
+      request,
+      hasBrowserSession(request, identityProvider),
     );
   }
 
-  const headers = await browserStorageHeaders(
+  const authorized = await browserStorageHeaders(
     request,
     stringEntry(form.get("auth_mode")),
     stringEntry(form.get("access_token")),
     operation.scope,
-    env,
     store,
     config,
+    identityProvider,
   );
-  if (headers instanceof Response) {
+  if (authorized instanceof Response) {
     return renderStorageResponse(
-      headers,
+      authorized,
       "files",
       operation.name,
       url.pathname,
+      request,
+      hasBrowserSession(request, identityProvider),
     );
   }
+  const { headers } = authorized;
   let body: ArrayBuffer | undefined;
-  if (operation.method === "PUT") {
+  if (operation.method === "PUT" || operation.method === "POST") {
     const file = form.get("file");
     if (!(file instanceof File) || !file.name) {
       return renderStorageResponse(
@@ -280,6 +406,8 @@ async function handleFileForm(
         "files",
         operation.name,
         url.pathname,
+        request,
+        hasBrowserSession(request, identityProvider),
       );
     }
     if (file.size > MAX_FILE_BYTES) {
@@ -288,18 +416,24 @@ async function handleFileForm(
         "files",
         operation.name,
         url.pathname,
+        request,
+        hasBrowserSession(request, identityProvider),
       );
     }
     headers.set("content-type", file.type || "application/octet-stream");
     body = await file.arrayBuffer();
   }
   const target = canonicalStorageUrl(url);
+  if (operation.name === "download") {
+    headers.set("accept", "application/octet-stream");
+  }
   const response = await storageEndpoint(
     new Request(target, { method: operation.method, headers, body }),
     target,
     env,
     store,
     config,
+    authorized.representation,
   );
   if (
     operation.name === "download" &&
@@ -322,7 +456,62 @@ async function handleFileForm(
     "files",
     operation.name,
     target.pathname,
+    request,
+    hasBrowserSession(request, identityProvider),
   );
+}
+
+async function readBoundedMultipartForm(
+  request: Request,
+  maxBytes: number,
+): Promise<FormData> {
+  const declaredLength = request.headers.get("content-length")?.trim();
+  if (declaredLength && /^\d+$/.test(declaredLength)) {
+    const parsedLength = Number(declaredLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength > maxBytes) {
+      throw new Error("request_too_large");
+    }
+  }
+
+  const body = await readBoundedBody(request.body, maxBytes);
+  const contentType = request.headers.get("content-type") ?? "";
+  return new Response(body, {
+    headers: { "content-type": contentType },
+  }).formData();
+}
+
+async function readBoundedBody(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  if (!body) return new ArrayBuffer(0);
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > maxBytes - totalBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("request_too_large");
+      }
+      chunks.push(value);
+      totalBytes += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const result = new ArrayBuffer(totalBytes);
+  const bytes = new Uint8Array(result);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
 }
 
 async function renderStorageResponse(
@@ -330,10 +519,11 @@ async function renderStorageResponse(
   kind: StorageKind,
   operation: string,
   retryHref: string,
+  request?: Request,
+  signedIn = false,
 ): Promise<Response> {
-  if (
-    !(response.headers.get("content-type") ?? "").includes("application/json")
-  ) {
+  if (request && !acceptsHtml(request)) return response;
+  if (!isJsonMediaType(response.headers.get("content-type") ?? "")) {
     return response;
   }
   const payload = (await response
@@ -341,19 +531,21 @@ async function renderStorageResponse(
     .json()
     .catch(() => null)) as Record<string, unknown> | null;
   if (!payload) return response;
-  const page =
-    response.status >= 400
-      ? protocolErrorPage(payload, response.status, retryHref)
-      : storageResultPage({
-          kind,
-          operation,
-          payload,
-          resourceHref: retryHref,
-        });
+  const page = storageResultPage({
+    kind,
+    operation,
+    payload,
+    resourceHref: retryHref,
+    csrf: request ? csrfTokenForRequest(request) : "",
+    signedIn,
+  });
+  const headers = new Headers(response.headers);
+  if (request)
+    headers.set("set-cookie", csrfCookie(csrfTokenForRequest(request)));
   return html(page, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers,
   });
 }
 
@@ -363,9 +555,13 @@ function browserOperation(
   submittedMethod: string | null,
 ): BrowserStorageOperation | null {
   if (resource.type === "collection") {
-    return submittedMethod === "GET"
-      ? { method: "GET", name: "list", scope: "storage.read" }
-      : null;
+    if (submittedMethod === "GET") {
+      return { method: "GET", name: "list", scope: "storage.read" };
+    }
+    if (kind === "files" && submittedMethod === "POST") {
+      return { method: "POST", name: "upload", scope: "storage.write" };
+    }
+    return null;
   }
   if (submittedMethod === "GET") {
     return {
@@ -403,7 +599,7 @@ function storageFormResponse(
 
 function storageHeaders(token: string): Headers {
   return new Headers({
-    accept: "application/json",
+    accept: `${HYPERMEDIA_MEDIA_TYPE}; version=${HYPERMEDIA_API_VERSION}`,
     authorization: `Bearer ${token}`,
   });
 }
@@ -413,10 +609,10 @@ async function browserStorageHeaders(
   submittedMode: string | null,
   submittedToken: string,
   scope: BrowserSessionScope,
-  env: RuntimeEnv,
   store: AuthStore,
   config: AppConfig,
-): Promise<Headers | Response> {
+  identityProvider: UpstreamIdentityProvider,
+): Promise<BrowserStorageRequest | Response> {
   const mode =
     submittedMode || (submittedToken.length > 0 ? "token" : "session");
   if (mode !== "session" && mode !== "token") {
@@ -424,20 +620,26 @@ async function browserStorageHeaders(
   }
   if (mode === "token") {
     return submittedToken
-      ? storageHeaders(submittedToken)
+      ? { headers: storageHeaders(submittedToken) }
       : oauthError("invalid_request", "An AittaDB access token is required");
   }
 
   const accessToken = await issueBrowserSessionAccessToken(
     request,
-    env,
+    identityProvider,
     store,
     config,
     [scope],
   );
   return accessToken instanceof Response
     ? accessToken
-    : storageHeaders(accessToken);
+    : {
+        headers: storageHeaders(accessToken),
+        representation: {
+          ...SESSION_REPRESENTATION,
+          csrfToken: csrfTokenForRequest(request),
+        },
+      };
 }
 
 function storageKind(pathname: string): StorageKind | null {
@@ -480,8 +682,9 @@ function canonicalStorageUrl(url: URL): URL {
   return target;
 }
 
-function resourceMethods(resource: StorageResource): string {
-  return resource.type === "collection" ? "GET" : "GET, PUT, DELETE";
+function resourceMethods(kind: StorageKind, resource: StorageResource): string {
+  if (resource.type === "item") return "GET, PUT, DELETE";
+  return kind === "files" ? "GET, POST" : "GET";
 }
 
 function stringEntry(value: FormDataEntryValue | string | null): string {
@@ -492,6 +695,7 @@ function storageFormReadError(
   error: unknown,
   kind: StorageKind,
   retryHref: string,
+  request: Request,
 ): Promise<Response> {
   const tooLarge =
     error instanceof Error && error.message === "request_too_large";
@@ -506,14 +710,17 @@ function storageFormReadError(
     kind,
     "invalid",
     retryHref,
+    request,
+    false,
   );
 }
 
-function csrfError(): Response {
-  return html(
-    errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
-    { status: 403 },
-  );
+function storageSecurityError(request: Request, description: string): Response {
+  return acceptsHtml(request)
+    ? html(errorPage("Invalid request", description, { status: 403 }), {
+        status: 403,
+      })
+    : oauthError("invalid_request", description, 403);
 }
 
 function methodNotAllowed(allowed: string): Response {
