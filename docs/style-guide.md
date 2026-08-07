@@ -97,15 +97,17 @@ Forms must look intentional:
 
 Tables should be used only where density is useful, such as client administration. They need horizontal overflow handling on small screens and clear column headings.
 
-Storage forms use one explicit operation selector rather than simulated cards or client-side state. Keep bearer-token fields visually distinct as credential inputs, show record JSON in a monospace textarea, use the native accessible file input for R2 uploads, and render escaped operation results in the shared shell. A download response may leave the shell to return the actual file attachment from the production endpoint.
+Storage and UserInfo forms use an explicit authentication selector. Prefer the current signed-in session when available and otherwise prefer explicit access-token mode; keep the optional bearer-token field visually distinct. Storage forms use one operation selector rather than simulated cards or client-side state, show record JSON in a monospace textarea, use the native accessible file input for R2 uploads, and render escaped operation results in the shared shell. A download response may leave the shell to return the actual file attachment from the production endpoint.
 
 ## Hypermedia Equivalence
 
 HTML pages show available actions as buttons or links. JSON responses should expose equivalent `_links` and `actions` objects where protocol compatibility allows. OAuth token success responses remain standards-compliant and do not include decorative hypermedia.
 
-The root remains publicly readable so clients can discover the issuer and begin OAuth flows before authentication. Identity-aware browser operations enter through `/session`, which starts the Sites-owned ChatGPT sign-in flow when needed and displays only the signed-in user's local AittaDB subject. A signed-in browser is not automatically authorized for client-scoped storage.
+The root remains publicly readable so clients can discover the issuer and begin OAuth flows before authentication. Identity-aware browser operations enter through `/session`, which starts the Sites-owned ChatGPT sign-in flow when needed and displays only the signed-in user's local AittaDB subject. The current session may use its isolated browser-client storage and UserInfo; it is never a substitute for a third-party client's registration, redirect URI, PKCE, consent, scopes, token, secret, revocation, or introspection requirements.
 
 `/docs` uses the self-hosted Swagger UI distribution inside the branded wide documentation layout. Load its CSS and scripts only from checked-in same-origin assets, point it at the canonical `/openapi.json`, disable persisted authorization, and keep the raw JSON link available. Swagger operations call the real API; do not populate them with working secrets or production credentials as examples.
+
+All AittaDB form, button, heading, table, code-output, and focus selectors must be rooted in the shared shell's direct content or named components. Never use global element selectors that can restyle Swagger controls. Verify operation expansion and the Schemas `Expand all` control after shell CSS changes.
 
 ## Review Checklist
 

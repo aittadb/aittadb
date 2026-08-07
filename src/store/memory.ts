@@ -1,4 +1,9 @@
 import { uuid } from "../crypto";
+import {
+  BROWSER_SESSION_CLIENT,
+  BROWSER_SESSION_CLIENT_ID,
+  isBrowserSessionClientId,
+} from "../system-client";
 import type {
   AuthStore,
   AuthorizationCode,
@@ -32,7 +37,15 @@ export class MemoryAuthStore implements AuthStore {
   audits: Array<{ type: string; data: Record<string, unknown>; now: number }> =
     [];
 
-  async migrate(): Promise<void> {}
+  constructor() {
+    this.clients.set(BROWSER_SESSION_CLIENT_ID, {
+      ...BROWSER_SESSION_CLIENT,
+      redirectUris: [...BROWSER_SESSION_CLIENT.redirectUris],
+      scopes: [...BROWSER_SESSION_CLIENT.scopes],
+      origins: [...BROWSER_SESSION_CLIENT.origins],
+      secretHash: null,
+    });
+  }
 
   async cleanup(now: number): Promise<void> {
     for (const [key, value] of this.revokedJtis) {
@@ -112,7 +125,9 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   async listClients(): Promise<ClientView[]> {
-    return Array.from(this.clients.values(), stripSecret);
+    return Array.from(this.clients.values())
+      .filter((client) => !isBrowserSessionClientId(client.id))
+      .map(stripSecret);
   }
 
   async getClient(id: string): Promise<ClientView | null> {
@@ -128,16 +143,19 @@ export class MemoryAuthStore implements AuthStore {
     id: string,
     disabledAt: number | null,
   ): Promise<void> {
+    if (isBrowserSessionClientId(id)) return;
     const client = this.clients.get(id);
     if (client) client.disabledAt = disabledAt;
   }
 
   async rotateClientSecret(id: string, secretHash: string): Promise<void> {
+    if (isBrowserSessionClientId(id)) return;
     const client = this.clients.get(id);
     if (client) client.secretHash = secretHash;
   }
 
   async revokeClientGrants(clientId: string, now: number): Promise<void> {
+    if (isBrowserSessionClientId(clientId)) return;
     for (const family of this.families.values()) {
       if (family.clientId === clientId) {
         family.status = "revoked";

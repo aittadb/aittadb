@@ -1,5 +1,10 @@
 import { randomToken } from "./crypto";
 import {
+  hasBrowserSession,
+  issueBrowserSessionAccessToken,
+  type BrowserSessionScope,
+} from "./browser-session";
+import {
   acceptsHtml,
   bearerToken,
   csrfCookie,
@@ -11,7 +16,12 @@ import {
 } from "./http";
 import { errorPage } from "./pages";
 import { protocolErrorPage } from "./protocol-pages";
-import { MAX_FILE_BYTES, MAX_RECORD_BYTES, storageEndpoint } from "./storage";
+import {
+  MAX_FILE_BYTES,
+  MAX_RECORD_BYTES,
+  storageAttachmentDisposition,
+  storageEndpoint,
+} from "./storage";
 import {
   fileStorageFormPage,
   recordStorageFormPage,
@@ -34,7 +44,11 @@ export async function storageBrowserEndpoint(
 
   if (request.method === "GET" && acceptsHtml(request)) {
     if (!bearerToken(request)) {
-      return storageFormResponse(kind, keyFromPath(url.pathname, kind));
+      return storageFormResponse(
+        kind,
+        keyFromPath(url.pathname, kind),
+        hasBrowserSession(request, env),
+      );
     }
     const response = await storageEndpoint(request, url, env, store, config);
     return renderStorageResponse(response, kind, "read", collectionPath(kind));
@@ -80,7 +94,23 @@ async function handleRecordForm(
   const token = form.get("access_token") || "";
   const target = operationTarget(url, "records", operation, key);
   if (target instanceof Response) return target;
-  const headers = storageHeaders(token);
+  const headers = await browserStorageHeaders(
+    request,
+    form.get("auth_mode"),
+    token,
+    operationScope(operation),
+    env,
+    store,
+    config,
+  );
+  if (headers instanceof Response) {
+    return renderStorageResponse(
+      headers,
+      "records",
+      operation,
+      "/storage/records",
+    );
+  }
   let body: string | undefined;
   if (operation === "write") {
     headers.set("content-type", "application/json");
@@ -131,7 +161,18 @@ async function handleFileForm(
   const token = stringEntry(form.get("access_token"));
   const target = operationTarget(url, "files", operation, key);
   if (target instanceof Response) return target;
-  const headers = storageHeaders(token);
+  const headers = await browserStorageHeaders(
+    request,
+    stringEntry(form.get("auth_mode")),
+    token,
+    operationScope(operation),
+    env,
+    store,
+    config,
+  );
+  if (headers instanceof Response) {
+    return renderStorageResponse(headers, "files", operation, "/storage/files");
+  }
   let body: ArrayBuffer | undefined;
   if (operation === "upload") {
     const file = form.get("file");
@@ -157,10 +198,7 @@ async function handleFileForm(
   );
   if (operation === "download" && response.ok) {
     const headersOut = new Headers(response.headers);
-    headersOut.set(
-      "content-disposition",
-      `attachment; filename="aittadb-download"; filename*=UTF-8''${encodeURIComponent(fileName(key))}`,
-    );
+    headersOut.set("content-disposition", storageAttachmentDisposition(key));
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -222,12 +260,16 @@ function operationTarget(
   return { method, url: target };
 }
 
-function storageFormResponse(kind: "records" | "files", key: string): Response {
+function storageFormResponse(
+  kind: "records" | "files",
+  key: string,
+  signedIn: boolean,
+): Response {
   const csrf = randomToken(24);
   const page =
     kind === "records"
-      ? recordStorageFormPage(csrf, key)
-      : fileStorageFormPage(csrf, key);
+      ? recordStorageFormPage(csrf, key, signedIn)
+      : fileStorageFormPage(csrf, key, signedIn);
   return html(page, { headers: { "set-cookie": csrfCookie(csrf) } });
 }
 
@@ -236,6 +278,40 @@ function storageHeaders(token: string): Headers {
     accept: "application/json",
     authorization: `Bearer ${token}`,
   });
+}
+
+async function browserStorageHeaders(
+  request: Request,
+  submittedMode: string | null,
+  submittedToken: string,
+  scope: BrowserSessionScope,
+  env: RuntimeEnv,
+  store: AuthStore,
+  config: AppConfig,
+): Promise<Headers | Response> {
+  const mode =
+    submittedMode || (submittedToken.length > 0 ? "token" : "session");
+  if (mode !== "session" && mode !== "token") {
+    return oauthError("invalid_request", "Unsupported authentication mode");
+  }
+  if (mode === "token") return storageHeaders(submittedToken);
+
+  const accessToken = await issueBrowserSessionAccessToken(
+    request,
+    env,
+    store,
+    config,
+    [scope],
+  );
+  return accessToken instanceof Response
+    ? accessToken
+    : storageHeaders(accessToken);
+}
+
+function operationScope(operation: string): BrowserSessionScope {
+  if (operation === "write" || operation === "upload") return "storage.write";
+  if (operation === "delete") return "storage.delete";
+  return "storage.read";
 }
 
 function storageKind(pathname: string): "records" | "files" | null {
@@ -265,10 +341,6 @@ function keyFromPath(pathname: string, kind: "records" | "files"): string {
 
 function encodeStorageKey(key: string): string {
   return key.split("/").map(encodeURIComponent).join("/");
-}
-
-function fileName(key: string): string {
-  return key.split("/").filter(Boolean).at(-1) || "aittadb-download";
 }
 
 function stringEntry(value: FormDataEntryValue | null): string {
