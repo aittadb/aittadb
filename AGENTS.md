@@ -266,7 +266,8 @@ Keep these commands current as package scripts evolve:
 - Migration consistency: `npm run db:check`
 - Production build: `npm run build`
 - Complete local validation: `npm run validate`
-- Generate local ES256 key pair: `npm run keys:generate`
+- Generate local ES256 key pair without printing the secret: `make generate-local-jwt-key`
+- Generate local ES256 key pair to stdout for ephemeral automation only: `npm run keys:generate`
 
 ## PLAN.md Workflow
 
