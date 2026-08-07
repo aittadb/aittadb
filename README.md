@@ -65,7 +65,7 @@ npm run validate
 
 Browser-facing routes and errors use content negotiation. Browsers that prefer `text/html` receive consistent authentication-service HTML views for metadata, health, device entry, consent, administration, and error/outcome pages. API clients that request JSON, or send generic CLI-style `Accept: */*`, receive JSON. JSON metadata and JSON errors are hypermedia-oriented and advertise `_links` and `actions` so clients can discover available operations instead of hard-coding every route. OAuth token success responses remain protocol-standard and do not add decorative browser content.
 
-The browser UI uses a shared responsive auth-service shell with an identity-to-token visual treatment served from the same-origin `/auth-ui.css` stylesheet. It does not load external fonts, imagery, or third-party client scripts from application code.
+The browser UI uses a shared responsive auth-service shell with page-aware trust-boundary copy and the original same-origin `broker-aperture.jpg` artwork. The image depicts an upstream signal passing through an independent broker and resolving into local credentials. Styles come from `/auth-ui.css`; the UI loads no external fonts, images, or third-party client scripts.
 
 ## Broker Storage
 

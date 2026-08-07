@@ -11,6 +11,9 @@ interface PageOptions {
   eyebrow?: string;
   heading: string;
   summary?: string;
+  visualEyebrow?: string;
+  visualHeading?: string;
+  visualSummary?: string;
   body: string;
   actions?: readonly PageAction[];
   tone?: "default" | "success" | "warning" | "danger";
@@ -32,6 +35,10 @@ export function serviceHomePage(metadata: {
     heading: metadata.service,
     summary:
       "Independent OAuth 2.0, OpenID Connect, and JWT sessions from ChatGPT Sites identity.",
+    visualEyebrow: "Identity boundary",
+    visualHeading: "One trusted signal. Your own local authority.",
+    visualSummary:
+      "Sites identity enters once. Broker-issued tokens leave without carrying upstream credentials.",
     body: `<section class="info-grid" aria-label="Service metadata"><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Token authority</span><strong>Sites Auth Broker only</strong></div></section><p class="note">This service does not issue OpenAI or ChatGPT tokens and does not expose ChatGPT credentials.</p>`,
     actions: [
       { href: "/docs", label: "API docs" },
@@ -56,6 +63,12 @@ export function healthPage(status: {
       ? "The broker is reachable and ready to answer requests."
       : "The broker is reachable but one or more dependencies are unavailable.",
     tone: status.ok ? "success" : "danger",
+    visualEyebrow: "Runtime map",
+    visualHeading: status.ok
+      ? "Every service, accounted for."
+      : "One or more layers need attention.",
+    visualSummary:
+      "The broker reports its durable storage bindings without exposing operational secrets.",
     body: `<section class="info-grid" aria-label="Health checks"><div><span>Status</span><strong>${status.ok ? "ok" : "unavailable"}</strong></div><div><span>Service</span><code>${escapeHtml(status.service)}</code></div><div><span>D1 binding</span><strong>${status.d1 ? "available" : "unavailable"}</strong></div><div><span>R2 binding</span><strong>${status.r2 ? "available" : "unavailable"}</strong></div></section>`,
     actions: [
       { href: "/", label: "Service" },
@@ -71,6 +84,10 @@ export function docsPage(): string {
     heading: "Sites Auth Broker API",
     summary:
       "Minimal endpoint map for the OAuth 2.0, OpenID Connect, and administrative API surface.",
+    visualEyebrow: "Protocol surface",
+    visualHeading: "Familiar standards. One independent issuer.",
+    visualSummary:
+      "Discovery, authorization, tokens, identity, and storage remain explicit parts of the same local trust boundary.",
     body: `<p class="note">The canonical machine-readable OpenAPI 3.1 document is available as JSON. Browser sign-in is supplied by the Sites runtime; downstream OAuth and OIDC tokens are issued by this service.</p><pre id="spec" aria-label="OpenAPI summary">GET /
 GET /health
 GET /.well-known/openid-configuration
@@ -109,6 +126,10 @@ export function deviceEntryPage(
     heading: "Enter device code",
     summary:
       "Type the code shown by your CLI to review the local scopes requested by that client.",
+    visualEyebrow: "Device handoff",
+    visualHeading: "A short code connects two moments.",
+    visualSummary:
+      "The browser confirms the request while the original device keeps polling through the standard device flow.",
     tone: error ? "warning" : "default",
     body: `${error ? alertMessage(error) : ""}<form method="post" action="/device"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="user_code">User code</label><input id="user_code" name="user_code" autocomplete="one-time-code" value="${escapeHtml(userCode)}" required><div class="actions"><button type="submit">Continue</button></div></form>`,
   });
@@ -125,6 +146,10 @@ export function deviceConsentPage(
     heading: "Approve device request",
     summary:
       "Approve only if the user code and client name match the application you started.",
+    visualEyebrow: "Device handoff",
+    visualHeading: "Match the request before the exchange.",
+    visualSummary:
+      "Approval creates broker-owned credentials for this client only. The upstream Sites credential never leaves the boundary.",
     body: `<section class="info-grid" aria-label="Device request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>User code</span><strong>${escapeHtml(grant.userCodeDisplay)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(grant.scope)}</code></div></section><form method="post" action="/device/decision"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="user_code" value="${escapeHtml(grant.userCodeDisplay)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
   });
 }
@@ -140,6 +165,10 @@ export function consentPage(
     heading: "Approve application",
     summary:
       "This grants the client local Sites Auth Broker scopes. It does not grant access to ChatGPT or OpenAI data.",
+    visualEyebrow: "Permission boundary",
+    visualHeading: "Scope stays visible and explicit.",
+    visualSummary:
+      "Only the listed local permissions cross this boundary, and only after you approve the registered client.",
     body: `<section class="info-grid" aria-label="Authorization request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(request.scope)}</code></div><div><span>Redirect URI</span><code>${escapeHtml(request.redirectUri)}</code></div></section><form method="post" action="/consent"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="request_id" value="${escapeHtml(request.id)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
   });
 }
@@ -161,6 +190,10 @@ export function adminClientsPage(
     heading: "Client administration",
     summary:
       "Register OAuth clients and manage grants. New confidential client secrets are shown once.",
+    visualEyebrow: "Client control",
+    visualHeading: "Trust begins with narrow permissions.",
+    visualSummary:
+      "Redirects, scopes, origins, secrets, and active grants remain bounded per registered client.",
     tone: secret ? "warning" : "default",
     body: `${secret ? alertMessage(`New client secret, shown once: ${secret}`) : ""}<form method="post" action="/admin/clients" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="name">Client name</label><input id="name" name="name" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option></select><label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" required></textarea><label for="scopes">Allowed scopes</label><input id="scopes" name="scopes" value="openid email profile offline_access storage.read storage.write storage.delete"><label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea><div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
   });
@@ -183,6 +216,15 @@ export function errorPage(
     summary: message,
     status,
     tone: status === 403 ? "warning" : status >= 500 ? "danger" : "default",
+    visualEyebrow: "Request boundary",
+    visualHeading:
+      status === 403
+        ? "Access stops at the boundary."
+        : status >= 500
+          ? "The broker needs a moment."
+          : "This request stopped here.",
+    visualSummary:
+      "The broker rejected this step without passing credentials or request secrets beyond its trust boundary.",
     body: `<section class="info-grid" aria-label="Error details"><div><span>Status</span><strong>${status}</strong></div>${options.error ? `<div><span>Error</span><code>${escapeHtml(options.error)}</code></div>` : ""}</section>`,
     actions: options.actions ?? [
       { href: "/", label: "Service" },
@@ -193,6 +235,14 @@ export function errorPage(
 
 function pageDocument(options: PageOptions): string {
   const tone = options.tone ?? "default";
+  const toneLabel =
+    tone === "success"
+      ? "Service ready"
+      : tone === "warning"
+        ? "Attention required"
+        : tone === "danger"
+          ? "Service interruption"
+          : "Independent token issuer";
   const actions = options.actions?.length
     ? `<nav class="actions" aria-label="Available actions">${options.actions
         .map(
@@ -201,7 +251,7 @@ function pageDocument(options: PageOptions): string {
         )
         .join("")}</nav>`
     : "";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(options.title)}</title><link rel="stylesheet" href="/auth-ui.css"></head><body class="sab-page"><main class="sab-shell tone-${tone}"><section class="brand-rail"><div class="brand-card" aria-hidden="true"><span class="brand-mark"><span></span></span><span>Sites Auth Broker</span></div><div class="identity-graphic" aria-hidden="true"><div class="credential-card source-card"><span>Sites identity</span><strong>email signal</strong></div><div class="flow-line"><span></span><span></span><span></span></div><div class="credential-card broker-card"><span>Broker session</span><strong>OAuth / OIDC</strong></div><div class="token-stack"><span></span><span></span><span></span></div></div><div class="brand-footer"><p class="brand-note">Local tokens. Standard protocols. No ChatGPT credentials forwarded.</p><a class="repo-badge" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer"><span>GitHub</span><strong>sendanor/sites-auth-broker</strong><em>source-available</em></a></div></section><section class="content-panel"><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer">Project source: <a href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">sendanor/sites-auth-broker on GitHub</a></footer></section></main></body></html>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#15372f"><title>${escapeHtml(options.title)}</title><link rel="icon" href="/favicon.svg"><link rel="preload" href="/broker-aperture.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css"></head><body class="sab-page"><main class="sab-shell tone-${tone}"><aside class="visual-panel" aria-label="Sites Auth Broker trust boundary"><img class="visual-image" src="/broker-aperture.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="Sites Auth Broker service home"><span class="brand-symbol" aria-hidden="true"><span></span></span><span>Sites Auth Broker</span></a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Trust boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "Identity in. Local authority out.")}</h2><p>${escapeHtml(options.visualSummary ?? "Standard local credentials without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="Identity exchange"><div><span>Upstream</span><strong>Sites identity</strong></div><div><span>Broker</span><strong>Local subject</strong></div><div><span>Downstream</span><strong>OAuth / OIDC</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth 2.0 / OIDC</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><strong>Sites Auth Broker</strong><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">View source on GitHub</a></footer></section></main></body></html>`;
 }
 
 function adminAction(
@@ -219,73 +269,71 @@ function alertMessage(message: string): string {
 
 export function authUiCss(): string {
   return `html{color-scheme:light}
-body.sab-page{margin:0;min-height:100vh;background:#edf3f4;color:#172033;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5;text-rendering:optimizeLegibility}
-.sab-page:before{content:"";position:fixed;inset:0;background:linear-gradient(126deg,#eff7f6 0%,#f7f9fc 40%,#fbf3e8 100%);z-index:-3}
-.sab-page:after{content:"";position:fixed;inset:0;background:linear-gradient(120deg,rgba(18,48,65,.11) 1px,transparent 1px),linear-gradient(30deg,rgba(18,48,65,.07) 1px,transparent 1px);background-size:76px 76px,52px 52px;mask-image:linear-gradient(140deg,rgba(0,0,0,.72),transparent 76%);z-index:-2}
-.sab-shell{box-sizing:border-box;width:min(100% - 28px,1120px);margin:clamp(18px,5vw,54px) auto;display:grid;grid-template-columns:minmax(310px,400px) minmax(0,1fr);min-height:clamp(610px,80vh,780px);background:rgba(255,255,255,.82);border:1px solid rgba(198,209,222,.82);border-radius:30px;box-shadow:0 34px 90px rgba(33,48,74,.18),0 2px 0 rgba(255,255,255,.78) inset;overflow:hidden;backdrop-filter:blur(22px)}
-.brand-rail{position:relative;padding:34px;color:#f8fafc;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(155deg,#102236 0%,#173d48 48%,#245f5f 100%);overflow:hidden}
-.brand-rail:before{content:"";position:absolute;inset:0;background:linear-gradient(145deg,rgba(91,205,190,.28),transparent 42%),linear-gradient(25deg,transparent 48%,rgba(241,178,98,.24)),repeating-linear-gradient(135deg,rgba(255,255,255,.08) 0 1px,transparent 1px 18px)}
-.brand-rail:after{content:"";position:absolute;left:34px;right:34px;bottom:116px;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent)}
-.brand-card,.identity-graphic,.brand-footer{position:relative}
-.brand-card{display:flex;gap:13px;align-items:center;font-weight:800;letter-spacing:0}
-.brand-mark{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.96);display:grid;place-items:center;box-shadow:0 16px 34px rgba(0,0,0,.18)}
-.brand-mark span{width:20px;height:20px;border:3px solid #236f80;border-top-color:#f1b262;border-radius:50%;display:block}
-.identity-graphic{display:grid;gap:18px;margin:56px 0 34px}
-.credential-card{border:1px solid rgba(255,255,255,.22);background:linear-gradient(145deg,rgba(255,255,255,.18),rgba(255,255,255,.08));border-radius:20px;padding:18px 18px 20px;box-shadow:0 22px 50px rgba(0,0,0,.18);backdrop-filter:blur(18px)}
-.credential-card span{display:block;color:rgba(248,250,252,.7);font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.12em}
-.credential-card strong{display:block;margin-top:8px;font-size:1.2rem;letter-spacing:0}
-.broker-card{margin-left:42px}
-.flow-line{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;width:72%;margin-left:28px}
-.flow-line:before,.flow-line:after{content:"";height:1px;background:rgba(255,255,255,.35)}
-.flow-line span{width:8px;height:8px;border-radius:50%;background:#f1b262;box-shadow:0 0 0 6px rgba(241,178,98,.16)}
-.flow-line span:nth-child(2){background:#71d2c3}.flow-line span:nth-child(3){background:#f8fafc}
-.token-stack{display:grid;gap:10px;margin:10px 34px 0 68px}
-.token-stack span{height:9px;border-radius:999px;background:rgba(248,250,252,.22)}
-.token-stack span:nth-child(1){width:82%}.token-stack span:nth-child(2){width:58%;background:rgba(113,210,195,.4)}.token-stack span:nth-child(3){width:72%;background:rgba(241,178,98,.38)}
-.brand-footer{display:grid;gap:16px}
-.brand-note{margin:0;color:rgba(248,250,252,.78);font-size:.95rem}
-.repo-badge{display:grid;grid-template-columns:1fr;gap:2px;width:min(100%,270px);box-sizing:border-box;border:1px solid rgba(255,255,255,.22);border-radius:16px;padding:13px 14px;background:rgba(255,255,255,.1);color:#f8fafc;text-decoration:none;box-shadow:0 16px 38px rgba(0,0,0,.16);backdrop-filter:blur(16px)}
-.repo-badge:hover{background:rgba(255,255,255,.15)}
-.repo-badge span{font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.13em;color:rgba(248,250,252,.68)}
-.repo-badge strong{font-size:.96rem;letter-spacing:0;overflow-wrap:anywhere}
-.repo-badge em{font-style:normal;font-size:.82rem;color:rgba(248,250,252,.72)}
-.content-panel{display:grid;grid-template-rows:1fr auto;align-items:center;padding:clamp(28px,5vw,58px);background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(248,250,252,.92))}
-.content-frame{width:min(100%,660px);justify-self:center}
-.page-footer{align-self:end;justify-self:center;width:min(100%,660px);margin-top:32px;padding-top:18px;border-top:1px solid #dbe4ef;color:#657488;font-size:.92rem}
-.page-footer a{font-weight:800}
-.eyebrow{margin:0 0 10px;color:#1b7283;font-size:.76rem;font-weight:850;text-transform:uppercase;letter-spacing:.14em}
-h1{margin:0;color:#101828;font-size:clamp(2.45rem,4.6vw,4.45rem);line-height:.96;letter-spacing:0}
-h2{margin:34px 0 14px;font-size:1.18rem;color:#142033}
-.summary{max-width:60ch;margin:18px 0 28px;color:#506071;font-size:1.11rem}
-.note,.notice{border:1px solid rgba(76,144,154,.18);border-left:5px solid #247489;background:linear-gradient(135deg,#eefafa,#f8fbfd);padding:14px 16px;border-radius:14px;color:#284455;box-shadow:0 10px 26px rgba(37,88,101,.08)}
-.tone-warning .notice,.tone-warning .note{border-left-color:#b7791f;background:linear-gradient(135deg,#fff8eb,#fffdf8)}.tone-danger .notice,.tone-danger .note{border-left-color:#b42318;background:linear-gradient(135deg,#fff3f1,#fffafa)}.tone-success .notice,.tone-success .note{border-left-color:#228b63;background:linear-gradient(135deg,#eefaf4,#fbfefd)}
-.info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:13px;margin:24px 0}
-.info-grid div{border:1px solid rgba(204,214,226,.9);background:linear-gradient(180deg,#fff,#f8fbfc);border-radius:16px;padding:16px;min-width:0;box-shadow:0 12px 28px rgba(39,55,83,.06)}
-.info-grid span{display:block;color:#667789;font-size:.78rem;font-weight:850;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
-label{display:block;margin:18px 0 7px;font-weight:800;color:#24324a}
-input,textarea,select{box-sizing:border-box;width:100%;border:1px solid #aeb9c8;border-radius:13px;font:inherit;padding:12px 14px;background:#fff;color:#172033;box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 10px 24px rgba(31,45,68,.05);transition:border-color .16s ease,box-shadow .16s ease}
-input:hover,textarea:hover,select:hover{border-color:#7f91a7}
-input:focus,textarea:focus,select:focus{border-color:#247489;box-shadow:0 0 0 4px rgba(36,116,137,.14)}
-textarea{min-height:104px;resize:vertical}
-a{color:#0e6176}
-a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #2f80ed;outline-offset:3px}
-.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:26px}
-button,.button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid #145f70;border-radius:13px;background:linear-gradient(180deg,#19788b,#145f70);color:#fff;font:inherit;font-weight:800;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 16px 34px rgba(20,95,112,.2);transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
-button:hover,.button:hover{transform:translateY(-1px);box-shadow:0 20px 40px rgba(20,95,112,.24)}
-button.secondary,.button.secondary{background:rgba(255,255,255,.88);color:#145f70;border-color:#b7c7d3;box-shadow:0 10px 24px rgba(39,55,83,.08)}
-button.compact{min-height:34px;padding:5px 10px;font-size:.88rem;border-radius:10px;box-shadow:none}
-pre{white-space:pre-wrap;border:1px solid #26364c;background:linear-gradient(180deg,#101827,#172338);color:#e7f7f6;border-radius:16px;padding:18px;overflow:auto;box-shadow:0 22px 46px rgba(16,24,39,.18)}
-.table-wrap{margin-top:30px;overflow-x:auto;border:1px solid #d9e1ec;border-radius:18px;background:#fff;box-shadow:0 18px 44px rgba(39,55,83,.07)}
-table{width:100%;border-collapse:collapse;font-size:.94rem}
-th,td{padding:12px;border-bottom:1px solid #e4ebf3;text-align:left;vertical-align:top}
-tbody tr:last-child td{border-bottom:0}
-th{color:#5f7083;font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;background:#f7fafc}
-.table-actions{display:flex;flex-wrap:wrap;gap:8px}
-.table-actions form{margin:0}
-@media (max-width:820px){.sab-shell{grid-template-columns:1fr;min-height:auto;border-radius:24px}.brand-rail{min-height:260px}.identity-graphic{margin:34px 0 18px}.broker-card{margin-left:28px}.content-panel{padding:26px}h1{font-size:2.35rem}}
-@media (max-width:520px){.sab-shell{width:min(100% - 18px,1120px);margin:9px auto;border-radius:20px}.brand-rail{padding:24px}.content-panel{padding:22px}.info-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.broker-card{margin-left:12px}.token-stack{margin-left:24px}}
-`;
+  *{box-sizing:border-box}
+  body.sab-page{--accent:#176c62;--accent-strong:#10534c;--accent-soft:#e8f3ef;margin:0;min-height:100vh;padding:24px;background:#e8ece8;color:#16201d;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5;text-rendering:optimizeLegibility}
+  .sab-page:before{content:"";position:fixed;inset:0;z-index:-1;background:repeating-linear-gradient(90deg,rgba(27,60,51,.035) 0 1px,transparent 1px 80px),#e8ece8}
+  .sab-shell{width:min(100%,1240px);min-height:min(820px,calc(100vh - 48px));margin:0 auto;display:grid;grid-template-columns:minmax(390px,.92fr) minmax(0,1.08fr);background:#fffdf9;border:1px solid #c4ccc6;border-radius:8px;box-shadow:0 28px 72px rgba(22,48,40,.17);overflow:hidden}
+  .tone-success{--accent:#18714f;--accent-strong:#0d5439;--accent-soft:#e8f4ed}.tone-warning{--accent:#9a6517;--accent-strong:#71480e;--accent-soft:#fbf1df}.tone-danger{--accent:#b44b3d;--accent-strong:#873429;--accent-soft:#fbeae7}
+  .visual-panel{position:relative;min-height:720px;isolation:isolate;overflow:hidden;background:#15372f;color:#fff}
+  .visual-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:56% center;z-index:-3}
+  .visual-panel:before{content:"";position:absolute;inset:0;z-index:-2;background:linear-gradient(180deg,rgba(9,28,24,.38) 0%,rgba(9,28,24,.04) 42%,rgba(8,25,22,.9) 100%)}
+  .visual-panel:after{content:"";position:absolute;inset:0;z-index:-1;box-shadow:inset 0 0 0 1px rgba(255,255,255,.09)}
+  .visual-inner{height:100%;min-height:720px;padding:30px;display:grid;grid-template-rows:auto 1fr auto;gap:34px}
+  .brand-lockup{width:max-content;max-width:100%;display:flex;align-items:center;gap:12px;color:#fff;text-decoration:none;font-weight:780;text-shadow:0 2px 16px rgba(0,0,0,.35)}
+  .brand-symbol{width:38px;height:38px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.54);border-radius:8px;background:rgba(11,35,29,.34);backdrop-filter:blur(14px)}
+  .brand-symbol span{position:relative;width:18px;height:18px;display:block;border:2px solid #f7f1e6;border-radius:50%}
+  .brand-symbol span:after{content:"";position:absolute;width:6px;height:6px;right:-4px;bottom:-3px;border-radius:50%;background:#f29a73;border:2px solid #16372f}
+  .visual-copy{align-self:end;max-width:490px;text-shadow:0 2px 24px rgba(0,0,0,.42)}
+  .visual-eyebrow,.eyebrow{margin:0 0 11px;font-size:.76rem;font-weight:820;text-transform:uppercase;letter-spacing:0}
+  .visual-eyebrow{color:#f4b28f}
+  .visual-copy h2{max-width:12ch;margin:0;color:#fff;font-size:3.25rem;line-height:.98;font-weight:780;letter-spacing:0}
+  .visual-copy>p:last-child{max-width:46ch;margin:18px 0 0;color:rgba(255,255,255,.82);font-size:1rem}
+  .visual-legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid rgba(255,255,255,.3);padding-top:16px}
+  .visual-legend div{min-width:0;padding:0 12px;border-left:1px solid rgba(255,255,255,.24)}
+  .visual-legend div:first-child{padding-left:0;border-left:0}.visual-legend div:last-child{padding-right:0}
+  .visual-legend span,.visual-legend strong{display:block;letter-spacing:0}
+  .visual-legend span{margin-bottom:4px;color:rgba(255,255,255,.62);font-size:.7rem;text-transform:uppercase;font-weight:750}
+  .visual-legend strong{color:#fff;font-size:.82rem;overflow-wrap:anywhere}
+  .content-panel{min-width:0;display:grid;grid-template-rows:auto 1fr auto;padding:30px 42px 26px;background:#fffdf9}
+  .content-topline{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-bottom:24px;border-bottom:1px solid #e2e6e1;color:#53635e;font-size:.78rem;font-weight:720}
+  .authority-status{display:inline-flex;align-items:center;gap:8px}.authority-status>span{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+  .protocol-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#6c7773}
+  .content-frame{width:min(100%,680px);align-self:center;justify-self:center;padding:44px 0}
+  .eyebrow{color:var(--accent)}
+  h1{margin:0;color:#131a18;font-size:3.35rem;line-height:1.01;font-weight:790;letter-spacing:0;text-wrap:balance}
+  h2{margin:32px 0 14px;color:#17211e;font-size:1.18rem;letter-spacing:0}
+  .summary{max-width:60ch;margin:17px 0 28px;color:#596762;font-size:1.08rem}
+  .note,.notice{border:1px solid #cbded7;border-left:4px solid var(--accent);background:var(--accent-soft);padding:14px 16px;border-radius:6px;color:#28433b}
+  .tone-warning .notice,.tone-warning .note{border-color:#ead5ac;color:#5f451c}.tone-danger .notice,.tone-danger .note{border-color:#efc6bf;color:#702f26}.tone-success .notice,.tone-success .note{border-color:#bfdccb;color:#244c37}
+  .info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:24px 0}
+  .info-grid div{min-width:0;padding:15px;border:1px solid #dce1dc;border-radius:6px;background:#fff;box-shadow:0 9px 22px rgba(25,46,40,.055)}
+  .info-grid span{display:block;margin-bottom:6px;color:#68756f;font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
+  label{display:block;margin:18px 0 7px;font-weight:760;color:#26332f}
+  input,textarea,select{width:100%;border:1px solid #aab6b0;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#17201e;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
+  input:hover,textarea:hover,select:hover{border-color:#74847d}
+  input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
+  textarea{min-height:104px;resize:vertical}
+  a{color:var(--accent-strong)}
+  a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #f29a73;outline-offset:3px}
+  .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  button,.button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid var(--accent-strong);border-radius:6px;background:var(--accent-strong);color:#fff;font:inherit;font-weight:780;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 10px 24px color-mix(in srgb,var(--accent-strong) 20%,transparent);transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease}
+  button:hover,.button:hover{transform:translateY(-1px);background:var(--accent);box-shadow:0 14px 30px color-mix(in srgb,var(--accent-strong) 24%,transparent)}
+  button.secondary,.button.secondary{background:#fff;color:var(--accent-strong);border-color:#b9c5bf;box-shadow:0 7px 18px rgba(25,46,40,.07)}
+  button.compact{min-height:34px;padding:5px 10px;font-size:.88rem;box-shadow:none}
+  pre{white-space:pre-wrap;border:1px solid #263a34;background:#14251f;color:#eaf4ef;border-radius:6px;padding:18px;overflow:auto;box-shadow:0 18px 38px rgba(17,35,29,.16)}
+  .table-wrap{margin-top:30px;overflow-x:auto;border:1px solid #d9dfda;border-radius:6px;background:#fff;box-shadow:0 14px 34px rgba(25,46,40,.07)}
+  table{width:100%;border-collapse:collapse;font-size:.91rem}
+  th,td{padding:12px;border-bottom:1px solid #e5e9e5;text-align:left;vertical-align:top}
+  tbody tr:last-child td{border-bottom:0}
+  th{color:#5e6d67;font-size:.72rem;text-transform:uppercase;letter-spacing:0;background:#f4f6f3}
+  .table-actions{display:flex;flex-wrap:wrap;gap:8px}.table-actions form{margin:0}
+  .page-footer{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding-top:20px;border-top:1px solid #e2e6e1;color:#66736e;font-size:.82rem}
+  .page-footer div{display:grid;gap:2px}.page-footer strong{color:#27332f}.page-footer span{font-size:.75rem}
+  .repo-link{flex:none;font-weight:760;text-decoration-thickness:1px;text-underline-offset:3px}
+  @media (max-width:860px){body.sab-page{padding:14px}.sab-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}h1{font-size:2.75rem}}
+  @media (max-width:540px){body.sab-page{padding:0}.sab-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}h1{font-size:2.35rem}.info-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
+  `;
 }
 
 function escapeHtml(value: string): string {

@@ -73,6 +73,7 @@ Maintain this structure unless `AGENTS.md` is updated in the same task that chan
 - `db/`: D1 schema definitions and checked-in SQL migrations.
 - `docs/`: Markdown documentation, architecture notes, threat model, deployment guide, self-hosting notes, examples, and key rotation instructions.
 - `openapi/`: canonical OpenAPI 3.1 source.
+- `public/`: same-origin static assets. `broker-aperture.jpg` is the shared decorative trust-boundary artwork used by browser responses.
 - `scripts/`: local administrative scripts such as signing-key generation and OpenAPI checks.
 - `src/`: protocol-independent domain logic, repositories, crypto, configuration, HTTP helpers, identity adapters, and service interfaces.
 - `tests/`: unit and integration tests, including complete token flows using a test-only identity adapter.
@@ -240,6 +241,8 @@ The root route must return concise machine-readable service metadata or redirect
 Use semantic HTML, visible focus, meaningful labels, clear validation errors, keyboard accessibility, screen-reader compatibility, and no unnecessary JavaScript.
 
 HTML pages must follow `docs/style-guide.md`. The interface should match the polish level expected from contemporary ChatGPT Sites generated pages while remaining a compact authentication service: strong typography, generous spacing, refined panels, purposeful local visual assets or CSS artwork, responsive layouts, and a consistent GitHub project affordance. Do not load external fonts, tracking scripts, or third-party images from application code.
+
+The shared browser shell uses `public/broker-aperture.jpg` as decorative, same-origin artwork. Keep it free of text, logos, secrets, PII, and deployment identifiers; render it with empty alternative text and page-specific adjacent copy. New HTML response types must define content-aware visual copy and use the shared shell unless a documented protocol constraint prevents HTML.
 
 ## Documentation Rules
 

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { stat } from "node:fs/promises";
 import { loadConfig } from "../../src/config";
 import { createAuthBrokerWithStore } from "../../src/handler";
 import { MemoryAuthStore } from "../../src/store/memory";
@@ -48,12 +49,14 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /<h1>Sites Auth Broker<\/h1>/);
   assert.match(browserRootHtml, /href="\/auth-ui\.css"/);
   assert.doesNotMatch(browserRootHtml, /<style>/);
-  assert.match(browserRootHtml, /identity-graphic/);
+  assert.match(browserRootHtml, /class="visual-panel"/);
+  assert.match(browserRootHtml, /src="\/broker-aperture\.jpg"/);
+  assert.match(browserRootHtml, /One trusted signal/);
   assert.match(
     browserRootHtml,
     /https:\/\/github\.com\/sendanor\/sites-auth-broker/,
   );
-  assert.match(browserRootHtml, /sendanor\/sites-auth-broker on GitHub/);
+  assert.match(browserRootHtml, /View source on GitHub/);
   assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
 
   const browserCss = await app.fetch(
@@ -64,7 +67,17 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserCss!.headers.get("content-type") ?? "", /^text\/css/);
   const browserCssText = await browserCss!.text();
   assert.match(browserCssText, /\.sab-shell/);
-  assert.match(browserCssText, /\.repo-badge/);
+  assert.match(browserCssText, /\.visual-image/);
+  assert.match(browserCssText, /\.repo-link/);
+
+  const visualAsset = await stat(
+    new URL("../../public/broker-aperture.jpg", import.meta.url),
+  );
+  assert.ok(visualAsset.size > 100_000);
+  const delegatedAsset = await app.fetch(
+    new Request("https://broker.example.test/broker-aperture.jpg"),
+  );
+  assert.equal(delegatedAsset, null);
 
   const cliHealth = await app.fetch(
     new Request("https://broker.example.test/health", {
@@ -89,7 +102,9 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       },
     }),
   );
-  assert.match(await browserHealth!.text(), /<h1>Service health<\/h1>/);
+  const browserHealthHtml = await browserHealth!.text();
+  assert.match(browserHealthHtml, /<h1>Service health<\/h1>/);
+  assert.match(browserHealthHtml, /Every service, accounted for/);
   assert.match(browserHealth!.headers.get("content-type") ?? "", /^text\/html/);
 
   const apiMissing = await app.fetch(
@@ -119,7 +134,8 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(browserMissing?.status, 404);
   assert.match(browserMissingHtml, /<h1>Not found<\/h1>/);
   assert.match(browserMissingHtml, /class="sab-shell/);
-  assert.match(browserMissingHtml, /identity-graphic/);
+  assert.match(browserMissingHtml, /This request stopped here/);
+  assert.match(browserMissingHtml, /src="\/broker-aperture\.jpg"/);
 
   const forbiddenAdmin = await app.fetch(
     new Request("https://broker.example.test/admin/clients", {
@@ -130,7 +146,9 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     }),
   );
   assert.equal(forbiddenAdmin?.status, 403);
-  assert.match(await forbiddenAdmin!.text(), /<h1>Forbidden<\/h1>/);
+  const forbiddenAdminHtml = await forbiddenAdmin!.text();
+  assert.match(forbiddenAdminHtml, /<h1>Forbidden<\/h1>/);
+  assert.match(forbiddenAdminHtml, /Access stops at the boundary/);
 });
 
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {
@@ -197,6 +215,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
       `https://broker.example.test/device?user_code=${deviceJson.user_code}`,
     ),
   );
+  assert.match(await entry!.text(), /A short code connects two moments/);
   const csrf = cookieValue(entry!, "sab_csrf");
   const continueResponse = await app.fetch(
     new Request("https://broker.example.test/device", {
@@ -208,6 +227,10 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
       },
       body: form({ csrf_token: csrf, user_code: deviceJson.user_code }),
     }),
+  );
+  assert.match(
+    await continueResponse!.text(),
+    /Match the request before the exchange/,
   );
   const decisionCsrf = cookieValue(continueResponse!, "sab_csrf");
   const approved = await app.fetch(
@@ -353,6 +376,7 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
   assert.equal(authorize?.status, 302);
   const consentLocation = authorize?.headers.get("location") ?? "";
   const consent = await app.fetch(new Request(consentLocation));
+  assert.match(await consent!.text(), /Scope stays visible and explicit/);
   const csrf = cookieValue(consent!, "sab_csrf");
   const requestId =
     new URL(consentLocation).searchParams.get("request_id") ?? "";
