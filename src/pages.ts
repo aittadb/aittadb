@@ -402,9 +402,13 @@ export function authUiJs(): string {
     };
     form.addEventListener("input", updateAction);
     form.addEventListener("change", updateAction);
-    form.addEventListener("submit", () => {
+    form.addEventListener("submit", (event) => {
       updateAction();
-      if (key && key.value) key.disabled = true;
+      const action = form.getAttribute("action");
+      if (key && key.value && action) {
+        event.preventDefault();
+        window.location.assign(action);
+      }
     });
     updateAction();
   });

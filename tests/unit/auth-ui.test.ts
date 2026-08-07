@@ -11,6 +11,10 @@ interface FakeControl {
   dataset: Record<string, string>;
 }
 
+interface FakeEvent {
+  preventDefault(): void;
+}
+
 class FakeConditionalField {
   readonly dataset: Record<string, string>;
   hidden = false;
@@ -39,7 +43,10 @@ class FakeConditionalField {
 class FakeForm {
   readonly dataset: Record<string, string>;
   readonly elements: { namedItem: (name: string) => FakeControl | null };
-  private readonly listeners = new Map<string, Array<() => void>>();
+  private readonly listeners = new Map<
+    string,
+    Array<(event: FakeEvent) => void>
+  >();
   private action: string;
 
   constructor(
@@ -75,14 +82,14 @@ class FakeForm {
     return selector === "[data-resource-key]" ? (this.key ?? null) : null;
   }
 
-  addEventListener(name: string, listener: () => void): void {
+  addEventListener(name: string, listener: (event: FakeEvent) => void): void {
     const listeners = this.listeners.get(name) ?? [];
     listeners.push(listener);
     this.listeners.set(name, listeners);
   }
 
-  dispatch(name: string): void {
-    for (const listener of this.listeners.get(name) ?? []) listener();
+  dispatch(name: string, event: FakeEvent = { preventDefault() {} }): void {
+    for (const listener of this.listeners.get(name) ?? []) listener(event);
   }
 
   setAttribute(name: string, value: string): void {
@@ -126,8 +133,16 @@ test("auth UI reveals only active fields and safely targets item URLs", () => {
       return [];
     },
   };
+  let assignedLocation = "";
+  const window = {
+    location: {
+      assign(value: string): void {
+        assignedLocation = value;
+      },
+    },
+  };
 
-  vm.runInNewContext(authUiJs(), { document, encodeURIComponent });
+  vm.runInNewContext(authUiJs(), { document, encodeURIComponent, window });
 
   assert.equal(tokenField.hidden, true);
   assert.equal(tokenField.attributes.get("aria-hidden"), "true");
@@ -146,8 +161,14 @@ test("auth UI reveals only active fields and safely targets item URLs", () => {
     navigationForm.actionValue(),
     "/storage/files/folder/hello%20world.txt",
   );
-  navigationForm.dispatch("submit");
-  assert.equal(key.disabled, true);
+  let navigationPrevented = false;
+  navigationForm.dispatch("submit", {
+    preventDefault(): void {
+      navigationPrevented = true;
+    },
+  });
+  assert.equal(navigationPrevented, true);
+  assert.equal(assignedLocation, "/storage/files/folder/hello%20world.txt");
 
   key.disabled = false;
   key.value = "";
