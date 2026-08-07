@@ -1,5 +1,7 @@
 # Sites Auth Broker
 
+[GitHub repository](https://github.com/sendanor/sites-auth-broker)
+
 Sites Auth Broker is an experimental independent authentication broker that converts ChatGPT Sites server-side identity into OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.
 
 It is not an official OpenAI project. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
