@@ -22,7 +22,7 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is an independent hosted application backend based on ChatGPT sign-in inside ChatGPT Sites. It creates a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT sessions, and provides client-isolated D1/R2 storage. Its tokens and stored data are not OpenAI or ChatGPT tokens or data.",
+      "AittaDB is an independent hosted application backend based on ChatGPT sign-in inside ChatGPT Sites. It creates a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT sessions, and provides client-isolated D1/R2 storage. Its tokens and stored data are not OpenAI or ChatGPT tokens or data. Browser-only forms require same-origin validation and a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages.",
   },
   paths: {
     "/": {

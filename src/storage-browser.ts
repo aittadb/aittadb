@@ -1,4 +1,3 @@
-import { randomToken } from "./crypto";
 import {
   hasBrowserSession,
   issueBrowserSessionAccessToken,
@@ -8,6 +7,7 @@ import {
   acceptsHtml,
   bearerToken,
   csrfCookie,
+  csrfTokenForRequest,
   csrfTokenMatches,
   html,
   oauthError,
@@ -45,6 +45,7 @@ export async function storageBrowserEndpoint(
   if (request.method === "GET" && acceptsHtml(request)) {
     if (!bearerToken(request)) {
       return storageFormResponse(
+        request,
         kind,
         keyFromPath(url.pathname, kind),
         hasBrowserSession(request, env),
@@ -261,11 +262,12 @@ function operationTarget(
 }
 
 function storageFormResponse(
+  request: Request,
   kind: "records" | "files",
   key: string,
   signedIn: boolean,
 ): Response {
-  const csrf = randomToken(24);
+  const csrf = csrfTokenForRequest(request);
   const page =
     kind === "records"
       ? recordStorageFormPage(csrf, key, signedIn)

@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readSitesIdentity, safeRelativeReturnPath } from "../../src/identity";
-import { cors, requireSameOrigin } from "../../src/http";
+import {
+  cors,
+  csrfTokenForRequest,
+  csrfTokenMatches,
+  requireSameOrigin,
+} from "../../src/http";
 
 test("parses Sites identity headers with percent-encoded UTF-8 name", () => {
   const request = new Request("https://aittadb.example.test/device", {
@@ -96,4 +101,22 @@ test("accepts the configured public origin behind the Sites dispatch URL", () =>
   const rejected = cors(foreignRequest, [], "https://aittadb.example.test");
   assert.ok(rejected instanceof Response);
   assert.equal(rejected.status, 403);
+});
+
+test("reuses only valid host session CSRF tokens", () => {
+  const csrf = "A".repeat(32);
+  const request = new Request("https://aittadb.example.test/storage/files", {
+    headers: { cookie: `aittadb_csrf=${csrf}` },
+  });
+  assert.equal(csrfTokenForRequest(request), csrf);
+  assert.equal(csrfTokenMatches(request, csrf), true);
+  assert.equal(csrfTokenMatches(request, `${csrf}x`), false);
+
+  const replacement = csrfTokenForRequest(
+    new Request("https://aittadb.example.test/storage/files", {
+      headers: { cookie: "aittadb_csrf=malformed" },
+    }),
+  );
+  assert.match(replacement, /^[A-Za-z0-9_-]{32}$/);
+  assert.notEqual(replacement, "malformed");
 });

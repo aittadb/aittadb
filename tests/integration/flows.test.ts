@@ -1634,10 +1634,14 @@ test("browser storage representations execute real scoped D1 and R2 operations",
 
   const fileForm = await app.fetch(
     new Request("https://aittadb.example.test/storage/files", {
-      headers: { accept: "text/html" },
+      headers: {
+        accept: "text/html",
+        cookie: `aittadb_csrf=${recordCsrf}`,
+      },
     }),
   );
   const fileCsrf = cookieValue(fileForm!, "aittadb_csrf");
+  assert.equal(fileCsrf, recordCsrf);
   const fileFormHtml = await fileForm!.text();
   assert.match(fileFormHtml, /<h1>File object storage<\/h1>/);
   assert.match(fileFormHtml, /enctype="multipart\/form-data"/);

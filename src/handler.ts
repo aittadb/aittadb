@@ -9,6 +9,7 @@ import {
   bearerToken,
   cors,
   csrfCookie,
+  csrfTokenForRequest,
   csrfTokenMatches,
   html,
   json,
@@ -388,7 +389,7 @@ async function route(
     request.method === "GET"
   ) {
     return acceptsHtml(request)
-      ? browserFormPage(deviceAuthorizationFormPage)
+      ? browserFormPage(request, deviceAuthorizationFormPage)
       : methodNotAllowed("POST");
   }
   if (
@@ -431,7 +432,7 @@ async function route(
   }
   if (url.pathname === "/oauth/token" && request.method === "GET") {
     return acceptsHtml(request)
-      ? browserFormPage(tokenFormPage)
+      ? browserFormPage(request, tokenFormPage)
       : methodNotAllowed("POST");
   }
   if (url.pathname === "/oauth/token" && request.method === "POST") {
@@ -452,7 +453,7 @@ async function route(
   }
   if (url.pathname === "/oauth/revoke" && request.method === "GET") {
     return acceptsHtml(request)
-      ? browserFormPage(revocationFormPage)
+      ? browserFormPage(request, revocationFormPage)
       : methodNotAllowed("POST");
   }
   if (url.pathname === "/oauth/revoke" && request.method === "POST") {
@@ -493,7 +494,7 @@ async function route(
   }
   if (url.pathname === "/oauth/introspect" && request.method === "GET") {
     return acceptsHtml(request)
-      ? browserFormPage(introspectionFormPage)
+      ? browserFormPage(request, introspectionFormPage)
       : methodNotAllowed("POST");
   }
   if (url.pathname === "/oauth/introspect" && request.method === "POST") {
@@ -533,7 +534,7 @@ async function route(
   }
   if (url.pathname === "/userinfo" && request.method === "GET") {
     if (!bearerToken(request) && acceptsHtml(request)) {
-      return browserFormPage((csrf) =>
+      return browserFormPage(request, (csrf) =>
         userInfoFormPage(csrf, hasBrowserSession(request, env)),
       );
     }
@@ -610,7 +611,7 @@ async function route(
     return storageEndpoint(request, url, env, store, config);
   }
   if (url.pathname === "/device" && request.method === "GET") {
-    const csrf = randomToken(24);
+    const csrf = csrfTokenForRequest(request);
     const headers = new Headers({ "set-cookie": csrfCookie(csrf) });
     return html(
       deviceEntryPage(url.searchParams.get("user_code") || "", csrf),
@@ -844,8 +845,11 @@ function prefersRawJson(request: Request, url: URL): boolean {
   return url.searchParams.get("format") === "json" || !acceptsHtml(request);
 }
 
-function browserFormPage(renderer: (csrf: string) => string): Response {
-  const csrf = randomToken(24);
+function browserFormPage(
+  request: Request,
+  renderer: (csrf: string) => string,
+): Response {
+  const csrf = csrfTokenForRequest(request);
   return html(renderer(csrf), {
     headers: { "set-cookie": csrfCookie(csrf) },
   });
@@ -1032,7 +1036,7 @@ async function deviceEntryPost(
     return html(
       deviceEntryPage(
         form.get("user_code") || "",
-        randomToken(24),
+        csrfTokenForRequest(request),
         "Invalid or expired user code",
       ),
       { status: 400 },
@@ -1045,7 +1049,7 @@ async function deviceEntryPost(
       errorPage("Invalid request", "Client is unavailable", { status: 400 }),
       { status: 400 },
     );
-  const csrf = randomToken(24);
+  const csrf = csrfTokenForRequest(request);
   return html(deviceConsentPage(grant, client, csrf), {
     headers: { "set-cookie": csrfCookie(csrf) },
   });
@@ -1127,7 +1131,7 @@ async function consentGet(
     );
     return redirectWithCode(authRequest.redirectUri, code, authRequest.state);
   }
-  const csrf = randomToken(24);
+  const csrf = csrfTokenForRequest(request);
   return html(consentPage(authRequest, client, csrf), {
     headers: { "set-cookie": csrfCookie(csrf) },
   });
@@ -1194,7 +1198,7 @@ async function adminClientsGet(
 ): Promise<Response> {
   const admin = await requireAdmin(request, env, config, store);
   if (admin instanceof Response) return admin;
-  const csrf = randomToken(24);
+  const csrf = csrfTokenForRequest(request);
   return html(adminClientsPage(await store.listClients(), csrf, null), {
     headers: { "set-cookie": csrfCookie(csrf) },
   });
@@ -1245,12 +1249,12 @@ async function adminClientsPost(
         await sha256(secret),
         nowSeconds(),
       );
-      const csrf = randomToken(24);
+      const csrf = csrfTokenForRequest(request);
       return html(adminClientsPage(await store.listClients(), csrf, secret), {
         headers: { "set-cookie": csrfCookie(csrf) },
       });
     }
-    const csrf = randomToken(24);
+    const csrf = csrfTokenForRequest(request);
     return html(adminClientsPage(await store.listClients(), csrf, null), {
       headers: { "set-cookie": csrfCookie(csrf) },
     });
@@ -1266,7 +1270,7 @@ async function adminClientsPost(
     origins: splitLines(form.get("origins") || ""),
   };
   const result = await createClientRegistration(input, store, nowSeconds());
-  const csrf = randomToken(24);
+  const csrf = csrfTokenForRequest(request);
   return html(
     adminClientsPage(await store.listClients(), csrf, result.secret),
     { headers: { "set-cookie": csrfCookie(csrf) } },
