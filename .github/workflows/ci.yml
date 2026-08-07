@@ -24,4 +24,5 @@ jobs:
       - run: npm run openapi:check
       - run: npm run swagger:check
       - run: npm run db:check
+      - run: npm run agents:check
       - run: npm run build

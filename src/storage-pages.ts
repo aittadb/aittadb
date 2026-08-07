@@ -1,31 +1,19 @@
-import { escapeHtml, pageDocument } from "./pages";
+import {
+  conditionalField,
+  conditionalFormScript,
+  escapeHtml,
+  pageDocument,
+} from "./pages";
+
+type StorageKind = "records" | "files";
+type StorageMethod = "GET" | "PUT" | "DELETE";
 
 export function recordStorageFormPage(
   csrf: string,
   key = "",
   signedIn = false,
 ): string {
-  return pageDocument({
-    title: "JSON record storage",
-    eyebrow: "D1 application data",
-    heading: "JSON record storage",
-    summary: signedIn
-      ? "Use your current sign-in for private persistent records, or provide an AittaDB access token for an application's records."
-      : "Sign in for your private persistent records, or provide an AittaDB access token for an application's records.",
-    visualEyebrow: "Structured application state",
-    visualHeading: "One local subject. One client boundary.",
-    visualSummary:
-      "Every record operation is authorized by the bearer token and isolated by its immutable AittaDB subject and OAuth client ID.",
-    body: `<form method="post" action="/storage/records" class="stacked-form"><input type="hidden" name="ui" value="1"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="record_auth_mode">Authentication</label>${authenticationSelect("record_auth_mode", signedIn)}<label for="record_operation">Operation</label><select id="record_operation" name="operation" required><option value="list">List records</option><option value="read"${key ? " selected" : ""}>Read record</option><option value="write">Create or replace record</option><option value="delete">Delete record</option></select><label for="record_access_token">AittaDB access token <span class="optional">only for access-token mode</span></label><textarea id="record_access_token" name="access_token" class="credential-input" autocomplete="off" spellcheck="false"></textarea><label for="record_key">Logical record key</label><input id="record_key" name="key" value="${escapeHtml(key)}" maxlength="240" autocomplete="off"><label for="record_value">JSON value <span class="optional">write operation only, maximum 64 KiB</span></label><textarea id="record_value" name="value" class="json-input" spellcheck="false">{}</textarea><div class="actions"><button type="submit">Run record operation</button></div></form><p class="note">Current-session mode stores durable D1 data in your private signed-in AittaDB namespace, isolated by your immutable AittaDB UUID and the internal browser client. Access-token mode uses that token's separate OAuth client namespace and requires the matching storage scope. Tokens are never retained or copied into result pages.</p>`,
-    actions: [
-      {
-        href: signedIn ? "/session" : "/session",
-        label: signedIn ? "My signed-in session" : "Sign in with ChatGPT",
-      },
-      { href: "/storage/files", label: "File storage", secondary: true },
-      { href: "/docs", label: "API docs", secondary: true },
-    ],
-  });
+  return storageFormPage("records", csrf, key, signedIn);
 }
 
 export function fileStorageFormPage(
@@ -33,40 +21,198 @@ export function fileStorageFormPage(
   key = "",
   signedIn = false,
 ): string {
+  return storageFormPage("files", csrf, key, signedIn);
+}
+
+function storageFormPage(
+  kind: StorageKind,
+  csrf: string,
+  key: string,
+  signedIn: boolean,
+): string {
+  const records = kind === "records";
+  const collection = `/storage/${kind}`;
+  const item = key ? `${collection}/${encodeStorageKey(key)}` : "";
+  const title = records ? "JSON record storage" : "File object storage";
+  const body = key
+    ? itemOperations(kind, item, key, csrf, signedIn)
+    : collectionOperations(kind, collection, csrf, signedIn);
+
   return pageDocument({
-    title: "File object storage",
-    eyebrow: "D1 metadata and R2 objects",
-    heading: "File object storage",
-    summary: signedIn
-      ? "Use your current sign-in for private persistent files, or provide an AittaDB access token for an application's files."
-      : "Sign in for your private persistent files, or provide an AittaDB access token for an application's files.",
-    visualEyebrow: "Object boundary",
-    visualHeading: "Logical keys outside. Generated object keys inside.",
-    visualSummary:
-      "AittaDB keeps searchable metadata in D1, stores bytes in R2, and never uses a caller-controlled physical object key.",
-    body: `<form method="post" action="/storage/files" enctype="multipart/form-data" class="stacked-form"><input type="hidden" name="ui" value="1"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="file_auth_mode">Authentication</label>${authenticationSelect("file_auth_mode", signedIn)}<label for="file_operation">Operation</label><select id="file_operation" name="operation" required><option value="list">List files</option><option value="download"${key ? " selected" : ""}>Download file</option><option value="upload">Upload or replace file</option><option value="delete">Delete file</option></select><label for="file_access_token">AittaDB access token <span class="optional">only for access-token mode</span></label><textarea id="file_access_token" name="access_token" class="credential-input" autocomplete="off" spellcheck="false"></textarea><label for="file_key">Logical file key</label><input id="file_key" name="key" value="${escapeHtml(key)}" maxlength="240" autocomplete="off"><label for="file_upload">File <span class="optional">upload operation only, maximum 10 MiB</span></label><input id="file_upload" name="file" type="file"><div class="actions"><button type="submit">Run file operation</button></div></form><p class="note">Current-session mode stores durable R2 files in your private signed-in AittaDB namespace. Access-token mode uses the token's separate OAuth client namespace and matching storage scope. Uploads still pass through the canonical D1 metadata and R2 byte operation; no credential or physical object key reaches the result page.</p>`,
+    title,
+    eyebrow: records ? "D1 application data" : "D1 metadata and R2 objects",
+    heading: title,
+    summary: key
+      ? `Work with the ${records ? "record" : "file"} at this exact AittaDB resource URL using your current sign-in or an application's access token.`
+      : signedIn
+        ? `List your private persistent ${records ? "records" : "files"}, or open an exact item endpoint.`
+        : `Sign in to list private persistent ${records ? "records" : "files"}, or use an application's AittaDB access token.`,
+    visualEyebrow: records ? "Structured application state" : "Object boundary",
+    visualHeading: records
+      ? "One local subject. One client boundary."
+      : "Logical keys outside. Generated object keys inside.",
+    visualSummary: records
+      ? "Every record operation is isolated by its immutable AittaDB subject and OAuth client ID."
+      : "AittaDB keeps searchable metadata in D1, stores bytes in R2, and never exposes caller-controlled physical object keys.",
+    body,
     actions: [
       {
         href: "/session",
         label: signedIn ? "My signed-in session" : "Sign in with ChatGPT",
       },
-      { href: "/storage/records", label: "JSON records", secondary: true },
+      {
+        href: records ? "/storage/files" : "/storage/records",
+        label: records ? "File storage" : "JSON records",
+        secondary: true,
+      },
       { href: "/docs", label: "API docs", secondary: true },
     ],
+    scripts: conditionalFormScript(),
   });
 }
 
-function authenticationSelect(id: string, signedIn: boolean): string {
-  return `<select id="${escapeHtml(id)}" name="auth_mode" required><option value="session"${signedIn ? " selected" : ""}>Current signed-in session${signedIn ? "" : " (sign-in required)"}</option><option value="token"${signedIn ? "" : " selected"}>AittaDB access token</option></select>`;
+function collectionOperations(
+  kind: StorageKind,
+  collection: string,
+  csrf: string,
+  signedIn: boolean,
+): string {
+  const records = kind === "records";
+  const noun = records ? "record" : "file";
+  return `<section class="resource-workbench" aria-labelledby="collection-actions-heading"><h2 id="collection-actions-heading">Collection actions</h2>${operationSection(
+    {
+      method: "GET",
+      title: `List ${noun}s`,
+      summary: `Read ${records ? "keys and JSON values" : "file metadata"} in the selected identity and client namespace.`,
+      form: storageActionForm({
+        action: collection,
+        method: "GET",
+        csrf,
+        signedIn,
+        prefix: `${kind}_list`,
+        submitLabel: `List ${noun}s`,
+      }),
+    },
+  )}${operationSection({
+    method: "GET",
+    title: `Open one ${noun}`,
+    summary: `Move to the exact item URL before reading, replacing, or deleting that ${noun}.`,
+    form: `<form method="get" action="${collection}" class="stacked-form" data-fallback-action="${collection}" data-key-action-template="${collection}/{key}"><label for="${kind}_navigate_key">Logical ${noun} key</label><input id="${kind}_navigate_key" name="key" data-resource-key maxlength="240" autocomplete="off" required><div class="actions"><button type="submit">Open ${noun} endpoint</button></div></form>`,
+  })}</section><p class="note">The collection URL owns listing and item navigation. Item operations live only at <code>${collection}/{key}</code>. Current-session mode uses your durable private AittaDB namespace; access-token mode uses the token's separate OAuth client namespace.</p>`;
+}
+
+function itemOperations(
+  kind: StorageKind,
+  item: string,
+  key: string,
+  csrf: string,
+  signedIn: boolean,
+): string {
+  const records = kind === "records";
+  const noun = records ? "record" : "file";
+  const readLabel = records ? "Read record" : "Download file";
+  const writeLabel = records
+    ? "Create or replace record"
+    : "Upload or replace file";
+  const writeField = records ? recordValueField() : fileUploadField();
+  return `<section class="resource-address" aria-label="Selected storage resource"><span>Logical ${noun} key</span><code>${escapeHtml(key)}</code><span>Resource path</span><code>${escapeHtml(item)}</code></section><section class="resource-workbench" aria-labelledby="item-actions-heading"><h2 id="item-actions-heading">Item actions</h2>${operationSection(
+    {
+      method: "GET",
+      title: readLabel,
+      summary: records
+        ? "Read the JSON value at this exact resource URL."
+        : "Return the file bytes from this exact resource URL as an attachment.",
+      form: storageActionForm({
+        action: item,
+        method: "GET",
+        csrf,
+        signedIn,
+        prefix: `${kind}_read`,
+        submitLabel: readLabel,
+      }),
+    },
+  )}${operationSection({
+    method: "PUT",
+    title: writeLabel,
+    summary: records
+      ? "Store a JSON value at this exact resource URL."
+      : "Store file bytes and D1 metadata at this exact resource URL.",
+    form: storageActionForm({
+      action: item,
+      method: "PUT",
+      csrf,
+      signedIn,
+      prefix: `${kind}_write`,
+      submitLabel: records ? "Save record" : "Upload file",
+      extraFields: writeField,
+      multipart: !records,
+    }),
+  })}${operationSection({
+    method: "DELETE",
+    title: `Delete ${noun}`,
+    summary: `Permanently remove the ${noun} at this exact resource URL.`,
+    form: storageActionForm({
+      action: item,
+      method: "DELETE",
+      csrf,
+      signedIn,
+      prefix: `${kind}_delete`,
+      submitLabel: `Delete ${noun}`,
+      danger: true,
+    }),
+  })}</section><p class="note">All browser actions post back to <code>${escapeHtml(item)}</code>, then the protected adapter invokes that resource's canonical <code>GET</code>, <code>PUT</code>, or <code>DELETE</code> operation. The URL key cannot be replaced by a form field.</p>`;
+}
+
+function operationSection(options: {
+  method: StorageMethod;
+  title: string;
+  summary: string;
+  form: string;
+}): string {
+  return `<section class="resource-operation"><header><span class="method-badge method-${options.method.toLowerCase()}">${options.method}</span><div><h3>${escapeHtml(options.title)}</h3><p>${escapeHtml(options.summary)}</p></div></header>${options.form}</section>`;
+}
+
+function storageActionForm(options: {
+  action: string;
+  method: StorageMethod;
+  csrf: string;
+  signedIn: boolean;
+  prefix: string;
+  submitLabel: string;
+  extraFields?: string;
+  multipart?: boolean;
+  danger?: boolean;
+}): string {
+  const encoding = options.multipart ? ` enctype="multipart/form-data"` : "";
+  return `<form method="post" action="${escapeHtml(options.action)}"${encoding} class="stacked-form" data-conditional-form><input type="hidden" name="ui" value="1"><input type="hidden" name="csrf_token" value="${escapeHtml(options.csrf)}"><input type="hidden" name="_method" value="${options.method}">${authenticationFields(options.prefix, options.signedIn)}${options.extraFields ?? ""}<div class="actions"><button${options.danger ? ` class="danger"` : ""} type="submit">${escapeHtml(options.submitLabel)}</button></div></form>`;
+}
+
+function authenticationFields(prefix: string, signedIn: boolean): string {
+  return `<label for="${prefix}_auth_mode">Authentication</label><select id="${prefix}_auth_mode" name="auth_mode" required><option value="session"${signedIn ? " selected" : ""}>Current signed-in session${signedIn ? "" : " (sign-in required)"}</option><option value="token"${signedIn ? "" : " selected"}>AittaDB access token</option></select>${conditionalField("auth_mode:token", `<label for="${prefix}_access_token">AittaDB access token</label><textarea id="${prefix}_access_token" name="access_token" class="credential-input" autocomplete="off" spellcheck="false" data-required-when-visible="true"></textarea>`)}`;
+}
+
+function recordValueField(): string {
+  return `<label for="records_write_value">JSON value <span class="optional">maximum 64 KiB</span></label><textarea id="records_write_value" name="value" class="json-input" spellcheck="false" required>{}</textarea>`;
+}
+
+function fileUploadField(): string {
+  return `<label for="files_write_file">File <span class="optional">maximum 10 MiB</span></label><input id="files_write_file" name="file" type="file" required>`;
+}
+
+function encodeStorageKey(key: string): string {
+  return key.split("/").map(encodeURIComponent).join("/");
 }
 
 export function storageResultPage(options: {
-  kind: "records" | "files";
+  kind: StorageKind;
   operation: string;
   payload: unknown;
+  resourceHref?: string;
 }): string {
   const records = options.kind === "records";
   const title = records ? "Record operation result" : "File operation result";
+  const collection = records ? "/storage/records" : "/storage/files";
+  const retryHref = options.resourceHref ?? collection;
   return pageDocument({
     title,
     eyebrow: records ? "D1 application data" : "D1 metadata and R2 objects",
@@ -80,8 +226,11 @@ export function storageResultPage(options: {
     body: `<pre class="json-output" aria-label="Storage operation result">${escapeHtml(JSON.stringify(options.payload, null, 2))}</pre>`,
     actions: [
       {
-        href: records ? "/storage/records" : "/storage/files",
-        label: `Run another ${records ? "record" : "file"} operation`,
+        href: retryHref,
+        label:
+          retryHref === collection
+            ? `Return to ${records ? "records" : "files"}`
+            : `Return to this ${records ? "record" : "file"}`,
       },
       {
         href: records ? "/storage/files" : "/storage/records",

@@ -1,6 +1,6 @@
 # Performance
 
-AittaDB keeps public discovery and static delivery off the database path. Requests for `/`, `/health`, discovery, JWKS, OpenAPI, docs, and `/auth-ui.css` do not issue D1 statements. Static assets bypass application creation and pass directly to Vinext.
+AittaDB keeps public discovery and static delivery off the database path. Requests for `/`, `/health`, discovery, JWKS, OpenAPI, docs, `/auth-ui.css`, and `/auth-ui.js` do not issue D1 statements. Static assets bypass application creation and pass directly to Vinext.
 
 Durable routes construct the D1 repository but never apply schema DDL. Independent client redirect, scope, and origin lookups are hydrated concurrently. Expired-row cleanup is non-authoritative and scheduled through `waitUntil` at most once per five-minute Worker instance interval, so a response does not wait for cleanup and correctness never depends on process memory.
 

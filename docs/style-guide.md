@@ -105,7 +105,11 @@ Forms must look intentional:
 
 Tables should be used only where density is useful, such as client administration. They need horizontal overflow handling on small screens and clear column headings.
 
-Storage and UserInfo forms use an explicit authentication selector. Prefer the current signed-in session when available and otherwise prefer explicit access-token mode; keep the optional bearer-token field visually distinct. Storage forms use one operation selector rather than simulated cards or client-side state, show record JSON in a monospace textarea, use the native accessible file input for R2 uploads, and render escaped operation results in the shared shell. A download response may leave the shell to return the actual file attachment from the production endpoint.
+Storage and UserInfo forms use an explicit authentication selector. Prefer the current signed-in session when available and otherwise prefer explicit access-token mode. Hide and disable the bearer field in session mode, reveal and require it in token mode, and leave it visible without JavaScript so the form still works through server validation.
+
+Each storage URL owns its browser interface. A collection page may list that collection and provide navigation to a logical key. An item page may expose `GET`, `PUT`, and `DELETE` actions only for the key already encoded in that exact URL. Do not use an operation selector to mix collection and item URLs, and never accept a second form key that can override an item URL. Browser actions post back to the same resource URL with an explicit canonical-method override; the server must validate that the override is valid for that resource. Show record JSON in a monospace textarea, use the native accessible file input for R2 uploads, and render escaped operation results in the shared shell. A download response may leave the shell to return the actual attachment.
+
+`/auth-ui.js` is the only general progressive-enhancement script. It is same-origin, CSP-compatible, and limited to conditional form disclosure plus encoded storage-item navigation. Initial markup must remain complete without it: conditional controls start enabled, collection navigation submits `?key=...`, and the server validates and redirects to the canonical same-origin item path. Client-side visibility never replaces server authorization, CSRF, origin, scope, key, method, or request-size checks.
 
 ## Hypermedia Equivalence
 
@@ -128,6 +132,8 @@ Before completing browser UI work:
 - Check CSP remains compatible with the stylesheet and assets.
 - Check the AittaDB mark and wordmark use the canonical assets, colors, Inter weight, and fallback stack.
 - Check no runtime-loaded third-party fonts, external images, or scripts were introduced.
+- Check inactive conditional fields are hidden, disabled, and required only when visible, while the no-JavaScript form remains complete.
+- Check collection and item storage pages expose only operations owned by their exact resource URL.
 - Check `aittadb-boundary.jpg` remains local, decorative, and free of text, marks, secrets, PII, and deployment identifiers.
 - Check `og.png` is 1200x630, uses exact brand text, and is advertised through issuer-derived root metadata.
 - Check errors are content-aware and not default/plain server output.

@@ -41,6 +41,12 @@ test("public requests perform no D1 work and runtime requests never apply schema
   );
   assert.equal(root?.status, 200);
   assert.deepEqual(queries, []);
+  const authScript = await app.fetch(
+    new Request("https://aittadb.example.test/auth-ui.js"),
+  );
+  assert.equal(authScript?.status, 200);
+  assert.match(authScript?.headers.get("content-type") ?? "", /javascript/);
+  assert.deepEqual(queries, []);
   assert.equal(
     await app.fetch(
       new Request("https://aittadb.example.test/aittadb-mark.svg"),

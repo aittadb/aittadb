@@ -324,7 +324,7 @@ function decodeStorageKey(pathname: string, prefix: string): string | null {
   }
 }
 
-function isValidStorageKey(key: string): boolean {
+export function isValidStorageKey(key: string): boolean {
   if (!key || key.length > 240) return false;
   for (const char of key) {
     const code = char.charCodeAt(0);
@@ -413,7 +413,7 @@ function storageActions(
   };
 }
 
-function encodeStorageKey(key: string): string {
+export function encodeStorageKey(key: string): string {
   return key.split("/").map(encodeURIComponent).join("/");
 }
 

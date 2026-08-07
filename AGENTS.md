@@ -1,379 +1,247 @@
 # AittaDB Agent Instructions
 
-## Project Purpose and Boundary
+This file is authoritative for humans and AI agents working in this repository. Read it before changing code. Keep it concise and below 32,000 bytes; `npm run agents:check` enforces the limit. Put extended rationale in `docs/` and link it here when useful. Never shorten a mandatory boundary merely to meet the limit.
 
-AittaDB is a hosted application backend for third-party applications, services, and agents. It runs inside ChatGPT Sites, maps the server-side ChatGPT sign-in signal to a separate AittaDB user, issues its own standard OAuth 2.0, OpenID Connect, and JWT sessions, and provides per-user, per-client JSON record and object storage for web applications, APIs, native applications, and CLI tools.
+## Purpose and Product Boundary
 
-Describe ChatGPT Sites as the OpenAI-hosted platform on which AittaDB is deployed. Distinguish that hosting relationship from product ownership: AittaDB itself remains an independent project and is not affiliated with, endorsed by, or an official product of OpenAI.
+AittaDB is a hosted application backend for third-party applications, services, and agents. It runs on the OpenAI-hosted ChatGPT Sites platform, maps a trusted server-side ChatGPT sign-in signal to a separate local AittaDB user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records and files.
 
-The current MVP includes identity mapping, OAuth/OIDC/JWT sessions, D1-backed JSON records, and R2-backed files with D1 metadata. Persistent events and long-polling delivery are planned and must never be described as currently available until their complete interface, implementation, tests, documentation, and validation task is finished.
+Current capabilities are identity mapping, OAuth/OIDC/JWT sessions, D1-backed JSON records, and R2-backed files with D1 metadata. Persistent events and long-polling are planned, not implemented. Do not describe planned behavior as available.
 
-This project is independent and is not affiliated with, endorsed by, or an official product of OpenAI. Do not describe it as "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or anything that implies tokens issued by this service are OpenAI or ChatGPT tokens.
+AittaDB is independent and is not affiliated with, endorsed by, or an official product of OpenAI. It is deployed on ChatGPT Sites, but its local users, credentials, grants, sessions, and stored data belong only to AittaDB. Never call it "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or imply that AittaDB credentials are OpenAI or ChatGPT credentials.
 
-The service uses only the identity signal supplied by the ChatGPT Sites runtime to a server-side request. It creates its own local user identity and issues tokens belonging exclusively to AittaDB. It does not expose ChatGPT credentials, access ChatGPT conversations, use ChatGPT files, read Projects or Library data, inspect connectors, check subscription state, consume API quota, or infer workspace roles or billing.
+AittaDB does not expose or forward ChatGPT cookies, credentials, tokens, or sessions. It does not access ChatGPT conversations, files, Projects, Library, connectors, subscriptions, workspace roles, billing, or API quota. Its scopes authorize only AittaDB claims, sessions, and storage.
 
-Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication.
+Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication. Do not describe a current release as open source.
 
-## Canonical Source
+## Canonical Source and Origin
 
-GitHub at `https://github.com/aittadb/aittadb` is the canonical source of truth for this repository. Work in the current Git repository. Do not create a second canonical source tree. Preserve existing files, package-manager choices, lockfiles, local user changes, and repository instructions.
+GitHub at `https://github.com/aittadb/aittadb` is canonical. Work in the current checkout; do not create another canonical tree. Preserve its files, npm lockfile, package choices, instructions, uncommitted user changes, and unrelated work.
 
-The canonical public service origin is `https://aittadb.com`. Hosted issuer metadata, absolute hypermedia links, Open Graph metadata, OAuth verification URIs, and OIDC discovery must use that origin through the configured `ISSUER_URL`. The legacy `chatgpt.site` hostname may continue to route at the platform level, but it is not the canonical issuer or public URL.
+The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
-Use feature branches for all implementation work. The initial MVP branch is `codex/initial-implementation`. Do not push directly to `main`, do not merge branches, and do not deploy, publish, create a production checkpoint, or change Sites access settings without explicit user approval.
+Use feature branches. The MVP branch is `codex/initial-implementation`. Never push directly to `main`, merge, deploy, publish, save a production version/checkpoint, rotate hosted secrets, or change Sites access settings without the user's explicit approval. A task-specific approval does not authorize unrelated operational changes.
 
-## Sites Runtime Compatibility
+## Runtime Contract
 
-The application must use the standard Sites-compatible Vinext and TypeScript shape with Cloudflare Worker-compatible ESM output. Deployed code must not assume Node-only APIs, filesystem writes, process memory durability, timers as durable jobs, or serverful runtime behavior.
+Use strict TypeScript, Vinext, and Cloudflare Worker-compatible ESM. Deployed modules must not require Node-only APIs, filesystem writes, server processes, or durable process memory. Node APIs are allowed only in isolated build scripts, local administration, and tests.
 
 Runtime requirements:
 
-- D1 binding name: `DB`.
-- R2 binding name: `BUCKET` for AittaDB object storage.
-- Web Crypto APIs for cryptography.
-- Durable authoritative state in D1 only.
-- No authoritative state in `localStorage`, `sessionStorage`, browser cookies, or process memory.
-- Process memory may hold only non-authoritative performance hints, such as the next bounded cleanup time. Correctness must not depend on their survival or uniqueness.
-- Public metadata, health, discovery, JWKS, OpenAPI, docs, and stylesheet routes must not initialize D1 work. Static assets must pass directly to Vinext. Durable-route cleanup must be bounded and scheduled with `waitUntil`, never awaited on every response.
-- Configuration from environment variables and Sites secrets.
-- No secrets committed to Git.
-- `.openai/hosting.json` may contain local logical binding names, but reusable public source must not publish a real production `project_id`.
+- D1 binding: `DB`; structured authoritative state lives in D1.
+- R2 binding: `BUCKET`; file bytes live in R2. Add no other R2 dependency without a real requirement.
+- Web Crypto for production cryptography.
+- Environment variables and Sites secrets for configuration.
+- No authoritative state in `localStorage`, `sessionStorage`, process memory, or browser cookies. Cookies may carry protected transaction state only.
+- Process memory may hold non-authoritative performance hints; correctness cannot depend on survival or uniqueness.
+- Public metadata, health, discovery, JWKS, OpenAPI, docs, CSS, and JavaScript routes must not initialize D1. Static assets pass to Vinext. Durable-route cleanup is bounded and scheduled with `waitUntil`, not awaited on every response.
+- `.openai/hosting.json` is ignored checkout-local metadata and may contain the active project ID and logical bindings. Never commit a real reusable `project_id`. Keep `.openai/hosting.example.json` safe for forks.
 
-## Upstream ChatGPT Sites Identity Boundary
+## Upstream Identity Trust Boundary
 
-Sites owns the ChatGPT sign-in and sign-out routes. Do not implement or override `/signin-with-chatgpt`, `/signout-with-chatgpt`, callback routes, or Sites dispatcher behavior.
+Sites owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, callbacks, and dispatcher behavior. Do not implement or override them. Internal `return_to` values must be same-origin relative paths; never pass a registered client URL directly to Sites sign-in.
 
-The trusted upstream identity for this service consists only of these server-side request headers inside the trusted Sites runtime:
+Trust only these server-side headers inside the trusted Sites runtime:
 
 - `oai-authenticated-user-email`
 - optional `oai-authenticated-user-full-name`
 - `oai-authenticated-user-full-name-encoding`, when present
 
-Decode the full name only when the encoding header is exactly `percent-encoded-utf-8`. Always fall back to the email address for display. Treat the display name as optional and never as an authorization attribute.
+Decode a full name only when encoding is exactly `percent-encoded-utf-8`. Fall back to email for display. A display name is never authorization data. Use email only to find or create a local user with an immutable generated UUID; that UUID is downstream `sub`. Document email change and reassignment risk.
 
-Use the email address only to locate or create a local user record. The local user record must have an immutable locally generated UUID, and that UUID is the downstream `sub`. Document and account for the risk that email addresses may change or be reassigned.
+Never trust browser JavaScript for identity or accept arbitrary `oai-authenticated-user-*` headers outside Sites. Production code has no header bypass. Tests may use only the explicit test adapter, which cannot be enabled in a production build or environment. Automated tests never require a real ChatGPT account.
 
-Never trust identity information sent from browser JavaScript. Never accept arbitrary `oai-authenticated-user-*` headers outside the trusted Sites runtime. Production code must not include a header-based development bypass. Local tests may use an explicit test-only identity adapter that cannot be enabled in a production build or production environment.
+## AittaDB Credentials and Scopes
 
-## Local Tokens Versus Upstream Identity
+AittaDB alone issues downstream access tokens, refresh tokens, ID tokens, authorization codes, device codes, consents, and sessions. Supported scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, and `storage.delete`. The data model may permit future custom scopes, but do not invent more MVP scopes.
 
-Downstream OAuth access tokens, refresh tokens, ID tokens, authorization codes, device codes, consents, and sessions are issued by AittaDB only. They are not OpenAI tokens, ChatGPT tokens, ChatGPT sessions, or proof of access to OpenAI services.
-
-The supported local scopes for the MVP are:
-
-- `openid`
-- `email`
-- `profile`
-- `offline_access`
-- `storage.read`
-- `storage.write`
-- `storage.delete`
-
-These scopes grant claims, refresh behavior, or AittaDB application-storage operations. They do not grant access to ChatGPT or OpenAI data.
-
-## Product Terminology
-
-Lead public product descriptions with **hosted application backend for third-party apps**, followed by the implemented capabilities: ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage. OAuth, OpenID Connect, JWT, D1, and R2 are important implementation details, but must not replace the product description or make AittaDB sound like only an authentication broker.
-
-On first reference in user-facing UI, JSON metadata, and documentation, call the upstream browser authentication "ChatGPT sign-in inside ChatGPT Sites." A shorter later reference may use "ChatGPT sign-in." Do not use the standalone phrase "Sites identity" in user-facing content because it does not explain the identity source.
-
-"ChatGPT sign-in" names only the upstream browser authentication supplied by the Sites runtime. In the same context, distinguish the immutable local UUID and tokens issued independently by AittaDB. Never imply a general OpenAI or ChatGPT OAuth service, credential issuance, endorsement, or access to ChatGPT data. Internal implementation names may use "Sites identity adapter" or "Sites identity provider" when discussing the runtime interface precisely.
-
-Keep `officialOpenAIProduct: false` in machine-readable service metadata. In HTML, state the independence and non-affiliation boundary once in natural prose; do not render it as an awkward yes/no metadata row.
-
-Use "Session issuer" in user-facing metadata for the service that issues downstream OAuth, OIDC, and JWT credentials. Do not use "Token authority" in browser copy or JSON metadata because it can be confused with AI-model token accounting.
-
-Do not call durable D1/R2 data "browser-session storage" in user-facing text. Call it the user's private or signed-in AittaDB namespace and explain that it persists. The internal reserved browser client remains the precise implementation term in architecture and code.
+Lead public descriptions with "hosted application backend for third-party apps", followed by ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, JSON records, and files. Use "ChatGPT sign-in inside ChatGPT Sites" on first user-facing reference. Do not use unexplained "Sites identity" or "Token authority" copy. Use "Session issuer" where needed. Keep `officialOpenAIProduct: false` in machine metadata; explain independence naturally in HTML rather than as a yes/no row.
 
 ## Repository Structure
 
-Maintain this structure unless `AGENTS.md` is updated in the same task that changes it:
+- `.github/workflows/`: lockfile install and validation CI; no deployment credentials or deployment job.
+- `.openai/`: ignored active hosting metadata plus safe checked-in template.
+- `app/`: Vinext entry routes; delegate behavior to `src/`.
+- `build/`: Node-only Vinext/Sites packaging and deterministic migration artifacts; no deployed domain behavior.
+- `db/`: required-table manifest and canonical handwritten SQL migrations.
+- `docs/`: architecture, style, performance, threat model, deployment, self-hosting, examples, and key operations.
+- `openapi/`: supporting OpenAPI material; `src/openapi.ts` is canonical.
+- `public/`: same-origin static brand, font, social, and pinned Swagger assets.
+- `scripts/`: Node-only validation and local administrative tools.
+- `src/`: deployed domain, protocol, repositories, cryptography, configuration, HTTP, identity, storage, and HTML representations.
+- `tests/`: unit and integration coverage using test-only adapters and in-memory fakes.
 
-- `.github/workflows/`: CI checks for formatting, linting, type checking, tests, OpenAPI validation, production build, and migration consistency.
-- `.openai/hosting.example.json`: safe reusable Sites hosting template with logical D1 and R2 binding names.
-- `.openai/hosting.json`: ignored checkout-local Sites project metadata; it may hold the active `project_id` and must never be committed.
-- `app/`: Vinext route handlers and minimal browser pages. HTTP handlers must delegate protocol and storage behavior to `src/`.
-- `build/`: Node-only build integration for Vinext/Sites, including typed hosting metadata loading and deterministic packaging of reviewed SQL into Sites migration artifacts. It must not contain deployed domain behavior.
-- `db/`: D1 required-table manifest and canonical checked-in SQL migration history.
-- `docs/`: Markdown documentation, architecture notes, threat model, deployment guide, self-hosting notes, examples, and key rotation instructions.
-- `docs/performance.md`: request-path invariants, baseline evidence, and live measurement requirements.
-- `openapi/`: canonical OpenAPI 3.1 source.
-- `public/`: same-origin static assets. `aittadb-mark.svg` is the canonical brand mark, `aittadb-boundary.jpg` is shared decorative boundary artwork, `og.png` is the 1200x630 social preview, and `fonts/` contains the self-hosted Inter variable font and its license.
-- `scripts/`: local administrative scripts such as signing-key generation and OpenAPI checks.
-- `src/`: protocol-independent domain logic, repositories, crypto, configuration, HTTP helpers, identity adapters, and service interfaces.
-- `tests/`: unit and integration tests, including complete token flows using a test-only identity adapter.
+Update this section in the same task if ownership moves.
 
-## System Units and Interfaces
+## Unit Interfaces
 
-Keep interfaces narrow and explicit:
+Keep dependencies narrow and explicit:
 
-- HTTP routes parse requests, apply HTTP security controls, and call services.
-- OAuth services own device authorization, authorization code with PKCE, token exchange, revocation, introspection, scope validation, and consent decisions.
-- OIDC services own discovery, JWKS, ID token claims, UserInfo, issuer metadata, nonce propagation, and JWT validation.
-- Identity providers own upstream ChatGPT Sites header parsing and test-only identity injection.
-- User repository owns email lookup, immutable local UUID creation, and user metadata.
-- Client repository owns public and confidential clients, redirect URIs, origins, scopes, disablement, secret hashes, and secret rotation.
-- Token repository owns hashed authorization codes, device codes, refresh token families, refresh token hashes, revocations, and expiration cleanup.
-- Consent repository owns remembered consent grants keyed by local user, client, and exact scope set.
-- Audit repository owns minimal redacted security events.
-- Rate-limit repository owns bounded counters and enforcement state.
-- Storage repository owns AittaDB JSON records, file metadata, and per-user/per-client object ownership. File bytes live in R2 behind generated object keys.
-- Storage browser adapter owns only same-origin HTML form parsing and representation. It must translate a protected form into a synthetic request to the production `storageEndpoint`; it must not duplicate authorization, scope checks, key validation, D1/R2 persistence, or storage state.
-- Browser-session adapter maps the trusted current Sites identity to the local UUID and a minimal short-lived internal AittaDB access token. It must never return, persist, log, or render that token.
-- Reserved system-client policy owns the fixed browser-session client identity. The client is migration-seeded, hidden from client administration, immutable through repository mutation methods, and rejected by all external OAuth grant paths.
-- Crypto module owns random value generation, hashing, constant-time comparison, PKCE verification, JWT signing, JWT validation, and JWKS publication.
-- Configuration module owns environment parsing, defaults, secret presence checks, and production/test separation.
-- Representation negotiation owns the HTML-versus-JSON boundary. It may render browser forms and readable results, but it must call the same route validation, domain services, repositories, and cryptographic interfaces as the canonical API operation. Do not build mock or duplicate "demo" authentication or storage logic.
+- HTTP handlers parse/limit requests, negotiate representations, apply CORS/security controls, and call domain services.
+- Identity provider parses the trusted Sites signal; the test provider is test-only.
+- User repository owns email lookup, generated immutable UUIDs, and user metadata.
+- Client repository owns client type, name, exact redirects, origins, scopes, disablement, secret hashes, and rotation.
+- OAuth services own RFC 8628, Authorization Code with PKCE, token exchange, scope checks, consent, revocation, and introspection.
+- OIDC services own discovery, JWKS, ID-token claims, nonce, UserInfo, issuer metadata, and verification.
+- Token repository owns hashed codes, device grants, refresh families/tokens, revocations, and expiration cleanup.
+- Consent, audit, and rate-limit repositories own their narrowly keyed durable records.
+- Storage repository owns records and file metadata keyed by local UUID plus OAuth client ID. R2 bytes use generated physical keys.
+- Storage browser adapter parses protected HTML forms and sends synthetic requests to canonical `storageEndpoint`; it never duplicates scope, ownership, key, D1, or R2 logic.
+- Browser-session adapter maps current trusted identity to a minimal short-lived internal access token for reserved client `aittadb-browser-session-v1`; it never logs, renders, returns, or persists that plaintext token.
+- System-client policy keeps that reserved client migration-seeded, hidden, immutable through administration, and rejected from external OAuth grants.
+- Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.
+- Configuration owns parsing, defaults, required-secret checks, and production/test separation.
+- Representation negotiation owns HTML versus JSON/binary only; browser pages always execute real route/domain logic, never a demo model.
 
-## TypeScript and Coding Conventions
+Use dependency injection where it materially improves tests. Keep protocol-independent logic separate from HTTP and storage behind repository interfaces.
 
-Use strict TypeScript. Avoid `any`; prefer explicit unknown parsing, small interfaces, and type guards. Keep modules small and dependency-free unless a dependency clearly improves correctness. Prefer pure domain functions for protocol behavior and inject repositories or clocks where useful for tests.
+## TypeScript and Coding Rules
 
-Deployed code must be Worker-compatible. Do not use Node-only modules in code that can run in production route handlers. Node-only helpers are allowed in `scripts/` and tests when isolated from production bundles.
+Use TypeScript `strict`; avoid `any`. Parse unknown input with explicit guards and structured APIs. Prefer small modules, pure domain functions, existing local patterns, and conservative changes. Add abstractions only when they remove real complexity. Use succinct comments only for non-obvious blocks.
 
-Use prepared SQL statements. Pass one SQL statement per `prepare()` call. Do not build SQL from untrusted strings. Store dates as integer Unix seconds or ISO text consistently per table and document the choice in schema comments.
+Use prepared SQL with one statement per `prepare()` and bound untrusted values. Never construct SQL identifiers or clauses from caller input. Use documented integer Unix seconds or ISO text consistently. Use Web-standard `Request`, `Response`, URL, streams, and Web Crypto in deployed code.
 
-## Cryptographic and Authentication Rules
+## Cryptography and Authentication
 
-Use Web Crypto for production cryptography:
-
-- ES256 with P-256 for JWT signing.
-- Load the private JWK from a hosted secret.
-- Publish only the public JWK at JWKS.
-- Include a configured key ID.
-- Never generate a signing key during ordinary runtime startup.
-- Include an immutable local UUID as `sub`.
-- Include unique `jti`.
-- Keep access tokens short-lived; default to 600 seconds.
-- Use opaque high-entropy refresh tokens stored only as hashes.
-- Rotate refresh tokens on every successful use.
-- Detect refresh-token reuse and revoke the associated family.
-- Validate JWT `iss`, `aud`, `exp`, `iat`, `nbf` when present, signature, algorithm, and key ID.
-- Reject incorrect algorithms and unknown keys.
-- Never set `email_verified: true` unless upstream Sites documentation explicitly supplies that assurance. Omit it or set it to `false`.
+- JWTs use ES256 with P-256 through Web Crypto.
+- Load the private JWK only from a hosted secret; publish only the derived public JWK.
+- Require configured `kid`; never generate a key at runtime startup.
+- Include immutable local UUID `sub` and unique `jti`.
+- Default access-token lifetime is 600 seconds.
+- Validate signature, exact algorithm, `kid`, `iss`, `aud`, `exp`, `iat`, and `nbf` when present. Reject wrong algorithms and unknown keys.
+- Omit `email_verified` or set it false unless Sites explicitly documents that assurance.
+- Authorization, device, and refresh credentials are cryptographically random. Store only hashes for bearer-equivalent opaque values and confidential client secrets.
+- Rotate refresh tokens on every successful use. Reuse revokes the family.
+- Generated client secrets appear once, are SHA-256 hashed, and are compared without timing-dependent early exit.
+- Never log or put access, refresh, device, authorization, client, CSRF, cookie, or signing credentials in URLs or client bundles.
 
 OAuth rules:
 
-- Implement RFC 8628 Device Authorization Grant.
-- Implement Authorization Code with PKCE using `S256`.
-- Do not implement implicit grant or resource-owner password grant.
-- Use high-entropy one-time authorization codes and device codes.
-- Enforce exact registered redirect URI matching.
-- Preserve OAuth `state` and OIDC `nonce`.
-- Use an internal same-origin continuation route before redirecting to clients.
-- Never pass an external URL directly as a Sites `return_to` value.
-- Require explicit consent unless remembered consent exactly covers the client and requested scopes.
-- Return standard OAuth error formats and content types.
-- Browser-facing responses and errors must use the shared content-negotiated HTML page shell when the client prefers `text/html`. JSON API errors must include hypermedia `_links` and `actions`; token success responses must remain OAuth/OIDC protocol-compatible.
-- Browser helpers for protocol endpoints must be explicit HTML representations of the real endpoint. They must not weaken client authentication, redirect matching, PKCE, consent, scopes, token handling, rate limits, or other protocol checks. Browser-only state-changing forms require same-origin and CSRF validation without changing standards-compliant non-browser API requests. Same-origin checks must recognize the configured `ISSUER_URL` origin when Sites dispatches the Worker under an internal request URL, and may accept `Origin: null` only with `Sec-Fetch-Site: same-origin`. Use one validated, host-only, `HttpOnly`, `SameSite=Lax`, secure CSRF token per browser session window rather than rotating it on every form render; concurrent operation pages must remain usable, while missing, malformed, mismatched, and cross-origin submissions fail closed.
-- Device token polling must authenticate the client and require an exact match with the client that created the device grant. The current signed-in browser session may approve a pending code but may not replace the polling client's identity or secret.
-- Browser UI styles must be served from same-origin stylesheet routes such as `/auth-ui.css`; do not rely on inline `<style>` blocks that are blocked by the strict CSP.
+- Implement RFC 8628 Device Authorization Grant and Authorization Code with PKCE `S256`; no implicit or resource-owner-password grants.
+- Public clients use no secret; confidential clients authenticate.
+- Enforce exact registered redirect URI and allowed scope matching.
+- Authorization codes are high-entropy, one-time, and short-lived.
+- Preserve `state` and OIDC `nonce`.
+- Require explicit consent unless remembered consent exactly covers client and scopes.
+- Device polling enforces interval, `slow_down`, pending, denied, expired, client binding, and one-time approval.
+- Use standard OAuth content types and errors. Token success remains protocol-standard.
+- Introspection is for authorized confidential clients; revocation follows standard non-disclosure behavior.
 
-## Database and Migration Rules
+Admin operations require trusted ChatGPT sign-in plus an exact server-side `ADMIN_EMAILS` match. Support list/create, public/confidential type, display name, exact redirects, scopes, origins, disable, secret rotation, and grant revocation. No unrestricted dynamic registration.
 
-D1 is the durable state store. Schema and migrations must be checked in. Required entities include:
+## Storage Isolation
 
-- local users
-- OAuth clients
-- redirect URIs
-- allowed scopes
-- authorization requests
-- one-time authorization codes
-- device grants
-- refresh-token families
-- refresh tokens
-- remembered consents
-- revoked access-token identifiers
-- minimal audit events
-- rate-limit counters when rate limiting is implemented in D1
-- storage records
-- storage file metadata
+- JSON records: D1 rows keyed by local UUID, client ID, and logical key.
+- File metadata: same ownership key in D1; bytes in `BUCKET` under generated physical keys.
+- Caller keys never become physical R2 keys.
+- Every repository read/list/write/delete binds both local UUID and client ID.
+- Canonical storage methods require AittaDB bearer access tokens and `storage.read`, `storage.write`, or `storage.delete`.
+- Expose no generic SQL, table, D1, R2 listing, environment, binding, owner/client ID, physical key, configuration, or secret API.
+- Omit private JWKs, secrets, deployment values, owner IDs, client IDs, and R2 keys from success and failure output.
+- Record JSON is limited to 64 KiB. File bytes are limited to 10 MiB. Browser wrappers bound form overhead and recheck parsed file size.
+- Attachment filenames are safe and logical-key based.
 
-Store hashes, not plaintext, for authorization codes, device codes, refresh tokens, confidential client secrets, and bearer-equivalent one-time credentials. Add expiration indexes for bounded cleanup. Cleanup must be safe during ordinary requests and must not require long background jobs.
+Current-session storage uses the reserved browser client, so it is durable but isolated from every normal OAuth client, even for the same user. Token mode uses the token's client namespace. Submitted and internal tokens never reach HTML, URLs, cookies, logs, or browser storage.
 
-Migration changes must include schema updates, checked-in SQL, automated migration tests, documentation updates, and validation evidence in the same task.
+## Browser and Hypermedia Contract
 
-This repository intentionally uses prepared D1 statements and handwritten SQL migrations, not Drizzle ORM or Drizzle Kit. `db/migrations/` is the canonical reviewed SQL history, `db/schema.ts` is the required-table manifest used by consistency checks, and `build/sites-migrations.ts` deterministically emits Sites-compatible SQL artifacts and a migration journal into `dist/.openai/drizzle/` during the build. Sites applies those artifacts during deployment. Production request handlers must never run `CREATE`, `ALTER`, or `DROP`, and no runtime migration copy may silently diverge from the canonical SQL. Do not reintroduce ORM tooling unless a future architecture task adopts it completely with schema declarations, generated migrations, tests, and documentation.
+The root is public and returns concise hypermedia JSON or a polished service entry page. It is an operation map, not marketing or a fake demo. Do not add a hero marketing site, pricing, testimonials, blog, dashboard, general account/profile pages, or nonessential navigation. `/session` is a focused protected identity/operations view.
 
-Storage rules:
+Every API endpoint provides a useful HTML representation when the request explicitly prefers `text/html`, while canonical JSON, OAuth, OIDC, or binary behavior remains unchanged for API clients and generic `Accept: */*`. JSON metadata and errors advertise `_links` and `actions` where protocol compatibility permits. Every HTML action executes real production validation and durable state. No mock users, grants, tokens, storage, or browser-only authorization shortcuts.
 
-- JSON records are D1 data keyed by local user UUID, OAuth client ID, and logical application key.
-- File metadata is D1 data keyed by local user UUID, OAuth client ID, and logical application key.
-- File bytes are stored in R2 through binding `BUCKET`.
-- Caller-supplied logical keys must never be used as physical R2 object keys. Generate physical R2 keys server-side.
-- Storage endpoints require this service's own bearer access tokens and `storage.read`, `storage.write`, or `storage.delete` scopes as applicable.
-- Every storage repository operation must bind both local user UUID and OAuth client ID. There is no generic SQL, D1-table, R2-listing, environment, binding, or secret API. Success and error responses must omit owner IDs, client IDs, physical R2 keys, private signing material, and deployment configuration.
-- Storage scopes are local AittaDB permissions only; never describe them as granting ChatGPT or OpenAI access.
-- Browser record and file forms default to current-session mode when a trusted Sites identity is present and otherwise default to explicit token mode. Current-session data is keyed by the local UUID plus reserved browser-client ID and must remain invisible to ordinary OAuth clients, including clients used by the same user. Explicit bearer values are accepted only in CSRF-protected form bodies. Record forms cap URL-encoded input before forwarding and rely on the canonical 64 KiB JSON limit. File forms use bounded multipart parsing, reject declared bodies above the 10 MiB file limit plus bounded form overhead, recheck actual `File.size`, and forward bytes to the canonical R2 operation. Submitted and internally issued tokens must never be copied into result HTML, URLs, cookies, logs, or browser storage.
+Browser state-changing forms require same-origin plus CSRF checks. Accept the configured issuer origin behind Sites dispatch; `Origin: null` is allowed only with `Sec-Fetch-Site: same-origin`. Use one validated host-only, secure, `HttpOnly`, `SameSite=Lax` CSRF cookie during its bounded window so concurrent tabs work. Missing, malformed, mismatched, or cross-origin submissions fail closed. Never weaken protocol validation for HTML.
 
-## OpenAPI Rules
+Storage HTML is resource-oriented:
 
-Maintain one canonical OpenAPI 3.1 specification in `src/openapi.ts`. Serve it as JSON from `/openapi.json` and provide a self-hosted Swagger UI at `/docs`. Swagger assets must be served from the AittaDB origin, load the canonical spec rather than a second generated copy, work under the strict CSP, and introduce no CDN or runtime third-party dependency. Scope AittaDB shell styles to named components or direct shell content; global element selectors must not override Swagger operation or schema controls.
+- Collection `GET` renders list and item-navigation controls.
+- Item `GET /storage/{kind}/{key}` renders read/download, replace/upload, and delete actions for that URL key only.
+- Protected browser actions `POST` to that same resource URL with `_method=GET`, `PUT`, or `DELETE`; reject method/resource mismatches.
+- Item keys come only from the URL, never an override field.
+- No-JavaScript navigation submits collection `?key=...`; validate it and redirect only to the encoded same-origin item path.
+- Do not use one operation selector to mix unrelated resource URLs.
 
-The OpenAPI spec must describe every REST endpoint, parameters, request bodies, responses, OAuth errors, schemas, authentication requirements, examples, and supported HTML representations. It must distinguish ChatGPT Sites browser authentication from tokens issued by AittaDB. Validate OpenAPI in CI and test that documented routes and implemented routes do not silently diverge.
+`/auth-ui.js` is same-origin progressive enhancement only. It hides/disables inactive authentication and grant fields, links `required` state to visibility, and upgrades item navigation. Initial HTML remains complete and usable without JavaScript; server validation is authoritative. `/auth-ui.css` and the script must remain CSP-compatible and perform no D1 work.
 
-## Configuration and Secrets
+Use semantic HTML, keyboard access, visible focus, meaningful labels, screen-reader compatibility, clear errors, responsive layout, no unnecessary JavaScript, and no third-party runtime fonts, imagery, trackers, or scripts. Follow `docs/style-guide.md`. Keep AittaDB shell selectors scoped so Swagger operations and Schemas controls are not restyled.
 
-All configuration must be explicit. `.env.example` documents names and safe placeholders only. Never commit secret values, generated production keys, client secrets, refresh tokens, device codes, authorization codes, or real deployment identifiers.
+Brand contract: self-host Inter with `system-ui, "Segoe UI", sans-serif`; Aitta weight 750 in `#0B234A`, DB weight 750 in `#F04A32`, teal accent `#159CA6`. Use `public/aittadb-mark.svg`, decorative `public/aittadb-boundary.jpg` with empty alt, and `public/og.png`. All pages use the shared shell and GitHub footer unless a protocol/binary constraint prevents it.
 
-Important configuration includes:
+## Database and Migrations
 
-- `ISSUER_URL`
-- `JWT_PRIVATE_JWK`
-- `JWT_KEY_ID`
-- `ADMIN_EMAILS`
-- access-token lifetime
-- refresh-token lifetime
-- authorization-code lifetime
-- device-code lifetime
-- token polling interval
-- allowed CORS origins where applicable
-- production/test environment marker
+D1 schema must explicitly cover local users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs where needed, audit events, rate limits, storage records, and file metadata. Add expiration indexes and bounded cleanup.
 
-For the canonical hosted service, `ISSUER_URL` must be exactly `https://aittadb.com` with no path or trailing slash. Changing the issuer is an operational token-boundary change: previously issued JWTs with another `iss` value will no longer validate under the new configuration and this must be called out during deployment acceptance.
+`db/migrations/` is canonical reviewed SQL. `db/schema.ts` is the required-table manifest. `build/sites-migrations.ts` deterministically emits Sites artifacts and journal under `dist/.openai/drizzle/`; Sites applies them. Runtime handlers never execute `CREATE`, `ALTER`, or `DROP`. This project intentionally uses handwritten migrations, not Drizzle ORM/Kit. Do not reintroduce ORM tooling without a complete architecture task.
 
-Build tooling must prefer the ignored checkout-local `.openai/hosting.json` when it exists and fall back to the checked-in `.openai/hosting.example.json` only for clean-checkout validation. The safe template is not deployable configuration and must never substitute for creating a fork-specific Sites project before deployment.
+Every schema change includes the manifest, checked-in migration, migration tests, architecture/docs, and validation in the same task. Migrations are forward, deterministic, reviewed, and safe for existing data; never rewrite applied history casually.
 
-Production startup must fail closed when required secrets are missing.
+## OpenAPI
 
-## Logging and PII Redaction
+Maintain one OpenAPI 3.1 source in `src/openapi.ts`; serve it at `/openapi.json`. `/docs` is self-hosted Swagger UI using pinned same-origin assets and that canonical document, with no CDN or persisted authorization.
 
-Do not log secrets, access tokens, refresh tokens, authorization codes, device codes, client secrets, CSRF tokens, cookies, or bearer-equivalent values. Redact credentials and PII from structured logs. Use generic authentication errors that do not leak account existence. Minimal audit events may record event type, local user UUID, client ID, request ID, coarse IP or user-agent metadata when needed, and timestamps.
+Document every REST and browser method, parameter, body, response, OAuth error, schema, auth requirement, example, content type, Device Grant, and PKCE flow. Clearly separate upstream ChatGPT sign-in from AittaDB credentials. Update implementation and OpenAPI together. `npm run openapi:check` must catch route drift; `npm run swagger:check` must catch vendor drift.
 
-OAuth, identity, and token responses must include `Cache-Control: no-store`.
+## Configuration, Secrets, Logs
 
-## Security Controls
+`.env.example` lists names and documentation, never values. Important configuration includes `ISSUER_URL`, `JWT_PRIVATE_JWK`, `JWT_KEY_ID`, `ADMIN_EMAILS`, token/code/device lifetimes, polling interval, CORS origins, and environment marker. Production fails closed when required secrets are absent. The canonical `ISSUER_URL` is exactly `https://aittadb.com` with no path or trailing slash; issuer changes invalidate the old token boundary and require explicit acceptance notes.
 
-Every relevant implementation must include and test:
+Generate local ES256 keys only through the documented script/Make target. Secret key files are ignored. Never print/process a generated private key in agent conversation, commit it, or place it in public hosting metadata.
 
-- exact redirect URI validation
-- PKCE `S256`
-- `state` preservation
-- `nonce` preservation
-- one-time authorization-code consumption
-- one-time device-grant approval or denial
-- device polling intervals and `slow_down`
-- short expirations
-- refresh-token rotation and reuse detection
-- CSRF protection on browser forms
-- same-origin validation for browser form submissions
-- secure `HttpOnly` `SameSite=Lax` transaction cookies
-- strict security headers
-- no open redirects
-- no token values in URLs
-- no secrets in client-side bundles
-- no user-controlled issuer or audience
-- constant-time comparison where relevant
-- least-privilege CORS
-- no wildcard credentialed CORS
-- exact configured origins for browser clients
-- request-size limits
-- rate limits for device authorization, token polling, client authentication, and admin operations
-- credential redaction
+Redact PII and every credential from logs. Use generic auth errors that do not reveal account existence. Minimal audit events may contain event type, local UUID, client ID, request ID, carefully bounded coarse request metadata, and timestamps. OAuth, identity, storage, and token responses use `Cache-Control: no-store` where sensitive.
 
-## Minimal Web Interface
+Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer policy, and permissions policy. CORS is least privilege: exact configured origins, no wildcard credentialed CORS, and no user-controlled issuer/audience. Enforce request limits and rate limits for device creation/polling, client auth, and admin operations. See `docs/threat-model.md` and `SECURITY.md`.
 
-This project is a hosted application backend with REST APIs and authentication, not a marketing website. Do not add a marketing landing page, feature sections, testimonials, pricing, a general dashboard, a general profile page, or a documentation portal beyond the OpenAPI viewer and focused operational interfaces.
+## Documentation Set
 
-The root route is public. It must return concise hypermedia service metadata to API clients and a polished service entry page to browsers. It must explain the ChatGPT sign-in boundary and link to the real session, OAuth/OIDC, storage, health, OpenAPI, and administrator routes. Public discovery and authorization initiation must not require authentication; protected routes must start the actual Sites-owned ChatGPT sign-in flow when identity is required.
+Maintain `README.md`, `AGENTS.md`, `PLAN.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.env.example`, architecture, style, performance, threat model, deployment, self-hosting limits, OpenAPI, schema/migrations, CLI Device Grant example, browser/native PKCE example, curl examples, key generation/rotation, downstream JWT verification, fork setup, and Sites-specific behavior.
 
-The browser interface is not a simulated demo. Every sign-in, device grant, authorization, token, UserInfo, revocation, introspection, JSON-record, file-storage, and administrator action exposed from the interface must execute the production route and domain logic with the same validation and durable state as its API representation. Do not create separate mock users, sample-only grants, fake tokens, fake storage, or browser-only authorization shortcuts.
+README must prominently state experimental status, independence, the Sites identity-header dependency, separate local identity/credentials, no official ChatGPT OAuth service, self-hosting adapter replacement, and FSL-to-MIT conversion. Keep implementation claims current.
 
-Every API endpoint must provide a useful content-aware HTML representation when a browser explicitly prefers `text/html`, while preserving its canonical JSON, OAuth, OIDC, or binary behavior for API clients. Read-only endpoints may render structured values and raw-JSON links. State-changing or credential-bearing operations must use focused forms, never place credentials or bearer values in URLs, validate CSRF and same origin for browser-only submissions, and render secrets only in a deliberate one-time result where the underlying protocol requires returning them. Binary file downloads may remain binary after an authenticated browser operation, but their collection and item routes must provide working HTML controls for listing, upload, download, and deletion.
+## Commands
 
-The protected local session view is an authentication boundary and operational identity view, not a general account profile. It may show the signed-in user's own email, display name, and immutable AittaDB subject UUID, explain that AittaDB creates its own identity and sessions, and link to real operations available to that user. Authorization must continue to come from server-side policy, client grants, and scopes; never from display name or merely being signed in.
-
-The operation map must explain how the current session participates in each flow. It approves device codes, supplies the user at Authorization Code consent, provides current-session UserInfo and a reserved personal storage namespace, and authorizes client administration only for exact `ADMIN_EMAILS` matches. It does not replace client registration, exact redirects, PKCE, state, nonce, client secrets, grants, token revocation credentials, or confidential-client introspection.
-
-Use semantic HTML, visible focus, meaningful labels, clear validation errors, keyboard accessibility, screen-reader compatibility, and no unnecessary JavaScript.
-
-HTML pages must follow `docs/style-guide.md`. The interface should match the polish level expected from contemporary ChatGPT Sites generated pages while remaining a compact application-backend service: strong typography, generous spacing, refined panels, purposeful local visual assets or CSS artwork, responsive layouts, and a consistent GitHub project affordance. Do not load runtime fonts, tracking scripts, or images from third-party origins.
-
-The shared browser shell uses `public/aittadb-mark.svg`, the AittaDB wordmark, the self-hosted Inter variable font, and `public/aittadb-boundary.jpg`. Render `Aitta` at Inter weight `750` in midnight navy `#0B234A`, `DB` at Inter weight `750` in red-orange `#F04A32`, and icon accents in teal `#159CA6`; use `Inter, system-ui, "Segoe UI", sans-serif` as the font stack. Keep decorative artwork free of text, logos, secrets, PII, and deployment identifiers; render it with empty alternative text and page-specific adjacent copy. `public/og.png` is the canonical social card, and root-page Open Graph metadata must construct its absolute URL from the configured issuer. New HTML response types must define content-aware visual copy and use the shared shell unless a documented protocol constraint prevents HTML.
-
-## Current Implementation State
-
-The complete AittaDB MVP is implemented on `codex/initial-implementation`. All 43 `PLAN.md` units have passed their integrated definitions of done. The production build, migrations, 27 automated tests, canonical OpenAPI document, self-hosted Swagger UI, signed-in operation pages, public route matrix, desktop/mobile browser QA, GitHub Actions CI, and representative real Sites authentication, OAuth, D1, and R2 checks passed before the plan was closed. Keep future work in new unchecked integrated plan items, and do not describe later changes as complete until their own validation and any required hosted acceptance pass.
-
-## Documentation Rules
-
-Create or maintain:
-
-- `README.md`
-- `AGENTS.md`
-- `PLAN.md`
-- `LICENSE.md`
-- `SECURITY.md`
-- `CONTRIBUTING.md`
-- `CHANGELOG.md`
-- `.env.example`
-- architecture documentation
-- style guide
-- performance notes
-- threat model
-- deployment guide
-- self-hosting limitations
-- OpenAPI specification
-- database schema and migrations
-- CLI integration example
-- browser/native PKCE example
-- curl examples
-- key generation and rotation instructions
-- downstream JWT verification example
-- instructions for creating a fresh Sites project from a fork
-- explanation of Sites-specific functionality
-
-Documentation must say this project is experimental, independent, and source-available under FSL-1.1-MIT, with each release converting to MIT after two years.
-
-## Required Commands
-
-Keep these commands current as package scripts evolve:
-
-- Install dependencies: `npm ci`
-- Format check: `npm run format:check`
-- Format write: `npm run format`
+- Install: `npm ci`
+- Format check/write: `npm run format:check`, `npm run format`
 - Lint: `npm run lint`
 - Type check: `npm run typecheck`
-- Unit tests: `npm run test:unit`
-- Integration tests: `npm run test:integration`
-- Full test suite: `npm test`
-- OpenAPI validation: `npm run openapi:check`
-- Swagger UI vendor consistency: `npm run swagger:check`
-- Refresh pinned Swagger UI browser assets: `npm run swagger:sync`
+- Unit/integration/all tests: `npm run test:unit`, `npm run test:integration`, `npm test`
+- OpenAPI: `npm run openapi:check`
+- Swagger check/sync: `npm run swagger:check`, `npm run swagger:sync`
 - Migration consistency: `npm run db:check`
-- High-severity dependency audit: `npm run audit:high`
+- Agent instruction budget: `npm run agents:check`
+- High-severity audit: `npm run audit:high`
 - Production build: `npm run build`
-- Complete local validation: `npm run validate`
-- Generate local ES256 key pair without printing the secret: `make generate-local-jwt-key`
-- Generate local ES256 key pair to stdout for ephemeral automation only: `npm run keys:generate`
+- Complete validation: `npm run validate`
+- Local key file: `make generate-local-jwt-key`
+- Ephemeral stdout key generation: `npm run keys:generate`
+
+Keep commands synchronized with `package.json`, CI, README, and contributor docs. CI uses lockfile installation and runs format, lint, typecheck, unit/integration tests, OpenAPI, Swagger, migration, AGENTS-size, audit, and production build checks. It never deploys.
 
 ## PLAN.md Workflow
 
-Before source implementation, create `PLAN.md` with a flat list of unchecked tasks. Each task must have a stable identifier such as `TASK-001`. Do not use nested tasks, subtasks, phases, epics, or separate documentation/test tasks.
+Before implementation, design the complete work in root `PLAN.md` as one flat list of initially unchecked `TASK-NNN` items. No nesting, phases, epics, or separate implementation/test/doc tasks. Each item is the smallest practical dependency-ordered, focused-commit unit and explicitly includes its contract, implementation, tests, docs, failure paths, configuration/migration/OpenAPI/AGENTS changes, and acceptance evidence.
 
-Process tasks in order unless a dependency discovered during implementation requires a documented reorder. Change a checkbox to `[x]` only after the task's full definition of done passes. If implementation reveals missing work, add a new unchecked flat-list item at the correct dependency position before performing that work. Keep completed task descriptions intact so the file remains an auditable implementation history.
+Process in order unless a discovered dependency is documented. Add missing work as a new unchecked flat item at the correct position before doing it. Mark `[x]` only after the entire definition of done passes. Never mark partial work complete or rewrite completed descriptions; PLAN is audit history.
 
 ## Definition of Done
 
-Every implementation task must complete all of these in the same task:
+Every implementation task completes all six in the same task:
 
 1. The unit's public interface or contract.
 2. Implementation.
-3. Automated tests.
-4. User/developer documentation.
+3. Automated tests, including relevant negative paths.
+4. User and developer documentation.
 5. Successful formatting, linting, type checking, relevant tests, and build validation.
-6. Necessary `AGENTS.md`, OpenAPI, schema, migration, or architecture updates.
+6. Necessary `AGENTS.md`, OpenAPI, schema, migration, architecture, configuration, and operational updates.
 
-Agents must not split documentation, tests, and implementation for one unit into separate tasks.
+Never split one unit's implementation, tests, or documentation into separate tasks. Scale coverage to security risk and blast radius.
 
-## Git, Commit, PR, and Review Workflow
+## Git, Review, and Deployment
 
-Use focused commits that correspond to completed `PLAN.md` tasks where practical. Never mark partially complete tasks as complete. Before commit, run the required validation commands relevant to the changed surface; before final handoff, run `npm run validate`.
+Use focused commits aligned to completed PLAN items where practical. Inspect a dirty tree and preserve unrelated user work. Never use destructive reset/checkout without explicit instruction. Run relevant checks before commits and `npm run validate` before handoff.
 
-If authenticated GitHub write access is available after validation, push the feature branch and open a draft pull request. If not, leave the verified commit locally and report that write access is unavailable.
+After validation, use authenticated GitHub access to push the feature branch and update/open a draft PR. Otherwise keep the verified commit local and report unavailable write access. Do not merge. Review findings prioritize security, behavioral regressions, protocol divergence, and missing tests.
 
-Production deployment, Sites version saving, publishing, access changes, and production checkpoint creation require explicit user approval.
+Production or preview deployment still requires the approval described under Canonical Source. Publish the exact validated committed source, apply checked-in migration artifacts through Sites, preserve D1/R2 bindings and hosted secrets, and verify deployment status. Never claim ChatGPT authentication works end to end unless a real private/public Sites deployment was tested. Record unverified Sites behavior and the exact next manual step.
 
-## Updating AGENTS.md
+## Maintaining This File
 
-Update this file in the same task whenever architecture, commands, constraints, operational knowledge, security rules, repository structure, deployment procedure, or maintainer workflow changes. If a task changes how future humans or AI agents should work, its definition of done includes an `AGENTS.md` update.
+Update `AGENTS.md` in the same task whenever architecture, interfaces, commands, constraints, security policy, repository structure, deployment procedure, current operational knowledge, or workflow changes. Keep it below 32,000 bytes. Prefer compact normative rules here and deeper explanation in maintained docs; remove stale statements instead of appending contradictions.
