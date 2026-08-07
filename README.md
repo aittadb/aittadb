@@ -107,6 +107,8 @@ Browser-facing routes and errors use content negotiation. Browsers that prefer `
 
 `/docs` is a self-hosted Swagger UI backed directly by the canonical `/openapi.json`. Its assets are pinned and served from AittaDB without a CDN. Browser forms are also available directly on the authorization, device authorization, token, revocation, introspection, and UserInfo routes; state-changing browser submissions are same-origin and CSRF protected, and credential values are never placed in URLs.
 
+The `/storage/records` and `/storage/files` browser views perform the real scoped D1 and R2 operations. They accept an AittaDB bearer token only in a protected form body, do not retain or echo it, and forward each list, read/download, write/upload, or delete action through the same storage service used by REST clients.
+
 The browser UI uses a shared responsive AittaDB shell with page-aware trust-boundary copy, the same-origin `aittadb-boundary.jpg` artwork, the supplied `aittadb-mark.svg` storehouse mark, and an AittaDB-specific `og.png` social card. Inter is self-hosted from `/fonts/inter-latin-wght-normal.woff2`, with `system-ui`, `Segoe UI`, and `sans-serif` fallbacks. Styles come from `/auth-ui.css`; the UI loads no third-party runtime fonts, images, tracking code, or client scripts.
 
 ## Application Storage

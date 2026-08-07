@@ -7,3 +7,4 @@
 - Clarified the upstream boundary as ChatGPT sign-in inside ChatGPT Sites while retaining separate local subjects and broker-issued tokens.
 - Renamed the project to AittaDB and introduced its storehouse mark, Inter wordmark, navy/red-orange/teal palette, GitHub organization identity, hypermedia metadata name, and application-storage positioning.
 - Updated the React/RSC, Vinext, Vite, Cloudflare, and Wrangler stack to patched compatible versions; removed unused Drizzle Kit and Fontsource tooling; corrected runtime dependency placement; and added enforced dependency-audit and automated update checks.
+- Added production-backed browser forms for OAuth/OIDC and D1/R2 storage operations, plus a self-hosted Swagger UI for the canonical OpenAPI document.

@@ -412,9 +412,55 @@ export const openApiSpec = {
           "Requires an AittaDB access token with storage.read. Records are AittaDB application storage; they do not expose ChatGPT or OpenAI data.",
         security: [{ bearer: [] }],
         responses: {
-          "200": { description: "Record collection" },
+          "200": {
+            description:
+              "Record collection for bearer clients or a protected browser operation form when no Authorization header is present",
+            content: {
+              "application/json": { schema: { type: "object" } },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
+        },
+      },
+      post: {
+        summary: "Browser-only JSON record operation",
+        description:
+          "CSRF-protected same-origin adapter for list, read, write, and delete. It places the submitted token in a synthetic Authorization header and invokes the same production storage operation as a REST client.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["ui", "csrf_token", "operation", "access_token"],
+                properties: {
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                  operation: {
+                    type: "string",
+                    enum: ["list", "read", "write", "delete"],
+                  },
+                  access_token: { type: "string" },
+                  key: { type: "string", minLength: 1, maxLength: 240 },
+                  value: {
+                    type: "string",
+                    description: "JSON text for the write operation.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Readable result from the production storage route",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+          "403": { description: "Scope, CSRF, or same-origin rejection" },
+          "405": { description: "Browser representation marker missing" },
+          "413": { description: "Form or JSON record exceeds the limit" },
         },
       },
     },
@@ -424,7 +470,16 @@ export const openApiSpec = {
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
-          "200": { description: "Storage record" },
+          "200": {
+            description:
+              "Storage record or a browser operation form when no Authorization header is present",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/StorageRecord" },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
           "404": { description: "Record not found" },
         },
       },
@@ -458,9 +513,52 @@ export const openApiSpec = {
           "Requires storage.read. File bytes are stored in R2 and searchable metadata is stored in D1.",
         security: [{ bearer: [] }],
         responses: {
-          "200": { description: "File metadata collection" },
+          "200": {
+            description:
+              "File metadata collection for bearer clients or a protected browser operation form when no Authorization header is present",
+            content: {
+              "application/json": { schema: { type: "object" } },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
+        },
+      },
+      post: {
+        summary: "Browser-only file storage operation",
+        description:
+          "Bounded CSRF-protected same-origin multipart adapter for list, download, upload, and delete. It invokes the same D1 metadata and R2 byte operations as REST clients.",
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["ui", "csrf_token", "operation", "access_token"],
+                properties: {
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                  operation: {
+                    type: "string",
+                    enum: ["list", "download", "upload", "delete"],
+                  },
+                  access_token: { type: "string" },
+                  key: { type: "string", minLength: 1, maxLength: 240 },
+                  file: { type: "string", format: "binary" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "Readable operation result or original file bytes as an attachment for download",
+          },
+          "403": { description: "Scope, CSRF, or same-origin rejection" },
+          "405": { description: "Browser representation marker missing" },
+          "413": { description: "Multipart form or file exceeds the limit" },
         },
       },
     },
@@ -471,7 +569,8 @@ export const openApiSpec = {
         parameters: [storageKeyParameter],
         responses: {
           "200": {
-            description: "File bytes",
+            description:
+              "File bytes for bearer clients or a browser operation form when no Authorization header is present",
             headers: {
               "x-aittadb-storage-key": {
                 description: "Percent-encoded logical application key.",

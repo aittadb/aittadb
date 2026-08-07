@@ -105,6 +105,7 @@ Keep interfaces narrow and explicit:
 - Audit repository owns minimal redacted security events.
 - Rate-limit repository owns bounded counters and enforcement state.
 - Storage repository owns AittaDB JSON records, file metadata, and per-user/per-client object ownership. File bytes live in R2 behind generated object keys.
+- Storage browser adapter owns only same-origin HTML form parsing and representation. It must translate a protected form into a synthetic request to the production `storageEndpoint`; it must not duplicate authorization, scope checks, key validation, D1/R2 persistence, or storage state.
 - Crypto module owns random value generation, hashing, constant-time comparison, PKCE verification, JWT signing, JWT validation, and JWKS publication.
 - Configuration module owns environment parsing, defaults, secret presence checks, and production/test separation.
 - Representation negotiation owns the HTML-versus-JSON boundary. It may render browser forms and readable results, but it must call the same route validation, domain services, repositories, and cryptographic interfaces as the canonical API operation. Do not build mock or duplicate "demo" authentication or storage logic.
@@ -186,6 +187,7 @@ Storage rules:
 - Caller-supplied logical keys must never be used as physical R2 object keys. Generate physical R2 keys server-side.
 - Storage endpoints require this service's own bearer access tokens and `storage.read`, `storage.write`, or `storage.delete` scopes as applicable.
 - Storage scopes are local AittaDB permissions only; never describe them as granting ChatGPT or OpenAI access.
+- Browser record operations accept bearer values only in CSRF-protected form bodies, cap URL-encoded form input before forwarding, and rely on the canonical 64 KiB JSON limit. Browser file operations use bounded multipart parsing, reject declared bodies above the 10 MiB file limit plus bounded form overhead, recheck actual `File.size`, and forward bytes to the canonical R2 operation. Tokens must never be copied into result HTML, URLs, cookies, logs, or browser storage.
 
 ## OpenAPI Rules
 
@@ -272,7 +274,7 @@ The shared browser shell uses `public/aittadb-mark.svg`, the AittaDB wordmark, t
 
 ## Current Implementation State
 
-The core AittaDB OAuth/OIDC issuer, ChatGPT Sites identity adapter, D1 persistence, R2-backed per-user/per-client storage APIs, security controls, OpenAPI document, self-hosted Swagger UI, production-backed protocol browser forms, tests, CI, patched dependency set, shared branded HTML shell, public operation map, and protected local-session view are implemented on `codex/initial-implementation`. The remaining storage browser representation and hosted-domain acceptance work is authoritative in unchecked `PLAN.md` items `TASK-036` and `TASK-037`, in that dependency order. Do not describe those items as complete until each integrated interface, implementation, tests, documentation, validation evidence, deployment checks, and plan checkbox satisfy its full definition of done.
+The core AittaDB OAuth/OIDC issuer, ChatGPT Sites identity adapter, D1 persistence, R2-backed per-user/per-client storage APIs, security controls, OpenAPI document, self-hosted Swagger UI, production-backed protocol and storage browser forms, tests, CI, patched dependency set, shared branded HTML shell, public operation map, and protected local-session view are implemented on `codex/initial-implementation`. The only remaining unchecked work is hosted-domain and deployment acceptance in `PLAN.md` item `TASK-037`. Do not describe it as complete until canonical issuer configuration, live route parity, browser QA, real Sites checks, GitHub CI, deployment evidence, and the plan checkbox satisfy its full definition of done.
 
 ## Documentation Rules
 

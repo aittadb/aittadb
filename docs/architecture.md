@@ -10,6 +10,8 @@ System units:
 - `src/store/d1.ts`: D1 repository implementation.
 - `src/store/memory.ts`: test-only repository implementation.
 - `src/storage.ts`: AittaDB application-storage endpoints and scope enforcement.
+- `src/storage-browser.ts`: CSRF-protected HTML adapter that forwards browser record/file operations into `src/storage.ts`.
+- `src/storage-pages.ts`: focused browser forms and readable storage results with no credential persistence.
 - `src/handler.ts`: HTTP route handling, representation negotiation, CORS, CSRF, and browser flows backed by production services.
 - `src/openapi.ts`: canonical OpenAPI source served by `/openapi.json`.
 
@@ -20,3 +22,5 @@ D1 access is implemented with narrow repositories and prepared SQL statements. T
 It never stores or forwards ChatGPT credentials. Downstream `sub` values are locally generated immutable UUIDs.
 
 The public root advertises the real service operations in HTML and JSON hypermedia. `/session` is the protected upstream-authentication boundary: it reads the server-side ChatGPT Sites identity, creates or retrieves the D1-backed local user, and returns that same local identity as HTML or JSON. Browser representations never maintain a second user, grant, token, or storage model.
+
+Storage browser forms post only to the collection routes. The adapter validates same-origin and CSRF state, moves the submitted bearer value into an in-memory synthetic `Authorization` header, and invokes `storageEndpoint`. Record JSON therefore reaches the same 64 KiB parser and D1 repository as REST `PUT`; multipart file bytes reach the same 10 MiB limit, generated physical key, D1 metadata write, and R2 object operation as REST `PUT`. Results omit the submitted token.

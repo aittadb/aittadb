@@ -97,6 +97,8 @@ Forms must look intentional:
 
 Tables should be used only where density is useful, such as client administration. They need horizontal overflow handling on small screens and clear column headings.
 
+Storage forms use one explicit operation selector rather than simulated cards or client-side state. Keep bearer-token fields visually distinct as credential inputs, show record JSON in a monospace textarea, use the native accessible file input for R2 uploads, and render escaped operation results in the shared shell. A download response may leave the shell to return the actual file attachment from the production endpoint.
+
 ## Hypermedia Equivalence
 
 HTML pages show available actions as buttons or links. JSON responses should expose equivalent `_links` and `actions` objects where protocol compatibility allows. OAuth token success responses remain standards-compliant and do not include decorative hypermedia.

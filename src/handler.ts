@@ -9,10 +9,10 @@ import {
   bearerToken,
   cors,
   csrfCookie,
+  csrfTokenMatches,
   html,
   json,
   oauthError,
-  parseCookies,
   readForm,
   redirect,
   requireSameOrigin,
@@ -20,6 +20,7 @@ import {
 } from "./http";
 import { oidcConfiguration, openApiSpec } from "./openapi";
 import { storageEndpoint } from "./storage";
+import { storageBrowserEndpoint } from "./storage-browser";
 import {
   adminClientsPage,
   authUiCss,
@@ -547,6 +548,14 @@ async function route(
     );
   }
   if (url.pathname.startsWith("/storage/")) {
+    const browserResponse = await storageBrowserEndpoint(
+      request,
+      url,
+      env,
+      store,
+      config,
+    );
+    if (browserResponse) return browserResponse;
     return storageEndpoint(request, url, env, store, config);
   }
   if (url.pathname === "/device" && request.method === "GET") {
@@ -1181,9 +1190,7 @@ async function requireAdmin(
 }
 
 function validCsrf(request: Request, form: URLSearchParams): boolean {
-  const cookie = parseCookies(request).get("aittadb_csrf");
-  const value = form.get("csrf_token");
-  return Boolean(cookie && value && cookie === value);
+  return csrfTokenMatches(request, form.get("csrf_token"));
 }
 
 function redirectWithCode(
