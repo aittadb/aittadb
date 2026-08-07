@@ -6,6 +6,15 @@ const storageKeyParameter = {
   description: "Application-defined logical object key.",
 } as const;
 
+const representationFormatParameter = {
+  name: "format",
+  in: "query",
+  required: false,
+  schema: { type: "string", enum: ["json"] },
+  description:
+    "Force canonical JSON when a browser Accept header would otherwise select HTML.",
+} as const;
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -63,13 +72,34 @@ export const openApiSpec = {
     "/.well-known/openid-configuration": {
       get: {
         summary: "OpenID Provider metadata",
-        responses: { "200": { description: "OIDC metadata" } },
+        parameters: [representationFormatParameter],
+        responses: {
+          "200": {
+            description: "OIDC metadata or readable browser representation",
+            content: {
+              "application/json": { schema: { type: "object" } },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+        },
       },
     },
     "/.well-known/jwks.json": {
       get: {
         summary: "JSON Web Key Set",
-        responses: { "200": { description: "Public ES256 signing keys" } },
+        parameters: [representationFormatParameter],
+        responses: {
+          "200": {
+            description:
+              "Public ES256 signing keys or readable browser representation",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/JsonWebKeySet" },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+        },
       },
     },
     "/authorize": {
@@ -112,6 +142,11 @@ export const openApiSpec = {
           },
         ],
         responses: {
+          "200": {
+            description:
+              "Browser request form when no client request parameters are supplied",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
           "302": {
             description:
               "Continues to same-origin consent or redirects an OAuth error",
@@ -120,6 +155,18 @@ export const openApiSpec = {
       },
     },
     "/oauth/device_authorization": {
+      get: {
+        summary: "Browser form for Device Authorization Grant initiation",
+        description:
+          "Returns an HTML form that posts to the production device authorization operation. API clients should use POST directly.",
+        responses: {
+          "200": {
+            description: "Same-origin HTML form with CSRF protection",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+          "405": { description: "JSON clients must use POST" },
+        },
+      },
       post: {
         summary: "OAuth 2.0 Device Authorization Grant endpoint",
         requestBody: {
@@ -130,38 +177,191 @@ export const openApiSpec = {
                 required: ["client_id"],
                 properties: {
                   client_id: { type: "string" },
+                  client_secret: {
+                    type: "string",
+                    description: "Required only for confidential clients.",
+                  },
                   scope: { type: "string" },
+                  ui: {
+                    type: "string",
+                    const: "1",
+                    description:
+                      "Browser-only representation marker. Requires csrf_token and same-origin submission.",
+                  },
+                  csrf_token: { type: "string" },
                 },
               },
             },
           },
         },
         responses: {
-          "200": { description: "Device code response" },
+          "200": {
+            description: "Device code response or readable HTML result",
+            content: {
+              "application/json": {
+                schema: {
+                  $ref: "#/components/schemas/DeviceAuthorizationResponse",
+                },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
           "400": { description: "OAuth error" },
+          "403": { description: "Browser CSRF or same-origin rejection" },
         },
       },
     },
     "/oauth/token": {
+      get: {
+        summary: "Browser form for token exchange",
+        description:
+          "Returns an HTML form that posts to the production token operation. API clients should use POST directly.",
+        responses: {
+          "200": {
+            description: "Same-origin HTML form with CSRF protection",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+          "405": { description: "JSON clients must use POST" },
+        },
+      },
       post: {
         summary:
           "OAuth 2.0 token endpoint for device, authorization_code, and refresh_token grants",
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["grant_type"],
+                properties: {
+                  grant_type: {
+                    type: "string",
+                    enum: [
+                      "urn:ietf:params:oauth:grant-type:device_code",
+                      "authorization_code",
+                      "refresh_token",
+                    ],
+                  },
+                  client_id: { type: "string" },
+                  client_secret: { type: "string" },
+                  device_code: { type: "string" },
+                  code: { type: "string" },
+                  redirect_uri: { type: "string", format: "uri" },
+                  code_verifier: { type: "string" },
+                  refresh_token: { type: "string" },
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                },
+              },
+            },
+          },
+        },
         responses: {
-          "200": { description: "Token response" },
+          "200": {
+            description:
+              "Protocol-standard JSON token response or deliberate one-time HTML credential result",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/TokenResponse" },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
           "400": { description: "OAuth error" },
+          "401": { description: "Client authentication failed" },
+          "403": { description: "Browser CSRF or same-origin rejection" },
         },
       },
     },
     "/oauth/revoke": {
+      get: {
+        summary: "Browser form for token revocation",
+        responses: {
+          "200": {
+            description: "Same-origin HTML form with CSRF protection",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+          "405": { description: "JSON clients must use POST" },
+        },
+      },
       post: {
         summary: "Token revocation",
-        responses: { "200": { description: "Revoked" } },
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["token"],
+                properties: {
+                  token: { type: "string" },
+                  token_type_hint: { type: "string" },
+                  client_id: { type: "string" },
+                  client_secret: { type: "string" },
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Revocation accepted",
+            content: {
+              "application/json": { schema: { type: "object" } },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+        },
       },
     },
     "/oauth/introspect": {
+      get: {
+        summary: "Browser form for token introspection",
+        responses: {
+          "200": {
+            description: "Same-origin HTML form with CSRF protection",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+          "405": { description: "JSON clients must use POST" },
+        },
+      },
       post: {
         summary: "Token introspection for confidential clients",
-        responses: { "200": { description: "Introspection result" } },
+        security: [{ clientSecretBasic: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["token"],
+                properties: {
+                  token: { type: "string" },
+                  token_type_hint: { type: "string" },
+                  client_id: { type: "string" },
+                  client_secret: { type: "string" },
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Introspection result",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/IntrospectionResponse" },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+          "401": { description: "Confidential client authentication failed" },
+        },
       },
     },
     "/userinfo": {
@@ -171,6 +371,36 @@ export const openApiSpec = {
         responses: {
           "200": { description: "Local user claims" },
           "401": { description: "Invalid bearer token" },
+        },
+      },
+      post: {
+        summary: "Browser-only UserInfo form submission",
+        description:
+          "Accepts a bearer token in a CSRF-protected same-origin form body, then invokes the same UserInfo validation as GET. Non-browser clients should use GET with Authorization: Bearer.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["ui", "csrf_token", "access_token"],
+                properties: {
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                  access_token: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Readable UserInfo claims",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+          "401": { description: "Invalid AittaDB access token" },
+          "403": { description: "CSRF or same-origin rejection" },
+          "405": { description: "Browser representation marker missing" },
         },
       },
     },
@@ -282,13 +512,25 @@ export const openApiSpec = {
     "/openapi.json": {
       get: {
         summary: "OpenAPI 3.1 JSON",
-        responses: { "200": { description: "OpenAPI spec" } },
+        parameters: [representationFormatParameter],
+        responses: {
+          "200": {
+            description:
+              "Canonical OpenAPI document or readable browser representation",
+            content: {
+              "application/json": { schema: { type: "object" } },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+        },
       },
     },
     "/docs": {
       get: {
-        summary: "Minimal OpenAPI viewer",
-        responses: { "200": { description: "HTML viewer" } },
+        summary: "Self-hosted interactive Swagger UI",
+        description:
+          "Loads the canonical /openapi.json document and calls real same-origin AittaDB routes. Browser assets are pinned and self-hosted; no CDN is used.",
+        responses: { "200": { description: "Interactive HTML API viewer" } },
       },
     },
   },
@@ -345,6 +587,88 @@ export const openApiSpec = {
           },
           _links: { $ref: "#/components/schemas/HypermediaLinks" },
           actions: { type: "object", additionalProperties: true },
+        },
+      },
+      JsonWebKeySet: {
+        type: "object",
+        required: ["keys"],
+        properties: {
+          keys: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["kty", "crv", "x", "y", "alg", "use", "kid"],
+              properties: {
+                kty: { type: "string", const: "EC" },
+                crv: { type: "string", const: "P-256" },
+                x: { type: "string" },
+                y: { type: "string" },
+                alg: { type: "string", const: "ES256" },
+                use: { type: "string", const: "sig" },
+                kid: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+      DeviceAuthorizationResponse: {
+        type: "object",
+        required: [
+          "device_code",
+          "user_code",
+          "verification_uri",
+          "verification_uri_complete",
+          "expires_in",
+          "interval",
+        ],
+        properties: {
+          device_code: { type: "string" },
+          user_code: { type: "string" },
+          verification_uri: { type: "string", format: "uri" },
+          verification_uri_complete: { type: "string", format: "uri" },
+          expires_in: { type: "integer" },
+          interval: { type: "integer" },
+          _links: { $ref: "#/components/schemas/HypermediaLinks" },
+          actions: { type: "object", additionalProperties: true },
+        },
+        examples: [
+          {
+            device_code: "opaque-high-entropy-device-code",
+            user_code: "ABCD-EFGH",
+            verification_uri: "https://aittadb.com/device",
+            verification_uri_complete:
+              "https://aittadb.com/device?user_code=ABCD-EFGH",
+            expires_in: 600,
+            interval: 5,
+          },
+        ],
+      },
+      TokenResponse: {
+        type: "object",
+        required: ["access_token", "token_type", "expires_in", "scope"],
+        properties: {
+          access_token: { type: "string" },
+          token_type: { type: "string", const: "Bearer" },
+          expires_in: { type: "integer" },
+          scope: { type: "string" },
+          id_token: { type: "string" },
+          refresh_token: { type: "string" },
+        },
+      },
+      IntrospectionResponse: {
+        type: "object",
+        required: ["active"],
+        properties: {
+          active: { type: "boolean" },
+          iss: { type: "string", format: "uri" },
+          sub: { type: "string", format: "uuid" },
+          aud: { type: "string" },
+          exp: { type: "integer" },
+          iat: { type: "integer" },
+          nbf: { type: "integer" },
+          jti: { type: "string", format: "uuid" },
+          scope: { type: "string" },
+          token_use: { type: "string", const: "access" },
         },
       },
       OAuthError: {

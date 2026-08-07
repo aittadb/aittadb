@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      sites-runtime:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "react-server-dom-webpack"
+          - "vinext"
+          - "vite"
+          - "@vitejs/*"
+          - "@cloudflare/*"
+          - "wrangler"

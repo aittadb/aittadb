@@ -293,16 +293,6 @@ export async function createAuthorizeRequest(
   store: AuthStore,
 ): Promise<Response> {
   const now = nowSeconds();
-  if (url.searchParams.get("response_type") !== "code") {
-    return redirectOAuthError(
-      url,
-      "unsupported_response_type",
-      "Only response_type=code is supported",
-    );
-  }
-  if (url.searchParams.get("code_challenge_method") !== "S256") {
-    return redirectOAuthError(url, "invalid_request", "PKCE S256 is required");
-  }
   const clientId = url.searchParams.get("client_id") || "";
   const client = await store.getClient(clientId);
   if (!client || client.disabledAt)
@@ -313,6 +303,33 @@ export async function createAuthorizeRequest(
       "invalid_request",
       "redirect_uri must exactly match a registered URI",
       400,
+    );
+  }
+  const errorRedirect = new URL(redirectUri);
+  const state = url.searchParams.get("state");
+  if (url.searchParams.get("response_type") !== "code") {
+    return redirectOAuthError(
+      errorRedirect,
+      "unsupported_response_type",
+      "Only response_type=code is supported",
+      state,
+    );
+  }
+  if (url.searchParams.get("code_challenge_method") !== "S256") {
+    return redirectOAuthError(
+      errorRedirect,
+      "invalid_request",
+      "PKCE S256 is required",
+      state,
+    );
+  }
+  const codeChallenge = url.searchParams.get("code_challenge") || "";
+  if (!/^[A-Za-z0-9_-]{43}$/.test(codeChallenge)) {
+    return redirectOAuthError(
+      errorRedirect,
+      "invalid_request",
+      "A valid S256 code challenge is required",
+      state,
     );
   }
   const scopes = parseScopes(
@@ -331,9 +348,9 @@ export async function createAuthorizeRequest(
     clientId: client.id,
     redirectUri,
     scope: scopes.join(" "),
-    state: url.searchParams.get("state"),
+    state,
     nonce: url.searchParams.get("nonce"),
-    codeChallenge: url.searchParams.get("code_challenge") || "",
+    codeChallenge,
     createdAt: now,
     expiresAt: now + config.authCodeTtlSeconds,
     userId: null,

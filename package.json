@@ -20,41 +20,42 @@
     "test:unit": "node --import tsx --test tests/unit/*.test.ts",
     "test:integration": "node --import tsx --test tests/integration/*.test.ts",
     "openapi:check": "node --import tsx scripts/check-openapi.ts",
-    "db:generate": "drizzle-kit generate",
+    "swagger:sync": "node --import tsx scripts/sync-swagger-ui.ts",
+    "swagger:check": "node --import tsx scripts/sync-swagger-ui.ts --check",
     "db:check": "node --import tsx scripts/check-migrations.ts",
+    "audit:high": "npm audit --audit-level=high",
     "keys:generate": "node --import tsx scripts/generate-keypair.ts",
-    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run openapi:check && npm run db:check && npm run build"
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run openapi:check && npm run swagger:check && npm run db:check && npm run audit:high && npm run build"
   },
   "dependencies": {
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-server-dom-webpack": "19.2.8",
+    "swagger-ui-dist": "5.32.12",
+    "vinext": "1.0.0-beta.4"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/vite-plugin": "1.51.1",
     "@eslint/js": "9.39.4",
-    "@fontsource-variable/inter": "^5.3.0",
     "@next/eslint-plugin-next": "16.2.6",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
-    "drizzle-kit": "0.31.10",
+    "@vitejs/plugin-react": "6.0.5",
+    "@vitejs/plugin-rsc": "0.5.34",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "16.4.0",
     "prettier": "3.7.4",
-    "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
-    "tsx": "4.21.0",
+    "tsx": "4.23.11",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
-    "vinext": "1.0.0-beta.2",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "vite": "8.2.1",
+    "wrangler": "4.120.0"
   },
   "type": "module"
 }

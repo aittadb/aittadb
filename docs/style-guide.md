@@ -103,6 +103,8 @@ HTML pages show available actions as buttons or links. JSON responses should exp
 
 The root remains publicly readable so clients can discover the issuer and begin OAuth flows before authentication. Identity-aware browser operations enter through `/session`, which starts the Sites-owned ChatGPT sign-in flow when needed and displays only the signed-in user's local AittaDB subject. A signed-in browser is not automatically authorized for client-scoped storage.
 
+`/docs` uses the self-hosted Swagger UI distribution inside the branded wide documentation layout. Load its CSS and scripts only from checked-in same-origin assets, point it at the canonical `/openapi.json`, disable persisted authorization, and keep the raw JSON link available. Swagger operations call the real API; do not populate them with working secrets or production credentials as examples.
+
 ## Review Checklist
 
 Before completing browser UI work:
