@@ -51,6 +51,8 @@ npm run validate
 - `GET /openapi.json`
 - `GET /docs`
 
+`GET /` and `GET /health` use content negotiation. Browsers that prefer `text/html` receive minimal HTML views; API clients that request JSON, or send generic CLI-style `Accept: */*`, receive JSON. JSON metadata is hypermedia-oriented and advertises `_links` and `actions` so clients can discover available operations instead of hard-coding every route.
+
 ## Sites Boundary
 
 Sites owns `/signin-with-chatgpt` and `/signout-with-chatgpt`. This service reads only server-side `oai-authenticated-user-email`, optional `oai-authenticated-user-full-name`, and the full-name encoding header. It never forwards or exposes ChatGPT cookies, credentials, sessions, or tokens.

@@ -129,3 +129,32 @@ export function parseCookies(request: Request): Map<string, string> {
 export function csrfCookie(value: string): string {
   return `sab_csrf=${value}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=900`;
 }
+
+export function acceptsHtml(request: Request): boolean {
+  const accept = request.headers.get("accept");
+  if (!accept) return false;
+  const ranges = accept
+    .split(",")
+    .map((part) => {
+      const [type, ...params] = part.trim().split(";");
+      const q = params
+        .map((param) => param.trim())
+        .find((param) => param.startsWith("q="));
+      return {
+        type: type.toLowerCase(),
+        q: q ? Number.parseFloat(q.slice(2)) : 1,
+      };
+    })
+    .filter((range) => Number.isFinite(range.q) && range.q > 0);
+
+  const html = ranges.find((range) => range.type === "text/html");
+  if (!html) return false;
+
+  const json = ranges.find(
+    (range) =>
+      range.type === "application/json" ||
+      range.type === "application/*" ||
+      range.type === "*/*",
+  );
+  return !json || html.q >= json.q;
+}
