@@ -21,6 +21,8 @@ The first user-facing reference to the upstream authentication must say "ChatGPT
 
 Always pair the upstream description with the boundary: AittaDB creates a separate user with an immutable UUID, issues its own tokens, and stores application data only inside AittaDB. Those tokens are not OpenAI or ChatGPT tokens, and AittaDB never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
 
+Label the downstream credential source as **Session issuer**, never **Token authority**. The latter can be mistaken for AI-model token accounting. Supporting copy may name OAuth, OIDC, and JWT credentials explicitly.
+
 ## Brand System
 
 The product name is **AittaDB**. Render the wordmark as two adjacent spans so its typography and colors cannot drift:

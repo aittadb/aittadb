@@ -285,7 +285,7 @@ export const openApiSpec = {
           "issuer",
           "officialOpenAIProduct",
           "upstreamSignIn",
-          "tokenAuthority",
+          "sessionIssuer",
           "_links",
           "actions",
         ],
@@ -317,9 +317,11 @@ export const openApiSpec = {
               credentialsForwarded: { type: "boolean", const: false },
             },
           },
-          tokenAuthority: {
+          sessionIssuer: {
             type: "string",
             const: "AittaDB",
+            description:
+              "Service that issues the downstream OAuth, OIDC, and JWT session credentials.",
           },
           _links: { $ref: "#/components/schemas/HypermediaLinks" },
           actions: { type: "object", additionalProperties: true },
