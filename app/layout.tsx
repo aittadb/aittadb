@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Sites Auth Broker",
   description:
-    "Independent OAuth 2.0, OpenID Connect, and JWT sessions from ChatGPT Sites identity.",
+    "Independent OAuth 2.0, OpenID Connect, and JWT sessions based on ChatGPT sign-in inside ChatGPT Sites.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

@@ -23,10 +23,28 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   const apiRootJson = (await apiRoot?.json()) as {
     service: string;
+    upstreamSignIn: {
+      source: string;
+      identitySignal: string;
+      stableSubjectSupplied: boolean;
+      credentialsForwarded: boolean;
+    };
+    tokenAuthority: string;
     _links: { docs: { href: string }; oidcConfiguration: { href: string } };
     actions: { deviceAuthorization: { method: string } };
   };
   assert.equal(apiRootJson.service, "Sites Auth Broker");
+  assert.equal(
+    apiRootJson.upstreamSignIn.source,
+    "ChatGPT sign-in inside ChatGPT Sites",
+  );
+  assert.equal(
+    apiRootJson.upstreamSignIn.identitySignal,
+    "server-side email and optional display name",
+  );
+  assert.equal(apiRootJson.upstreamSignIn.stableSubjectSupplied, false);
+  assert.equal(apiRootJson.upstreamSignIn.credentialsForwarded, false);
+  assert.equal(apiRootJson.tokenAuthority, "Sites Auth Broker");
   assert.equal(
     apiRootJson._links.docs.href,
     "https://broker.example.test/docs",
@@ -51,7 +69,10 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.doesNotMatch(browserRootHtml, /<style>/);
   assert.match(browserRootHtml, /class="visual-panel"/);
   assert.match(browserRootHtml, /src="\/broker-aperture\.jpg"/);
-  assert.match(browserRootHtml, /One trusted signal/);
+  assert.match(browserRootHtml, /ChatGPT sign-in/);
+  assert.match(browserRootHtml, /separate local UUID/);
+  assert.match(browserRootHtml, /tokens are not OpenAI or ChatGPT tokens/);
+  assert.doesNotMatch(browserRootHtml, /Sites identity/);
   assert.match(
     browserRootHtml,
     /https:\/\/github\.com\/sendanor\/sites-auth-broker/,

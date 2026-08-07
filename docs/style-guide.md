@@ -15,6 +15,12 @@ Use one shared authentication-service shell for all normal HTML responses:
 
 The normal page set is limited to service metadata, health, device-code entry, device approval or denial, OAuth consent, OAuth errors, administrator client registration, and the minimal OpenAPI viewer.
 
+## Terminology
+
+The first user-facing reference to the upstream authentication must say "ChatGPT sign-in inside ChatGPT Sites." Later references on the same page may say "ChatGPT sign-in." Do not present the standalone phrase "Sites identity" to users.
+
+Always pair the upstream description with the boundary: Sites Auth Broker creates a separate local user with an immutable UUID and issues its own tokens. Those tokens are not OpenAI or ChatGPT tokens, and the broker never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
+
 ## Visual Direction
 
 Prefer:

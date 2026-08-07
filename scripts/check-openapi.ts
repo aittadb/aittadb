@@ -1,6 +1,7 @@
 import { openApiSpec } from "../src/openapi";
 
 const requiredPaths = [
+  "/",
   "/health",
   "/.well-known/openid-configuration",
   "/.well-known/jwks.json",

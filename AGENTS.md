@@ -2,7 +2,7 @@
 
 ## Project Purpose and Boundary
 
-Sites Auth Broker is an independent authentication broker that converts ChatGPT Sites identity into standard OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.
+Sites Auth Broker is an independent authentication broker based on ChatGPT sign-in inside ChatGPT Sites. It maps the server-side identity signal to a separate local user and issues standard OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.
 
 This project is independent and is not affiliated with, endorsed by, or an official product of OpenAI. Do not describe it as "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or anything that implies tokens issued by this service are OpenAI or ChatGPT tokens.
 
@@ -62,6 +62,12 @@ The supported local scopes for the MVP are:
 - `storage.delete`
 
 These scopes grant claims, refresh behavior, or broker-local storage operations from Sites Auth Broker. They do not grant access to ChatGPT or OpenAI data.
+
+## Product Terminology
+
+On first reference in user-facing UI, JSON metadata, and documentation, call the upstream browser authentication "ChatGPT sign-in inside ChatGPT Sites." A shorter later reference may use "ChatGPT sign-in." Do not use the standalone phrase "Sites identity" in user-facing content because it does not explain the identity source.
+
+"ChatGPT sign-in" names only the upstream browser authentication supplied by the Sites runtime. In the same context, distinguish the immutable local UUID and tokens issued independently by Sites Auth Broker. Never imply a general OpenAI or ChatGPT OAuth service, token authority, endorsement, or access to ChatGPT data. Internal implementation names may use "Sites identity adapter" or "Sites identity provider" when discussing the runtime interface precisely.
 
 ## Repository Structure
 
