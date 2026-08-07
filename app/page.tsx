@@ -14,10 +14,10 @@ export default function Page() {
       <p className="eyebrow">Hosted application backend</p>
       <h1>Sign-in, data, and files for third-party applications.</h1>
       <p>
-        AittaDB runs inside ChatGPT Sites. It maps ChatGPT sign-in to a separate
-        AittaDB user, issues its own OAuth 2.0 and OpenID Connect sessions, and
-        provides persistent JSON records and file storage isolated by user and
-        client.
+        AittaDB is deployed as an application on OpenAI-hosted ChatGPT Sites. It
+        maps ChatGPT sign-in to a separate AittaDB user, issues its own OAuth
+        2.0 and OpenID Connect sessions, and provides persistent JSON records
+        and file storage isolated by user and client.
       </p>
       <p>
         Third-party apps, services, and agents use AittaDB through its REST and

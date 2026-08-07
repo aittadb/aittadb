@@ -4,7 +4,7 @@
 
 [GitHub repository](https://github.com/aittadb/aittadb)
 
-**An application backend that runs entirely on ChatGPT Sites.**
+**An application backend that runs entirely on OpenAI-hosted ChatGPT Sites.**
 
 AittaDB currently provides authentication, persistent JSON data, and object storage through a single self-contained ChatGPT Sites deployment. Persistent events and long-polling delivery are planned and are not part of the current MVP. AittaDB is designed for third-party applications that need backend capabilities without requiring separate application servers, database servers, object-storage services, or authentication infrastructure.
 
@@ -18,7 +18,7 @@ Current releases are source-available under FSL-1.1-MIT. Each released version c
 
 ## Built for ChatGPT Sites
 
-AittaDB is designed to run and be hosted on [ChatGPT Sites](https://learn.chatgpt.com/docs/sites). It uses capabilities provided by the Sites platform:
+AittaDB is designed to be deployed as an application on [ChatGPT Sites](https://learn.chatgpt.com/docs/sites), an OpenAI-hosted platform. It uses capabilities provided by the Sites platform:
 
 - Managed application hosting and runtime.
 - ChatGPT sign-in supplied inside the Sites trust boundary.
