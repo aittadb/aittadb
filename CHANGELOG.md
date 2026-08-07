@@ -26,3 +26,4 @@
 - Hardened OAuth state with atomic authorization, device, code, and refresh-token transitions; access-token purpose checks; `openid`-gated UserInfo; client-bound access/refresh revocation with hint fallback; and refresh-family reuse detection.
 - Made browser mutation origin checks reject missing headers, bounded complete multipart streams independently of `Content-Length`, and added copy-on-write plus bounded D1/R2 compensation for file failures.
 - Replaced Vinext's vulnerable unpatched `image-size` transitive package with a narrow checked-in compatibility adapter backed by `image-dimensions`, retaining a zero-high-severity dependency audit.
+- Added an explicitly non-committal backlog for namespace-isolated backup, verified restore, incremental backup, and live synchronization design work, with repository checks that keep it distinct from the implementation plan and product roadmap.

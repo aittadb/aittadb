@@ -45,7 +45,7 @@ OpenAI currently publishes no fixed numerical figures for Sites D1/R2 capacity o
 
 The goal is to let developers build persistent, authenticated applications without first deploying and maintaining a conventional backend stack.
 
-The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, and files are available in the MVP; Events remains an explicitly planned capability. See [ROADMAP.md](ROADMAP.md) for future work; unchecked roadmap items are not current features or release commitments.
+The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, and files are available in the MVP; Events remains an explicitly planned capability. See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
 
 ## Why AittaDB?
 
@@ -162,6 +162,7 @@ This is an invitation to start a conversation rather than an announcement of a f
 
 - Explore the [AittaDB repositories](https://github.com/aittadb).
 - Review the planned, not-yet-implemented work in [ROADMAP.md](ROADMAP.md).
+- Review unscheduled, uncommitted implementation ideas in [BACKLOG.md](BACKLOG.md).
 - Read each repository's documentation.
 - Use [GitHub Issues](https://github.com/aittadb/aittadb/issues) for bug reports and feature proposals.
 - Read the [ChatGPT Sites documentation](https://learn.chatgpt.com/docs/sites).

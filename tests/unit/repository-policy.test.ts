@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const AGENTS_PATH = new URL("../../AGENTS.md", import.meta.url);
+const BACKLOG_PATH = new URL("../../BACKLOG.md", import.meta.url);
 const README_PATH = new URL("../../README.md", import.meta.url);
 const ROADMAP_PATH = new URL("../../ROADMAP.md", import.meta.url);
 const MAX_AGENTS_BYTES = 32_000;
@@ -75,6 +76,39 @@ test("ROADMAP.md is one stable flat list of unchecked future items", async () =>
   );
   assert.match(roadmap, /Persistent Events has no current API/);
   assert.match(roadmap, /provider capacity explicitly unknown/);
+});
+
+test("BACKLOG.md is one stable flat list of unchecked uncommitted ideas", async () => {
+  const backlog = await readFile(BACKLOG_PATH, "utf8");
+  const checkboxLines = backlog
+    .split("\n")
+    .filter((line) => /^\s*- \[[ x]\]/i.test(line));
+
+  assert.ok(checkboxLines.length > 0, "BACKLOG.md must contain ideas");
+  assert.ok(
+    checkboxLines.every((line) => /^- \[ \] BACKLOG-\d{3}: /.test(line)),
+    "backlog items must be top-level, unchecked, and use stable identifiers",
+  );
+  assert.deepEqual(
+    checkboxLines.map((line) => Number(line.match(/BACKLOG-(\d{3})/)?.[1])),
+    checkboxLines.map((_, index) => index + 1),
+    "backlog identifiers must remain sequential",
+  );
+  assert.match(backlog, /not a current capability, release commitment/);
+  assert.match(backlog, /must never export, import, mirror, or reveal/);
+  assert.match(
+    backlog,
+    /BACKLOG-001: Define namespace-scoped point-in-time backup/,
+  );
+  assert.match(backlog, /BACKLOG-004: Define opt-in live synchronization/);
+});
+
+test("README distinguishes delivery, roadmap, and backlog documents", async () => {
+  const readme = await readFile(README_PATH, "utf8");
+
+  assert.match(readme, /\[ROADMAP\.md\]\(ROADMAP\.md\)/);
+  assert.match(readme, /\[BACKLOG\.md\]\(BACKLOG\.md\)/);
+  assert.match(readme, /backup and live synchronization/);
 });
 
 test("README documents unknown Sites quotas without advertising capacity", async () => {

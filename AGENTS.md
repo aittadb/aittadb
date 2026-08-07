@@ -202,7 +202,7 @@ Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing,
 
 ## Documentation Set
 
-Maintain `README.md`, `AGENTS.md`, `PLAN.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.env.example`, architecture, style, performance, threat model, deployment, self-hosting limits, OpenAPI, schema/migrations, CLI Device Grant example, browser/native PKCE example, curl examples, key generation/rotation, downstream JWT verification, fork setup, and Sites-specific behavior.
+Maintain `README.md`, `AGENTS.md`, `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.env.example`, architecture, style, performance, threat model, deployment, self-hosting limits, OpenAPI, schema/migrations, CLI Device Grant example, browser/native PKCE example, curl examples, key generation/rotation, downstream JWT verification, fork setup, and Sites-specific behavior.
 
 README must prominently state experimental status, independence, the Sites identity-header dependency, separate local identity/credentials, no official ChatGPT OAuth service, self-hosting adapter replacement, and FSL-to-MIT conversion. Keep implementation claims current.
 
@@ -233,7 +233,9 @@ Process in order unless a discovered dependency is documented. Add missing work 
 
 Parallelize independent reads, validation commands, and non-overlapping implementation work whenever practical. Serialize dependent, overlapping, and security-sensitive edits; use an isolated Git worktree only when it reduces conflict without replacing this canonical checkout.
 
-`ROADMAP.md` lists future product capabilities as one flat stable `ROADMAP-NNN` checkbox list. It never implies availability. Before implementing a roadmap item, capture the integrated delivery unit in `PLAN.md`; mark roadmap work complete only after the same definition of done passes.
+`ROADMAP.md` lists future product direction as one flat stable `ROADMAP-NNN` checkbox list. `BACKLOG.md` lists uncommitted, unscheduled ideas as one flat stable `BACKLOG-NNN` checkbox list. Neither implies availability or authorizes implementation. Before implementing an item from either file, capture the integrated delivery unit in `PLAN.md`; update its source item only after the PLAN definition of done passes or the idea is explicitly retired with a documented replacement.
+
+Backup, restore, and synchronization designs must remain inside the authenticated user and authorized client namespace. They must exclude AittaDB's OAuth/identity/internal tables, other namespaces, physical R2 keys, environment and binding data, signing keys, secrets, and deployment metadata. Provider capacity is unknown; require bounded, resumable, idempotent, integrity-checked operations with documented conflict, deletion, recovery, quota, and partial-failure semantics before implementation.
 
 ## Definition of Done
 
