@@ -26,6 +26,7 @@ import {
   consentPage,
   deviceConsentPage,
   deviceEntryPage,
+  deviceOutcomePage,
   docsPage,
   errorPage,
   healthPage,
@@ -147,7 +148,7 @@ async function route(
         stableSubjectSupplied: false,
         credentialsForwarded: false,
       },
-      tokenAuthority: "AittaDB",
+      sessionIssuer: "AittaDB",
       _links: {
         self: { href: config.issuerUrl },
         health: { href: `${config.issuerUrl}/health` },
@@ -598,15 +599,7 @@ async function deviceDecisionPost(
   grant.status = form.get("decision") === "approve" ? "approved" : "denied";
   grant.userId = grant.status === "approved" ? user.id : null;
   await store.updateDeviceGrant(grant);
-  return html(
-    errorPage(
-      "Device request updated",
-      grant.status === "approved"
-        ? "You may return to the CLI."
-        : "The request was denied.",
-      { status: 200, error: grant.status },
-    ),
-  );
+  return html(deviceOutcomePage(grant.status));
 }
 
 async function consentGet(

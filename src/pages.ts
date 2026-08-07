@@ -18,6 +18,7 @@ interface PageOptions {
   actions?: readonly PageAction[];
   tone?: "default" | "success" | "warning" | "danger";
   status?: number;
+  statusLabel?: string;
   social?: {
     description: string;
     imageUrl: string;
@@ -37,7 +38,7 @@ export function serviceHomePage(metadata: {
     stableSubjectSupplied: boolean;
     credentialsForwarded: boolean;
   };
-  tokenAuthority: string;
+  sessionIssuer: string;
   _links?: Record<string, { href: string; type?: string }>;
   actions?: Record<string, unknown>;
 }): string {
@@ -58,7 +59,7 @@ export function serviceHomePage(metadata: {
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Token authority</span><strong>${escapeHtml(metadata.tokenAuthority)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID, issues its own OAuth, OIDC, and JWT tokens, and provides client-isolated storage. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID, issues its own OAuth, OIDC, and JWT tokens, and provides client-isolated storage. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p>`,
     actions: [
       { href: "/docs", label: "API docs" },
       { href: "/openapi.json", label: "OpenAPI JSON", secondary: true },
@@ -218,6 +219,34 @@ export function adminClientsPage(
   });
 }
 
+export function deviceOutcomePage(status: "approved" | "denied"): string {
+  const approved = status === "approved";
+  return pageDocument({
+    title: approved ? "Device approved" : "Device denied",
+    eyebrow: "Device authorization",
+    heading: approved ? "Device approved" : "Device denied",
+    summary: approved
+      ? "Return to the application that displayed this code. It can now complete the AittaDB token exchange."
+      : "The application request was denied. No AittaDB credentials will be issued for this device code.",
+    statusLabel: approved ? "Request approved" : "Request denied",
+    tone: approved ? "success" : "warning",
+    visualEyebrow: approved
+      ? "Authorization complete"
+      : "Authorization stopped",
+    visualHeading: approved
+      ? "Approved. The device can continue."
+      : "Denied. No credentials cross this boundary.",
+    visualSummary: approved
+      ? "The application can finish its standards-based exchange without receiving any upstream ChatGPT credential."
+      : "AittaDB records the denial so the polling application receives the standard access_denied response.",
+    body: `<section class="info-grid" aria-label="Device outcome"><div><span>Status</span><strong>${status}</strong></div><div><span>Next step</span><strong>${approved ? "Return to the application" : "Close this page"}</strong></div></section>`,
+    actions: [
+      { href: "/", label: "Service" },
+      { href: "/docs", label: "API docs", secondary: true },
+    ],
+  });
+}
+
 export function errorPage(
   title: string,
   message: string,
@@ -255,13 +284,14 @@ export function errorPage(
 function pageDocument(options: PageOptions): string {
   const tone = options.tone ?? "default";
   const toneLabel =
-    tone === "success"
+    options.statusLabel ??
+    (tone === "success"
       ? "Service ready"
       : tone === "warning"
         ? "Attention required"
         : tone === "danger"
           ? "Service interruption"
-          : "AittaDB service";
+          : "AittaDB service");
   const actions = options.actions?.length
     ? `<nav class="actions" aria-label="Available actions">${options.actions
         .map(

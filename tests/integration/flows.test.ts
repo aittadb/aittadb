@@ -29,7 +29,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       stableSubjectSupplied: boolean;
       credentialsForwarded: boolean;
     };
-    tokenAuthority: string;
+    sessionIssuer: string;
     _links: { docs: { href: string }; oidcConfiguration: { href: string } };
     actions: { deviceAuthorization: { method: string } };
   };
@@ -44,7 +44,8 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   assert.equal(apiRootJson.upstreamSignIn.stableSubjectSupplied, false);
   assert.equal(apiRootJson.upstreamSignIn.credentialsForwarded, false);
-  assert.equal(apiRootJson.tokenAuthority, "AittaDB");
+  assert.equal(apiRootJson.sessionIssuer, "AittaDB");
+  assert.equal(Object.hasOwn(apiRootJson, "tokenAuthority"), false);
   assert.equal(
     apiRootJson._links.docs.href,
     "https://aittadb.example.test/docs",
@@ -82,6 +83,8 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /ChatGPT sign-in/);
   assert.match(browserRootHtml, /separate local UUID/);
   assert.match(browserRootHtml, /tokens are not OpenAI or ChatGPT tokens/);
+  assert.match(browserRootHtml, /Session issuer/);
+  assert.doesNotMatch(browserRootHtml, /Token authority/i);
   assert.doesNotMatch(browserRootHtml, /Sites identity/);
   assert.doesNotMatch(browserRootHtml, /Sites Auth Broker/);
   assert.match(browserRootHtml, /https:\/\/github\.com\/aittadb\/aittadb/);
@@ -301,6 +304,12 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
     }),
   );
   assert.equal(approved?.status, 200);
+  const approvedHtml = await approved!.text();
+  assert.match(approvedHtml, /<h1>Device approved<\/h1>/);
+  assert.match(approvedHtml, /Approved\. The device can continue\./);
+  assert.match(approvedHtml, /aria-label="Device outcome"/);
+  assert.doesNotMatch(approvedHtml, /Error details/);
+  assert.doesNotMatch(approvedHtml, /This request stopped here/);
   await new Promise((resolve) => setTimeout(resolve, 1100));
 
   const token = await app.fetch(
@@ -392,6 +401,76 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   assert.equal(
     ((await reuse?.json()) as { error: string }).error,
     "invalid_grant",
+  );
+
+  const deniedDevice = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/device_authorization", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form({ client_id: client.id, scope: "openid" }),
+    }),
+  );
+  const deniedDeviceJson = (await deniedDevice?.json()) as {
+    device_code: string;
+    user_code: string;
+  };
+  const deniedEntry = await app.fetch(
+    new Request(
+      `https://aittadb.example.test/device?user_code=${deniedDeviceJson.user_code}`,
+    ),
+  );
+  const deniedEntryCsrf = cookieValue(deniedEntry!, "aittadb_csrf");
+  const deniedReview = await app.fetch(
+    new Request("https://aittadb.example.test/device", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${deniedEntryCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        csrf_token: deniedEntryCsrf,
+        user_code: deniedDeviceJson.user_code,
+      }),
+    }),
+  );
+  const deniedDecisionCsrf = cookieValue(deniedReview!, "aittadb_csrf");
+  const deniedOutcome = await app.fetch(
+    new Request("https://aittadb.example.test/device/decision", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${deniedDecisionCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        csrf_token: deniedDecisionCsrf,
+        user_code: deniedDeviceJson.user_code,
+        decision: "deny",
+      }),
+    }),
+  );
+  assert.equal(deniedOutcome?.status, 200);
+  const deniedHtml = await deniedOutcome!.text();
+  assert.match(deniedHtml, /<h1>Device denied<\/h1>/);
+  assert.match(deniedHtml, /No credentials cross this boundary/);
+  assert.match(deniedHtml, /aria-label="Device outcome"/);
+  assert.doesNotMatch(deniedHtml, /Error details/);
+
+  const deniedPoll = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form({
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: deniedDeviceJson.device_code,
+        client_id: client.id,
+      }),
+    }),
+  );
+  assert.equal(
+    ((await deniedPoll?.json()) as { error: string }).error,
+    "access_denied",
   );
 });
 
