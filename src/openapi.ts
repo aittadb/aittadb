@@ -52,6 +52,66 @@ const storageBrowserKeyParameter = {
     "No-JavaScript browser navigation fallback. An HTML request without a bearer token is redirected to the canonical encoded item URL; API collection reads ignore this parameter.",
 } as const;
 
+const storagePageSizeParameter = {
+  name: "page_size",
+  in: "query",
+  required: false,
+  schema: { type: "integer", minimum: 1 },
+  description:
+    "Maximum number of resources returned on this page. The value must not exceed the deployment-configured maximum; the server uses its configured default when omitted.",
+} as const;
+
+const storageCursorParameter = {
+  name: "cursor",
+  in: "query",
+  required: false,
+  schema: { type: "string", minLength: 1 },
+  description:
+    "Opaque encrypted continuation cursor from the preceding collection response's next link. Authenticated encryption binds it to the resource kind, local user, and OAuth client; it exposes no logical key and must not be constructed or reused across namespaces. Signing-key rotation invalidates outstanding cursors.",
+} as const;
+
+const tokenBoundCorsDescription =
+  "For a cross-origin bearer request, Origin must exactly match an allowed origin registered on the active OAuth client identified by the token audience. A preflight is admitted only for an origin registered to at least one active client; the eventual request is still checked against its token's client. Wildcards are not accepted.";
+
+function rateLimitedResponse(includeHypermedia = false) {
+  return {
+    description:
+      "A deployment rate limit was exceeded. Retry only after the response's Retry-After interval.",
+    headers: {
+      "Retry-After": {
+        description: "Seconds until this request family may be retried.",
+        schema: { type: "integer", minimum: 1 },
+      },
+    },
+    content: includeHypermedia
+      ? hypermediaContent("#/components/schemas/HypermediaError")
+      : {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/HypermediaError" },
+          },
+          "text/html": { schema: { type: "string" } },
+        },
+  } as const;
+}
+
+const storageWriteDisabledResponse = {
+  description:
+    "Storage writes are disabled by deployment configuration. Read and delete operations remain available subject to their own authorization and limits.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
+const storageQuotaExceededResponse = {
+  description:
+    "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
+const storageConflictResponse = {
+  description:
+    "The file changed concurrently. The stale operation did not replace newer metadata and its uncommitted R2 object was retired.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -222,6 +282,7 @@ export const openApiSpec = {
             description:
               "Continues to same-origin consent or redirects an OAuth error",
           },
+          "429": rateLimitedResponse(),
         },
       },
     },
@@ -280,6 +341,7 @@ export const openApiSpec = {
           },
           "400": { description: "OAuth error" },
           "403": { description: "Browser CSRF or same-origin rejection" },
+          "429": rateLimitedResponse(),
         },
       },
     },
@@ -300,6 +362,8 @@ export const openApiSpec = {
       post: {
         summary:
           "OAuth 2.0 token endpoint for device, authorization_code, and refresh_token grants",
+        description:
+          "A cross-origin preflight is allowed only for an exact origin registered on an active OAuth client. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential.",
         requestBody: {
           required: true,
           content: {
@@ -344,6 +408,7 @@ export const openApiSpec = {
           "400": { description: "OAuth error" },
           "401": { description: "Client authentication failed" },
           "403": { description: "Browser CSRF or same-origin rejection" },
+          "429": rateLimitedResponse(),
         },
       },
     },
@@ -390,6 +455,7 @@ export const openApiSpec = {
               "text/html": { schema: { type: "string" } },
             },
           },
+          "429": rateLimitedResponse(),
         },
       },
     },
@@ -438,14 +504,14 @@ export const openApiSpec = {
             },
           },
           "401": { description: "Confidential client authentication failed" },
+          "429": rateLimitedResponse(),
         },
       },
     },
     "/userinfo": {
       get: {
         summary: "OpenID Connect UserInfo",
-        description:
-          "API clients send an AittaDB bearer access token containing the openid scope; ID tokens and access tokens without openid are rejected. A browser requesting HTML without a bearer token receives a same-origin form that can use either the current ChatGPT-signed-in AittaDB session or an explicit access token.",
+        description: `API clients send an AittaDB bearer access token containing the openid scope. The token audience must identify an existing active OAuth client; ID tokens, tokens for disabled or missing clients, and access tokens without openid are rejected with the same generic invalid-token response. A browser requesting HTML without a bearer token receives a same-origin form that can use either the current ChatGPT-signed-in AittaDB session or an explicit access token. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -469,7 +535,8 @@ export const openApiSpec = {
             },
           },
           "401": {
-            description: "Invalid bearer token",
+            description:
+              "Invalid bearer token, missing openid scope, unknown audience client, or disabled audience client",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
         },
@@ -528,9 +595,12 @@ export const openApiSpec = {
       get: {
         summary:
           "List JSON records for the access token's local user and OAuth client",
-        description:
-          "Requires an AittaDB access token with storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. Records are AittaDB application storage; they do not expose ChatGPT or OpenAI data.",
-        parameters: [storageBrowserKeyParameter],
+        description: `Requires an AittaDB access token with storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. Records are AittaDB application storage; they do not expose ChatGPT or OpenAI data. Results use encrypted cursor pagination and report aggregate record-and-file usage only for the authenticated local-user and OAuth-client namespace. ${tokenBoundCorsDescription}`,
+        parameters: [
+          storageBrowserKeyParameter,
+          storagePageSizeParameter,
+          storageCursorParameter,
+        ],
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -540,8 +610,10 @@ export const openApiSpec = {
               "#/components/schemas/StorageCollectionDocument",
             ),
           },
+          "400": { description: "Invalid page_size or storage cursor" },
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
+          "429": rateLimitedResponse(true),
         },
       },
       post: {
@@ -586,14 +658,16 @@ export const openApiSpec = {
           "403": { description: "Scope, CSRF, or same-origin rejection" },
           "405": { description: "Browser representation marker missing" },
           "413": { description: "Form or JSON record exceeds the limit" },
+          "429": rateLimitedResponse(true),
+          "503": storageWriteDisabledResponse,
+          "507": storageQuotaExceededResponse,
         },
       },
     },
     "/storage/records/{key}": {
       get: {
         summary: "Read one JSON record",
-        description:
-          "A bearer request performs the canonical read. An HTML request without a bearer token renders read, replace, and delete forms for only the key in this exact resource URL.",
+        description: `A bearer request performs the canonical read. An HTML request without a bearer token renders read, replace, and delete forms for only the key in this exact resource URL. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
@@ -605,6 +679,7 @@ export const openApiSpec = {
             ),
           },
           "404": { description: "Record not found" },
+          "429": rateLimitedResponse(true),
         },
       },
       post: {
@@ -672,12 +747,14 @@ export const openApiSpec = {
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
           "413": { description: "Form or JSON record exceeds the limit" },
+          "429": rateLimitedResponse(true),
+          "503": storageWriteDisabledResponse,
+          "507": storageQuotaExceededResponse,
         },
       },
       put: {
         summary: "Create or replace one JSON record",
-        description:
-          "Requires storage.write. The request body must be JSON and is stored in D1 under the local user UUID and client ID.",
+        description: `Requires storage.write. The request body must be JSON and is stored in D1 under the local user UUID and client ID. Writes are subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         requestBody: {
@@ -693,10 +770,14 @@ export const openApiSpec = {
             ),
           },
           "413": { description: "Record exceeds the AittaDB limit" },
+          "429": rateLimitedResponse(true),
+          "503": storageWriteDisabledResponse,
+          "507": storageQuotaExceededResponse,
         },
       },
       delete: {
         summary: "Delete one JSON record",
+        description: `Requires storage.delete. Deletion remains available when new storage writes are disabled. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
@@ -707,6 +788,7 @@ export const openApiSpec = {
               false,
             ),
           },
+          "429": rateLimitedResponse(true),
         },
       },
     },
@@ -714,9 +796,12 @@ export const openApiSpec = {
       get: {
         summary:
           "List file metadata for the access token's local user and OAuth client",
-        description:
-          "Requires storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. File bytes are stored in R2 and searchable metadata is stored in D1.",
-        parameters: [storageBrowserKeyParameter],
+        description: `Requires storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. File bytes are stored in R2 and searchable metadata is stored in D1. Results use encrypted cursor pagination and report aggregate record-and-file usage only for the authenticated local-user and OAuth-client namespace. ${tokenBoundCorsDescription}`,
+        parameters: [
+          storageBrowserKeyParameter,
+          storagePageSizeParameter,
+          storageCursorParameter,
+        ],
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -726,14 +811,15 @@ export const openApiSpec = {
               "#/components/schemas/StorageCollectionDocument",
             ),
           },
+          "400": { description: "Invalid page_size or storage cursor" },
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
+          "429": rateLimitedResponse(true),
         },
       },
       post: {
         summary: "Create a file or submit the browser file-collection form",
-        description:
-          "A bearer API request uploads raw bytes and creates a file under a server-generated logical UUID key. It returns 201 Created and the exact item Location. The same URL also accepts the CSRF-protected browser multipart upload form and the no-JavaScript collection-read adapter. Caller-selected logical keys use PUT /storage/files/{key} instead.",
+        description: `A bearer API request uploads raw bytes and creates a file under a server-generated logical UUID key. It returns 201 Created and the exact item Location. The same URL also accepts the CSRF-protected browser multipart upload form and the no-JavaScript collection-read adapter. Multipart parsing requires a trusted ChatGPT Sites identity first, including when the form later selects explicit-token mode; raw bearer API uploads do not require a Sites browser session. Caller-selected logical keys use PUT /storage/files/{key} instead. File creation is subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         requestBody: {
           required: true,
@@ -807,16 +893,23 @@ export const openApiSpec = {
               "Redirect to the Sites-owned ChatGPT sign-in route when session mode is selected anonymously",
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
+          "409": storageConflictResponse,
           "405": { description: "Browser representation marker missing" },
           "413": { description: "Multipart form or file exceeds the limit" },
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "Storage writes are disabled by deployment configuration or the R2 bucket is unavailable",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "507": storageQuotaExceededResponse,
         },
       },
     },
     "/storage/files/{key}": {
       get: {
         summary: "Read one file from R2",
-        description:
-          "A bearer request returns the canonical file bytes. An HTML request without a bearer token renders download, upload-or-replace, and delete forms for only the key in this exact resource URL.",
+        description: `A bearer request returns the canonical file bytes. An HTML request without a bearer token renders download, upload-or-replace, and delete forms for only the key in this exact resource URL. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
@@ -848,12 +941,18 @@ export const openApiSpec = {
             },
           },
           "404": { description: "File not found" },
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "R2 is unavailable when the request asks for file bytes",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
         },
       },
       post: {
         summary: "Browser-only action on one stored file",
         description:
-          "CSRF-protected same-origin adapter on this exact item URL. URL-encoded _method=GET or DELETE invokes the canonical download or deletion. Multipart _method=PUT uploads bytes through the canonical file PUT. The logical key comes only from the URL and cannot be overridden by a form field.",
+          "CSRF-protected same-origin adapter on this exact item URL. URL-encoded _method=GET or DELETE invokes the canonical download or deletion. Multipart _method=PUT requires a trusted ChatGPT Sites identity before parsing and uploads bytes through the canonical file PUT. The logical key comes only from the URL and cannot be overridden by a form field.",
         parameters: [storageKeyParameter],
         requestBody: {
           required: true,
@@ -931,14 +1030,21 @@ export const openApiSpec = {
             description: "Method override does not match this resource",
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
+          "409": storageConflictResponse,
           "413": { description: "Multipart form or file exceeds the limit" },
           "415": { description: "Upload was not submitted as multipart data" },
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "Storage writes are disabled by deployment configuration or the R2 bucket is unavailable",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "507": storageQuotaExceededResponse,
         },
       },
       put: {
         summary: "Create or replace one file in R2",
-        description:
-          "Requires storage.write. The caller's key is metadata only; AittaDB generates the physical R2 object key.",
+        description: `Requires storage.write. The caller's key is metadata only; AittaDB generates the physical R2 object key. Writes are subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         requestBody: {
@@ -958,11 +1064,19 @@ export const openApiSpec = {
             ),
           },
           "413": { description: "File exceeds the AittaDB limit" },
-          "503": { description: "R2 bucket is unavailable" },
+          "409": storageConflictResponse,
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "Storage writes are disabled by deployment configuration or the R2 bucket is unavailable",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "507": storageQuotaExceededResponse,
         },
       },
       delete: {
         summary: "Delete one file from R2 and D1 metadata",
+        description: `Requires storage.delete. Deletion remains available when new storage writes are disabled but needs R2 when metadata identifies an existing object. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
@@ -972,6 +1086,12 @@ export const openApiSpec = {
               "#/components/schemas/StorageDeletionDocument",
               false,
             ),
+          },
+          "409": storageConflictResponse,
+          "429": rateLimitedResponse(true),
+          "503": {
+            description: "R2 is unavailable for an existing file object",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
         },
       },
@@ -1196,7 +1316,9 @@ export const openApiSpec = {
       get: {
         summary: "List and manage registered OAuth clients",
         description:
-          "Available only to a trusted Sites-signed-in identity whose exact email appears in the server-side administrator allowlist. The response advertises only actions valid for each current client state and never repeats a confidential secret.",
+          "Administrative client data requires both trusted ChatGPT sign-in inside ChatGPT Sites and an authorized local administrator identity from the configured local-subject allowlist or narrow exact-email bootstrap, plus an independent deployment access key. API callers send the key in x-aittadb-admin-key. A browser without that additional credential receives only an unlock form; a correct key creates a short-lived HttpOnly admin session cookie bound to the local subject. The key or cookie is never sufficient without the trusted Sites identity and administrator authorization. The response advertises only actions valid for each current client state and never repeats a confidential secret.",
+        security: [{ adminAccessKey: [] }, { adminSession: [] }, {}],
+        "x-aittadb-sites-identity-required": true,
         responses: {
           "200": {
             description: "OAuth client administration resource",
@@ -1206,11 +1328,18 @@ export const openApiSpec = {
           },
           "302": { description: "Continue through Sites-owned sign-in" },
           "401": {
-            description: "Trusted Sites browser identity is required",
+            description:
+              "Trusted Sites identity or independent administrator authentication is missing or invalid",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "403": {
             description: "Signed-in identity is not allowlisted",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "Independent administrator authentication is not configured",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
         },
@@ -1218,13 +1347,16 @@ export const openApiSpec = {
       post: {
         summary: "Create or operate on an OAuth client",
         description:
-          "CSRF-protected same-origin administration for creation, enable/disable, confidential-secret rotation, and active-grant revocation. Generated confidential secrets are returned exactly once and stored only as SHA-256 hashes.",
+          "CSRF-protected same-origin administration for independent-key unlock, creation, enable/disable, confidential-secret rotation, and active-grant revocation. The unlock variant submits the deployment access key in the request body and establishes the short-lived admin session cookie. Every other variant requires that cookie or x-aittadb-admin-key in addition to trusted Sites identity and local administrator authorization. Generated confidential secrets are returned exactly once and stored only as SHA-256 hashes.",
+        security: [{ adminAccessKey: [] }, { adminSession: [] }, {}],
+        "x-aittadb-sites-identity-required": true,
         requestBody: {
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
               schema: {
                 oneOf: [
+                  { $ref: "#/components/schemas/OAuthAdminUnlockInput" },
                   { $ref: "#/components/schemas/OAuthClientCreateInput" },
                   { $ref: "#/components/schemas/OAuthClientOperationInput" },
                 ],
@@ -1241,12 +1373,17 @@ export const openApiSpec = {
             ),
           },
           "302": { description: "Continue through Sites-owned sign-in" },
+          "303": {
+            description:
+              "Independent access key accepted; continue with the subject-bound admin session cookie",
+          },
           "400": {
             description: "Invalid registration or operation input",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "401": {
-            description: "Trusted Sites browser identity is required",
+            description:
+              "Trusted Sites identity or independent administrator authentication is missing or invalid",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "403": {
@@ -1255,6 +1392,12 @@ export const openApiSpec = {
           },
           "404": {
             description: "Client is unavailable",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "Independent administrator authentication is not configured",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
         },
@@ -1294,6 +1437,20 @@ export const openApiSpec = {
     securitySchemes: {
       bearer: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
       clientSecretBasic: { type: "http", scheme: "basic" },
+      adminAccessKey: {
+        type: "apiKey",
+        in: "header",
+        name: "x-aittadb-admin-key",
+        description:
+          "Independent deployment administrator key. It is an additional factor and is accepted only with trusted ChatGPT sign-in inside ChatGPT Sites and an authorized local administrator identity.",
+      },
+      adminSession: {
+        type: "apiKey",
+        in: "cookie",
+        name: "aittadb_admin_session",
+        description:
+          "Short-lived HttpOnly browser session issued after the independent administrator key is verified. It is bound to the authorized local subject and is never sufficient without the trusted Sites identity.",
+      },
     },
     schemas: {
       HypermediaLink: {
@@ -1767,9 +1924,24 @@ export const openApiSpec = {
       },
       StorageCollectionData: {
         type: "object",
-        required: ["count", "items"],
+        required: ["count", "page_size", "has_more", "usage", "items"],
         properties: {
-          count: { type: "integer", minimum: 0 },
+          count: {
+            type: "integer",
+            minimum: 0,
+            description: "Number of resources in this page, not a total count.",
+          },
+          page_size: {
+            type: "integer",
+            minimum: 1,
+            description: "Effective maximum page size used for this response.",
+          },
+          has_more: {
+            type: "boolean",
+            description:
+              "True when the response includes a next link with an encrypted continuation cursor.",
+          },
+          usage: { $ref: "#/components/schemas/StorageNamespaceUsage" },
           items: {
             type: "array",
             items: {
@@ -1778,6 +1950,48 @@ export const openApiSpec = {
                 { $ref: "#/components/schemas/StorageFileDocument" },
               ],
             },
+          },
+        },
+        additionalProperties: false,
+      },
+      StorageNamespaceUsage: {
+        type: "object",
+        required: [
+          "item_count",
+          "byte_count",
+          "item_limit",
+          "byte_limit",
+          "writes_enabled",
+        ],
+        properties: {
+          item_count: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Total JSON-record and file count in this local-user and OAuth-client namespace.",
+          },
+          byte_count: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Total stored JSON bytes and file bytes in this local-user and OAuth-client namespace.",
+          },
+          item_limit: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Configured finite item ceiling for this local-user and OAuth-client namespace.",
+          },
+          byte_limit: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Configured finite byte ceiling for this local-user and OAuth-client namespace.",
+          },
+          writes_enabled: {
+            type: "boolean",
+            description:
+              "Whether storage.write operations are currently enabled for this deployment. Deletes are controlled separately.",
           },
         },
         additionalProperties: false,
@@ -1925,6 +2139,21 @@ export const openApiSpec = {
             },
           },
         ],
+      },
+      OAuthAdminUnlockInput: {
+        type: "object",
+        required: ["csrf_token", "action", "admin_access_key"],
+        properties: {
+          csrf_token: { type: "string" },
+          action: { type: "string", const: "unlock" },
+          admin_access_key: {
+            type: "string",
+            writeOnly: true,
+            description:
+              "Independent deployment administrator key. Accepted only with the trusted Sites identity and local administrator authorization, and never returned by the service.",
+          },
+        },
+        additionalProperties: false,
       },
       OAuthClientCreateInput: {
         type: "object",

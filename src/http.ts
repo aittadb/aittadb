@@ -143,10 +143,42 @@ export async function readForm(
   if (!contentType.includes("application/x-www-form-urlencoded")) {
     throw new Error("unsupported_media_type");
   }
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > maxBytes)
-    throw new Error("request_too_large");
+  const text = new TextDecoder().decode(
+    await readBoundedBody(request.body, maxBytes),
+  );
   return new URLSearchParams(text);
+}
+
+export async function readBoundedBody(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  if (!body) return new ArrayBuffer(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > maxBytes - totalBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("request_too_large");
+      }
+      chunks.push(value);
+      totalBytes += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const result = new ArrayBuffer(totalBytes);
+  const bytes = new Uint8Array(result);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
 }
 
 export function redirect(location: string, status = 302): Response {

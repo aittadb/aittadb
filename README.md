@@ -12,7 +12,7 @@ AittaDB currently provides identity, authentication, persistent JSON data, and o
 
 It is not an official OpenAI project. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
 
-The service creates its own user record with an immutable UUID subject. The upstream email address is used only to locate or create that AittaDB user. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
+The service creates its own user record with an immutable UUID subject. The upstream email address is used only to locate or create that AittaDB user. ChatGPT Sites does not currently document a stable upstream subject, so an email change can create a new AittaDB identity and a reassigned address can inherit the existing identity and namespace. This remains a risk for ordinary users and administrators: putting that local UUID in `ADMIN_SUBJECTS` does not change how it is located. The independent administrator key is the separate factor. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
 
 Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication.
 
@@ -33,6 +33,8 @@ Because these capabilities are provided by ChatGPT Sites, a core AittaDB deploym
 As of August 8, 2026, ChatGPT Sites usage and storage are included up to plan-specific public-beta limits. **Persistent D1 database and R2 object storage are provided by ChatGPT Sites, subject to the plan-specific aggregate limits displayed in ChatGPT during the public beta.** These limits apply across all Sites on the account, may change, and can vary for Enterprise and Edu workspaces. The Sites experience displays the current limits and warns as the account approaches them. Reaching a limit may prevent adding storage, creating another Site, or keeping a high-usage Site publicly available until usage is reduced. See [Creating and managing ChatGPT Sites](https://help.openai.com/en/articles/20001339-creating-and-managing-chatgpt-sites).
 
 OpenAI currently publishes no fixed numerical figures for Sites D1/R2 capacity or allocation, object size, rows or queries, bandwidth or operations, or additional pricing. Do not plan or advertise a fixed AittaDB capacity from undocumented assumptions. The Pro plan's 100 GB [ChatGPT Library](https://help.openai.com/en/articles/20001052-library-for-chatgpt) quota applies to files saved in ChatGPT Library and is unrelated to Sites D1/R2 storage.
+
+AittaDB separately enforces finite application-level ceilings for the deployment, each local user, and each local-user/OAuth-client namespace. These are abuse controls, not statements about Sites capacity, and the provider can impose a lower or shared limit first.
 
 ## What AittaDB Provides
 
@@ -62,7 +64,9 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 - Opaque hashed refresh tokens with rotation and reuse detection.
 - D1-backed durable state with checked-in migrations.
 - Per-user, per-client application storage: JSON records in D1 and file bytes in R2.
+- Finite storage ceilings, bounded cursor pagination, atomic rate counters, and a deployment storage-write kill switch.
 - ChatGPT-sign-in-protected browser operations for current-session UserInfo, personal record/file storage, device approval, consent, and admin client bootstrap.
+- Administrator access requiring both an allowed local identity and a separately generated access key.
 
 ## Local Setup
 
@@ -70,10 +74,13 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 npm ci
 cp .env.example .env
 make generate-local-jwt-key
+make generate-local-admin-access-key
 npm run validate
 ```
 
 `make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material.
+
+`make generate-local-admin-access-key` (equivalently `npm run admin-key:generate`) writes a 256-bit key and its SHA-256 base64url hash to separate ignored files under `.secrets/` with restrictive permissions. It prints only file locations and setup instructions, not key material. Configure the hosted `ADMIN_ACCESS_KEY_HASH` secret from the hash file; retain the plaintext file only for authorized administrators. Do not use `--force` except for an intentional rotation.
 
 `npm run validate` includes a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, the root `AGENTS.md` instruction-budget check, tests, and the production build. `AGENTS.md` must remain below 32,000 bytes so Codex loads its complete authoritative contract by default. D1 migrations are maintained as reviewed SQL and packaged into the Sites deployment artifact during the build; request handlers never run schema DDL. The project intentionally has no incomplete ORM generation command.
 
@@ -82,7 +89,15 @@ npm run validate
 - `ISSUER_URL`: exact public issuer URL.
 - `JWT_KEY_ID`: configured signing key ID.
 - `JWT_PRIVATE_JWK`: ES256 P-256 private JWK JSON.
-- `ADMIN_EMAILS`: comma-separated exact admin email allowlist.
+- `ADMIN_SUBJECTS`: comma-separated immutable local UUID subjects for administrators; this removes a direct email allowlist entry but does not eliminate upstream email reassignment risk.
+- `ADMIN_ACCESS_KEY_HASH`: SHA-256 base64url hash of the independent administrator access key; administration fails closed when it is absent.
+- `ADMIN_EMAILS`: optional exact email allowlist for initial bootstrap or migration only; remove entries after their local UUIDs are in `ADMIN_SUBJECTS`.
+- `STORAGE_WRITES_ENABLED`: deployment storage-write kill switch; disabling it leaves authorized reads and deletes available.
+- `STORAGE_GLOBAL_MAX_ITEMS` / `STORAGE_GLOBAL_MAX_BYTES`: combined record-and-file ceiling for the deployment; defaults to 10,000 items and 1 GiB.
+- `STORAGE_USER_MAX_ITEMS` / `STORAGE_USER_MAX_BYTES`: combined ceiling across one local user's client namespaces; defaults to 1,000 items and 100 MiB.
+- `STORAGE_NAMESPACE_MAX_ITEMS` / `STORAGE_NAMESPACE_MAX_BYTES`: combined ceiling for one local user and OAuth client; defaults to 500 items and 50 MiB.
+- `STORAGE_DEFAULT_PAGE_SIZE` / `STORAGE_MAX_PAGE_SIZE`: collection-page bounds; defaults to 50 and 100.
+- `STORAGE_READ_RATE_LIMIT` / `STORAGE_WRITE_RATE_LIMIT`: per-user/client storage limits per minute; defaults to 120 and 30.
 - D1 binding named `DB`.
 - R2 binding named `BUCKET` for `/storage/files/*`.
 
@@ -127,6 +142,10 @@ Client applications may request `storage.read`, `storage.write`, and `storage.de
 
 Storage is isolated by the immutable AittaDB user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2. `POST /storage/files` creates a file with a server-generated logical key and returns `201 Created` with its item URI in `Location`; `PUT /storage/files/{key}` creates or replaces the file at a caller-selected logical key. Caller-provided keys are logical metadata only; AittaDB always generates physical R2 object keys.
 
+Record and file creates or replacements use one conditional D1 write to enforce the configured deployment, user, and user/client item-and-byte ceilings. A rejected write returns `507 storage_limit_exceeded`; disabling writes returns `503 storage_writes_disabled`. File writes use copy-on-write R2 keys and bounded compensation when quota or metadata persistence fails. D1 and R2 do not share a transaction, so simultaneous persistent failures can still require private operator repair.
+
+Storage collections use deterministic encrypted-cursor pagination. `page_size` defaults to 50 and cannot exceed the configured maximum, initially 100. Follow the returned `next` link instead of constructing or reusing a cursor: authenticated encryption binds each cursor to the resource kind, local user, and OAuth client without exposing its logical key or timestamp. Signing-key rotation invalidates outstanding cursors. Collection responses disclose only the combined record-and-file usage and namespace ceiling for the authenticated user/client namespace. They never disclose deployment-wide usage, another user, or another client namespace.
+
 The signed-in browser uses a reserved, hidden AittaDB client ID, so the user's durable signed-in AittaDB namespace remains separate even from an OAuth client belonging to the same local user. That reserved client cannot be selected by device authorization, Authorization Code, token exchange, or administrator operations. AittaDB exposes no generic SQL, internal-table, physical R2-key, environment, binding, or deployment-secret API.
 
 `GET /statistics` is public and returns only the aggregate count of local AittaDB identities in this deployment. It exposes no email address, display name, local subject, client ownership, or other personal or internal data.
@@ -134,6 +153,8 @@ The signed-in browser uses a reserved, hidden AittaDB client ID, so the user's d
 ## ChatGPT Sites Sign-In Boundary
 
 ChatGPT sign-in is supplied inside ChatGPT Sites through Sites-owned `/signin-with-chatgpt` and `/signout-with-chatgpt` routes. This service reads only server-side `oai-authenticated-user-email`, optional `oai-authenticated-user-full-name`, and the full-name encoding header. It never forwards or exposes ChatGPT cookies, credentials, sessions, or tokens.
+
+Short Device Grant user codes are returned to the requesting client as required by RFC 8628, but only their hashes are persisted. The browser reconstructs the display value from the matching same-origin submission, and migration `0004_security_indexes.sql` scrubs legacy display values. The application does not add device or user codes to audit events.
 
 ## Contributing
 

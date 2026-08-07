@@ -127,6 +127,155 @@ test("OpenAPI guard locates legacy _links members without rejecting links", () =
   ]);
 });
 
+test("OpenAPI documents implemented security controls", () => {
+  assert.doesNotMatch(JSON.stringify(openApiSpec), /\bADMIN_[A-Z_]+\b/);
+
+  for (const path of ["/storage/records", "/storage/files"]) {
+    const parameters = openApiOperation(path, "get").parameters;
+    assert.ok(Array.isArray(parameters));
+    const names = parameters.map((parameter) =>
+      String(asObject(parameter, "parameter").name),
+    );
+    assert.ok(names.includes("page_size"), `${path} must document page_size`);
+    assert.ok(names.includes("cursor"), `${path} must document cursor`);
+    const cursor = (parameters as UnknownObject[]).find(
+      (parameter) => String(parameter.name) === "cursor",
+    );
+    assert.match(String(cursor?.description), /encrypted continuation cursor/);
+  }
+
+  const collectionData = openApiSchema("StorageCollectionData");
+  assert.deepEqual(collectionData.required, [
+    "count",
+    "page_size",
+    "has_more",
+    "usage",
+    "items",
+  ]);
+  const collectionProperties = asObject(
+    collectionData.properties,
+    "StorageCollectionData.properties",
+  );
+  assert.equal(
+    asObject(collectionProperties.usage, "StorageCollectionData.usage").$ref,
+    "#/components/schemas/StorageNamespaceUsage",
+  );
+  assert.deepEqual(openApiSchema("StorageNamespaceUsage").required, [
+    "item_count",
+    "byte_count",
+    "item_limit",
+    "byte_limit",
+    "writes_enabled",
+  ]);
+
+  for (const [path, method] of [
+    ["/authorize", "get"],
+    ["/oauth/device_authorization", "post"],
+    ["/oauth/token", "post"],
+    ["/oauth/revoke", "post"],
+    ["/oauth/introspect", "post"],
+    ["/storage/records", "get"],
+    ["/storage/records", "post"],
+    ["/storage/records/{key}", "get"],
+    ["/storage/records/{key}", "post"],
+    ["/storage/records/{key}", "put"],
+    ["/storage/records/{key}", "delete"],
+    ["/storage/files", "get"],
+    ["/storage/files", "post"],
+    ["/storage/files/{key}", "get"],
+    ["/storage/files/{key}", "post"],
+    ["/storage/files/{key}", "put"],
+    ["/storage/files/{key}", "delete"],
+    ["/admin/clients", "get"],
+    ["/admin/clients", "post"],
+  ] as const) {
+    assert.ok(
+      "429" in operationResponses(path, method),
+      `${method.toUpperCase()} ${path} must document 429`,
+    );
+  }
+
+  for (const [path, method] of [
+    ["/storage/records", "post"],
+    ["/storage/records/{key}", "post"],
+    ["/storage/records/{key}", "put"],
+    ["/storage/files", "post"],
+    ["/storage/files/{key}", "post"],
+    ["/storage/files/{key}", "put"],
+  ] as const) {
+    const responses = operationResponses(path, method);
+    assert.ok("503" in responses, `${method.toUpperCase()} ${path} needs 503`);
+    assert.ok("507" in responses, `${method.toUpperCase()} ${path} needs 507`);
+  }
+
+  for (const [path, method] of [
+    ["/userinfo", "get"],
+    ["/storage/records", "get"],
+    ["/storage/records/{key}", "get"],
+    ["/storage/records/{key}", "put"],
+    ["/storage/records/{key}", "delete"],
+    ["/storage/files", "get"],
+    ["/storage/files", "post"],
+    ["/storage/files/{key}", "get"],
+    ["/storage/files/{key}", "put"],
+    ["/storage/files/{key}", "delete"],
+  ] as const) {
+    const description = String(openApiOperation(path, method).description);
+    assert.match(description, /Origin must exactly match/);
+    assert.match(description, /active OAuth client/);
+  }
+
+  const userInfoUnauthorized = asObject(
+    operationResponses("/userinfo", "get")["401"],
+    "UserInfo 401 response",
+  );
+  assert.match(String(userInfoUnauthorized.description), /disabled audience/);
+  assert.match(
+    String(openApiOperation("/oauth/token", "post").description),
+    /before any authorization code, device code, or refresh token is consumed/,
+  );
+  for (const [path, method] of [
+    ["/storage/files", "post"],
+    ["/storage/files/{key}", "post"],
+    ["/storage/files/{key}", "put"],
+    ["/storage/files/{key}", "delete"],
+  ] as const) {
+    assert.ok(
+      "409" in operationResponses(path, method),
+      `${method.toUpperCase()} ${path} must document concurrent conflicts`,
+    );
+  }
+
+  const schemes = asObject(
+    asObject(openApiSpec.components, "components").securitySchemes,
+    "securitySchemes",
+  );
+  const adminKey = asObject(schemes.adminAccessKey, "adminAccessKey");
+  assert.equal(adminKey.type, "apiKey");
+  assert.equal(adminKey.in, "header");
+  assert.equal(adminKey.name, "x-aittadb-admin-key");
+  const adminSession = asObject(schemes.adminSession, "adminSession");
+  assert.equal(adminSession.in, "cookie");
+  assert.equal(adminSession.name, "aittadb_admin_session");
+  const adminUnlock = openApiSchema("OAuthAdminUnlockInput");
+  const unlockProperties = asObject(
+    adminUnlock.properties,
+    "OAuthAdminUnlockInput.properties",
+  );
+  assert.equal(
+    asObject(unlockProperties.admin_access_key, "admin_access_key").writeOnly,
+    true,
+  );
+  for (const method of ["get", "post"] as const) {
+    assert.equal(
+      openApiOperation("/admin/clients", method)[
+        "x-aittadb-sites-identity-required"
+      ],
+      true,
+    );
+  }
+});
+
 async function routeSources(): Promise<{
   handlerSource: string;
   storageSources: StorageRouteSources;
@@ -145,6 +294,34 @@ function operationSet(
   return new Set(
     operations.map(({ method, path }) => `${method.toUpperCase()} ${path}`),
   );
+}
+
+type UnknownObject = Record<string, unknown>;
+
+function asObject(value: unknown, label: string): UnknownObject {
+  assert.ok(
+    value !== null && typeof value === "object" && !Array.isArray(value),
+    `${label} must be an object`,
+  );
+  return value as UnknownObject;
+}
+
+function openApiOperation(path: string, method: string): UnknownObject {
+  const paths = asObject(openApiSpec.paths, "paths");
+  return asObject(asObject(paths[path], path)[method], `${method} ${path}`);
+}
+
+function operationResponses(path: string, method: string): UnknownObject {
+  return asObject(
+    openApiOperation(path, method).responses,
+    `${method} ${path} responses`,
+  );
+}
+
+function openApiSchema(name: string): UnknownObject {
+  const components = asObject(openApiSpec.components, "components");
+  const schemas = asObject(components.schemas, "schemas");
+  return asObject(schemas[name], name);
 }
 
 function replaceRecordMethod(

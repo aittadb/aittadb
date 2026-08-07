@@ -13,6 +13,7 @@ import {
   html,
   isJsonMediaType,
   oauthError,
+  readBoundedBody,
   readForm,
   redirect,
   requireSameOrigin,
@@ -22,7 +23,10 @@ import {
   HYPERMEDIA_MEDIA_TYPE,
   requestedHypermediaVersion,
 } from "./hypermedia";
-import type { UpstreamIdentityProvider } from "./identity";
+import {
+  requireSitesIdentity,
+  type UpstreamIdentityProvider,
+} from "./identity";
 import { errorPage } from "./pages";
 import {
   encodeStorageKey,
@@ -325,6 +329,10 @@ async function handleFileForm(
   const urlEncoded = contentType.includes("application/x-www-form-urlencoded");
   if (!multipart && !urlEncoded)
     return methodNotAllowed(resourceMethods("files", resource));
+  if (multipart) {
+    const identity = requireSitesIdentity(request, identityProvider);
+    if (identity instanceof Response) return identity;
+  }
 
   let form: FormData | URLSearchParams;
   try {
@@ -478,40 +486,6 @@ async function readBoundedMultipartForm(
   return new Response(body, {
     headers: { "content-type": contentType },
   }).formData();
-}
-
-async function readBoundedBody(
-  body: ReadableStream<Uint8Array> | null,
-  maxBytes: number,
-): Promise<ArrayBuffer> {
-  if (!body) return new ArrayBuffer(0);
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value.byteLength > maxBytes - totalBytes) {
-        await reader.cancel().catch(() => undefined);
-        throw new Error("request_too_large");
-      }
-      chunks.push(value);
-      totalBytes += value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const result = new ArrayBuffer(totalBytes);
-  const bytes = new Uint8Array(result);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return result;
 }
 
 async function renderStorageResponse(
@@ -677,8 +651,14 @@ function collectionPath(kind: StorageKind): string {
 
 function canonicalStorageUrl(url: URL): URL {
   const target = new URL(url);
+  const cursor = target.searchParams.get("cursor");
+  const pageSize = target.searchParams.get("page_size");
   target.search = "";
   target.hash = "";
+  if (/^\/storage\/(?:records|files)$/.test(target.pathname)) {
+    if (pageSize) target.searchParams.set("page_size", pageSize);
+    if (cursor) target.searchParams.set("cursor", cursor);
+  }
   return target;
 }
 

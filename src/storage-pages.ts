@@ -328,7 +328,7 @@ function storageState(
   if (type === "error") {
     return storageErrorState(data);
   }
-  if (type.endsWith("-collection")) return collectionState(kind, data);
+  if (type.endsWith("-collection")) return collectionState(kind, data, payload);
   if (type.endsWith("-deletion")) {
     const noun = kind === "records" ? "record" : "file";
     const key = stringValue(data.key);
@@ -349,6 +349,7 @@ function storageErrorState(data: Record<string, unknown>): string {
 function collectionState(
   kind: StorageKind,
   data: Record<string, unknown>,
+  payload: Record<string, unknown>,
 ): string {
   const records = kind === "records";
   const noun = records ? "record" : "file";
@@ -357,8 +358,13 @@ function collectionState(
         .map(objectValue)
         .filter((item): item is Record<string, unknown> => Boolean(item))
     : [];
+  const nextHref = linkHref(payload, "next");
+  const usage = objectValue(data.usage);
+  const usageText = usage
+    ? `<p class="note">This namespace uses ${escapeHtml(String(numberValue(usage.item_count)))} of ${escapeHtml(String(numberValue(usage.item_limit)))} items and ${escapeHtml(formatBytes(numberValue(usage.byte_count)))} of ${escapeHtml(formatBytes(numberValue(usage.byte_limit)))}.</p>`
+    : "";
   if (items.length === 0) {
-    return `<section class="storage-state" aria-labelledby="stored-${kind}-heading"><h2 id="stored-${kind}-heading">Your ${kind}</h2><p class="empty-state">No ${kind} found.</p></section>`;
+    return `<section class="storage-state" aria-labelledby="stored-${kind}-heading"><h2 id="stored-${kind}-heading">Your ${kind}</h2><p class="empty-state">No ${kind} found.</p>${usageText}</section>`;
   }
   const rows = items
     .map((document) => {
@@ -374,7 +380,10 @@ function collectionState(
   const headings = records
     ? "<th>Key</th><th>Value</th><th>Updated</th><th>Action</th>"
     : "<th>Key</th><th>Content type</th><th>Size</th><th>Updated</th><th>Action</th>";
-  return `<section class="storage-state" aria-labelledby="stored-${kind}-heading"><div class="storage-state-heading"><div><h2 id="stored-${kind}-heading">Your ${kind}</h2><p>${items.length} ${items.length === 1 ? noun : kind} found.</p></div></div><div class="table-wrap"><table class="resource-table"><thead><tr>${headings}</tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  const pagination = nextHref
+    ? `<nav class="actions" aria-label="Storage pages"><a class="button secondary" href="${escapeHtml(nextHref)}">Next page</a></nav>`
+    : `<p class="note">End of this collection.</p>`;
+  return `<section class="storage-state" aria-labelledby="stored-${kind}-heading"><div class="storage-state-heading"><div><h2 id="stored-${kind}-heading">Your ${kind}</h2><p>${items.length} ${items.length === 1 ? noun : kind} on this page.</p></div></div>${usageText}<div class="table-wrap"><table class="resource-table"><thead><tr>${headings}</tr></thead><tbody>${rows}</tbody></table></div>${pagination}</section>`;
 }
 
 function itemState(kind: StorageKind, data: Record<string, unknown>): string {
@@ -432,6 +441,20 @@ function objectValue(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function linkHref(payload: Record<string, unknown>, relation: string): string {
+  const links = Array.isArray(payload.links) ? payload.links : [];
+  for (const candidate of links.map(objectValue)) {
+    if (!candidate) continue;
+    const relations = Array.isArray(candidate.rel)
+      ? candidate.rel.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [];
+    if (relations.includes(relation)) return stringValue(candidate.href);
+  }
+  return "";
 }
 
 function stringValue(value: unknown): string {

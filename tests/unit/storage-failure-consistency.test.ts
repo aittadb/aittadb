@@ -5,7 +5,7 @@ import { nowSeconds, sha256 } from "../../src/crypto";
 import type { AittaDBApp } from "../../src/handler";
 import { createClientRegistration, issueTokens } from "../../src/oauth";
 import { MemoryAuthStore } from "../../src/store/memory";
-import type { StorageFileMetadata } from "../../src/types";
+import type { StorageFileMetadata, StorageLimits } from "../../src/types";
 import { createTestAittaDB, MemoryR2Bucket, testEnv } from "../helpers";
 
 const INJECTED_FAILURE = "injected-storage-internal-secret";
@@ -16,24 +16,32 @@ class FaultInjectingStore extends MemoryAuthStore {
 
   override async upsertStorageFileMetadata(
     file: StorageFileMetadata,
-  ): Promise<void> {
+    expectedR2Key: string | null,
+    limits?: StorageLimits,
+  ): Promise<boolean> {
     if (this.upsertFileFailures > 0) {
       this.upsertFileFailures -= 1;
       throw new Error(`${INJECTED_FAILURE}:d1-upsert`);
     }
-    await super.upsertStorageFileMetadata(file);
+    return super.upsertStorageFileMetadata(file, expectedR2Key, limits);
   }
 
   override async deleteStorageFileMetadata(
     userId: string,
     clientId: string,
     key: string,
-  ): Promise<void> {
+    expectedR2Key: string,
+  ): Promise<boolean> {
     if (this.deleteFileFailures > 0) {
       this.deleteFileFailures -= 1;
       throw new Error(`${INJECTED_FAILURE}:d1-delete`);
     }
-    await super.deleteStorageFileMetadata(userId, clientId, key);
+    return super.deleteStorageFileMetadata(
+      userId,
+      clientId,
+      key,
+      expectedR2Key,
+    );
   }
 }
 
@@ -70,6 +78,62 @@ class FaultInjectingBucket extends MemoryR2Bucket {
   }
 }
 
+class CoordinatedBucket extends FaultInjectingBucket {
+  private putBarrier:
+    | { remaining: number; promise: Promise<void>; release: () => void }
+    | undefined;
+  private nextPutGate:
+    | { entered: () => void; promise: Promise<void> }
+    | undefined;
+
+  blockNextPuts(count: number): void {
+    let release = (): void => undefined;
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.putBarrier = { remaining: count, promise, release };
+  }
+
+  pauseNextPut(): { entered: Promise<void>; release: () => void } {
+    let markEntered = (): void => undefined;
+    let release = (): void => undefined;
+    const entered = new Promise<void>((resolve) => {
+      markEntered = resolve;
+    });
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.nextPutGate = { entered: markEntered, promise };
+    return { entered, release };
+  }
+
+  override async put(
+    key: string,
+    value: ArrayBuffer | ArrayBufferView | ReadableStream | string,
+    options?: {
+      httpMetadata?: { contentType?: string };
+      customMetadata?: Record<string, string>;
+    },
+  ): Promise<unknown> {
+    const gate = this.nextPutGate;
+    if (gate) {
+      this.nextPutGate = undefined;
+      gate.entered();
+      await gate.promise;
+    }
+    const barrier = this.putBarrier;
+    if (barrier) {
+      barrier.remaining -= 1;
+      if (barrier.remaining === 0) {
+        this.putBarrier = undefined;
+        barrier.release();
+      }
+      await barrier.promise;
+    }
+    return super.put(key, value, options);
+  }
+}
+
 interface Fixture {
   app: AittaDBApp;
   store: FaultInjectingStore;
@@ -79,8 +143,9 @@ interface Fixture {
   accessToken: string;
 }
 
-async function fixture(): Promise<Fixture> {
-  const bucket = new FaultInjectingBucket();
+async function fixture(
+  bucket: FaultInjectingBucket = new FaultInjectingBucket(),
+): Promise<Fixture> {
   const env = await testEnv({ BUCKET: bucket });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new FaultInjectingStore();
@@ -387,4 +452,86 @@ test("file deletion preserves the complete resource when D1 or R2 deletion fails
     null,
   );
   assert.equal(context.bucket.objects.has(previous.r2Key), false);
+});
+
+test("concurrent first writes retain exactly one metadata row and R2 object", async () => {
+  const bucket = new CoordinatedBucket();
+  const context = await fixture(bucket);
+  const key = "concurrent-create.txt";
+  bucket.blockNextPuts(10);
+
+  const responses = await Promise.all(
+    Array.from({ length: 10 }, (_, index) =>
+      fileRequest(context, "PUT", key, `body-${index}`, "text/plain"),
+    ),
+  );
+  assert.equal(responses.filter(({ status }) => status === 200).length, 1);
+  assert.equal(responses.filter(({ status }) => status === 409).length, 9);
+  const metadata = await context.store.getStorageFileMetadata(
+    context.userId,
+    context.clientId,
+    key,
+  );
+  assert.ok(metadata);
+  assert.equal(context.store.storageFiles.size, 1);
+  assert.equal(context.bucket.objects.size, 1);
+  assert.equal(context.bucket.objects.has(metadata.r2Key), true);
+});
+
+test("concurrent replacements retain only the winning R2 object", async () => {
+  const bucket = new CoordinatedBucket();
+  const context = await fixture(bucket);
+  const key = "concurrent-replace.txt";
+  assert.equal(
+    (await fileRequest(context, "PUT", key, "initial", "text/plain")).status,
+    200,
+  );
+  bucket.blockNextPuts(8);
+
+  const responses = await Promise.all(
+    Array.from({ length: 8 }, (_, index) =>
+      fileRequest(context, "PUT", key, `replacement-${index}`, "text/plain"),
+    ),
+  );
+  assert.equal(responses.filter(({ status }) => status === 200).length, 1);
+  assert.equal(responses.filter(({ status }) => status === 409).length, 7);
+  const metadata = await context.store.getStorageFileMetadata(
+    context.userId,
+    context.clientId,
+    key,
+  );
+  assert.ok(metadata);
+  assert.equal(context.bucket.objects.size, 1);
+  assert.equal(context.bucket.objects.has(metadata.r2Key), true);
+});
+
+test("a replacement that loses to deletion removes its uncommitted R2 object", async () => {
+  const bucket = new CoordinatedBucket();
+  const context = await fixture(bucket);
+  const key = "replace-delete-race.txt";
+  assert.equal(
+    (await fileRequest(context, "PUT", key, "initial", "text/plain")).status,
+    200,
+  );
+  const gate = bucket.pauseNextPut();
+  const replacement = fileRequest(
+    context,
+    "PUT",
+    key,
+    "late replacement",
+    "text/plain",
+  );
+  await gate.entered;
+  assert.equal((await fileRequest(context, "DELETE", key)).status, 200);
+  gate.release();
+  assert.equal((await replacement).status, 409);
+  assert.equal(
+    await context.store.getStorageFileMetadata(
+      context.userId,
+      context.clientId,
+      key,
+    ),
+    null,
+  );
+  assert.equal(context.bucket.objects.size, 0);
 });

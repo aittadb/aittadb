@@ -128,6 +128,32 @@ test("malformed bounded multipart is rejected without persistence", async () => 
   assert.equal(bucket.objects.size, 0);
 });
 
+test("anonymous multipart is redirected to Sites sign-in before form parsing", async () => {
+  const env = await testEnv();
+  const bucket = env.BUCKET as MemoryR2Bucket;
+  const store = new MemoryAuthStore();
+  const app = createTestAittaDB(env, store, null);
+  const response = await app.fetch(
+    new Request(`${ORIGIN}/storage/files`, {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        origin: ORIGIN,
+        "content-type": "multipart/form-data; boundary=never-parsed",
+      },
+      body: "this is deliberately not a valid multipart form",
+    }),
+  );
+
+  assert.equal(response?.status, 302);
+  assert.match(
+    response?.headers.get("location") ?? "",
+    /\/signin-with-chatgpt\?return_to=%2Fstorage%2Ffiles/,
+  );
+  assert.equal(store.storageFiles.size, 0);
+  assert.equal(bucket.objects.size, 0);
+});
+
 async function fixture() {
   const env = await testEnv();
   const bucket = env.BUCKET as MemoryR2Bucket;

@@ -1,4 +1,5 @@
 import { uuid } from "../crypto";
+import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
   BROWSER_SESSION_CLIENT,
   BROWSER_SESSION_CLIENT_ID,
@@ -15,7 +16,11 @@ import type {
   RefreshTokenFamily,
   RefreshTokenRecord,
   StorageFileMetadata,
+  StorageLimits,
+  StorageListPage,
+  StorageListPosition,
   StorageRecord,
+  StorageUsage,
   UpstreamIdentity,
 } from "../types";
 
@@ -51,6 +56,42 @@ export class MemoryAuthStore implements AuthStore {
     for (const [key, value] of this.revokedJtis) {
       if (value <= now) this.revokedJtis.delete(key);
     }
+    for (const [key, code] of this.authCodes) {
+      if (code.expiresAt <= now) this.authCodes.delete(key);
+    }
+    for (const [key, request] of this.authRequests) {
+      const hasActiveCode = Array.from(this.authCodes.values()).some(
+        (code) => code.authRequestId === request.id && code.expiresAt > now,
+      );
+      if (request.expiresAt <= now && !hasActiveCode)
+        this.authRequests.delete(key);
+    }
+    for (const [key, grant] of this.devices) {
+      if (grant.expiresAt <= now) {
+        this.devices.delete(key);
+        this.devicesByUserCodeHash.delete(grant.userCodeHash);
+      }
+    }
+    for (const [key, token] of this.refreshTokens) {
+      if (token.expiresAt <= now) this.refreshTokens.delete(key);
+    }
+    for (const [key, family] of this.families) {
+      const hasToken = Array.from(this.refreshTokens.values()).some(
+        (token) => token.familyId === family.id,
+      );
+      if (
+        family.createdAt <= now - REFRESH_FAMILY_ORPHAN_GRACE_SECONDS &&
+        !hasToken
+      ) {
+        this.families.delete(key);
+      }
+    }
+    for (const [key, counter] of this.counters) {
+      if (counter.windowStart <= now - 300) this.counters.delete(key);
+    }
+    this.audits = this.audits.filter(
+      (event) => event.now > now - 90 * 24 * 60 * 60,
+    );
   }
 
   async rateLimit(
@@ -61,6 +102,7 @@ export class MemoryAuthStore implements AuthStore {
   ): Promise<boolean> {
     const counter = this.counters.get(key);
     if (!counter || counter.windowStart + windowSeconds <= now) {
+      if (!counter && this.counters.size >= 10_000) return false;
       this.counters.set(key, { count: 1, windowStart: now });
       return true;
     }
@@ -73,7 +115,7 @@ export class MemoryAuthStore implements AuthStore {
     data: Record<string, unknown>,
     now: number,
   ): Promise<void> {
-    this.audits.push({ type, data, now });
+    this.audits.push({ type, data: redactAuditData(data), now });
   }
 
   async findOrCreateUser(
@@ -141,6 +183,12 @@ export class MemoryAuthStore implements AuthStore {
 
   async getClientSecretHash(id: string): Promise<string | null> {
     return this.clients.get(id)?.secretHash ?? null;
+  }
+
+  async hasActiveClientOrigin(origin: string): Promise<boolean> {
+    return Array.from(this.clients.values()).some(
+      (client) => !client.disabledAt && client.origins.includes(origin),
+    );
   }
 
   async setClientDisabled(
@@ -361,12 +409,18 @@ export class MemoryAuthStore implements AuthStore {
   async listStorageRecords(
     userId: string,
     clientId: string,
-  ): Promise<StorageRecord[]> {
-    return Array.from(this.storageRecords.values())
+    after: StorageListPosition | null,
+    limit: number,
+  ): Promise<StorageListPage<StorageRecord>> {
+    const items = Array.from(this.storageRecords.values())
       .filter(
-        (record) => record.userId === userId && record.clientId === clientId,
+        (record) =>
+          record.userId === userId &&
+          record.clientId === clientId &&
+          isAfterPosition(record, after),
       )
       .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));
+    return { items: items.slice(0, limit), hasMore: items.length > limit };
   }
 
   async getStorageRecord(
@@ -377,13 +431,31 @@ export class MemoryAuthStore implements AuthStore {
     return this.storageRecords.get(storageKey(userId, clientId, key)) ?? null;
   }
 
-  async upsertStorageRecord(record: StorageRecord): Promise<void> {
+  async upsertStorageRecord(
+    record: StorageRecord,
+    limits: StorageLimits,
+  ): Promise<boolean> {
     const key = storageKey(record.userId, record.clientId, record.key);
     const existing = this.storageRecords.get(key);
+    const nextBytes = utf8Bytes(record.valueJson);
+    const previousBytes = existing ? utf8Bytes(existing.valueJson) : 0;
+    if (
+      !fitsStorageLimits(
+        this,
+        record.userId,
+        record.clientId,
+        existing ? 0 : 1,
+        nextBytes - previousBytes,
+        limits,
+      )
+    ) {
+      return false;
+    }
     this.storageRecords.set(key, {
       ...record,
       createdAt: existing?.createdAt ?? record.createdAt,
     });
+    return true;
   }
 
   async deleteStorageRecord(
@@ -397,10 +469,18 @@ export class MemoryAuthStore implements AuthStore {
   async listStorageFiles(
     userId: string,
     clientId: string,
-  ): Promise<StorageFileMetadata[]> {
-    return Array.from(this.storageFiles.values())
-      .filter((file) => file.userId === userId && file.clientId === clientId)
+    after: StorageListPosition | null,
+    limit: number,
+  ): Promise<StorageListPage<StorageFileMetadata>> {
+    const items = Array.from(this.storageFiles.values())
+      .filter(
+        (file) =>
+          file.userId === userId &&
+          file.clientId === clientId &&
+          isAfterPosition(file, after),
+      )
       .sort((a, b) => b.updatedAt - a.updatedAt || a.key.localeCompare(b.key));
+    return { items: items.slice(0, limit), hasMore: items.length > limit };
   }
 
   async getStorageFileMetadata(
@@ -411,21 +491,57 @@ export class MemoryAuthStore implements AuthStore {
     return this.storageFiles.get(storageKey(userId, clientId, key)) ?? null;
   }
 
-  async upsertStorageFileMetadata(file: StorageFileMetadata): Promise<void> {
+  async upsertStorageFileMetadata(
+    file: StorageFileMetadata,
+    expectedR2Key: string | null,
+    limits?: StorageLimits,
+  ): Promise<boolean> {
     const key = storageKey(file.userId, file.clientId, file.key);
     const existing = this.storageFiles.get(key);
+    if (
+      (expectedR2Key === null && existing) ||
+      (expectedR2Key !== null && existing?.r2Key !== expectedR2Key)
+    ) {
+      return false;
+    }
+    if (
+      limits &&
+      !fitsStorageLimits(
+        this,
+        file.userId,
+        file.clientId,
+        existing ? 0 : 1,
+        file.size - (existing?.size ?? 0),
+        limits,
+      )
+    ) {
+      return false;
+    }
     this.storageFiles.set(key, {
       ...file,
       createdAt: existing?.createdAt ?? file.createdAt,
     });
+    return true;
   }
 
   async deleteStorageFileMetadata(
     userId: string,
     clientId: string,
     key: string,
-  ): Promise<void> {
-    this.storageFiles.delete(storageKey(userId, clientId, key));
+    expectedR2Key: string,
+  ): Promise<boolean> {
+    const storageFileKey = storageKey(userId, clientId, key);
+    if (this.storageFiles.get(storageFileKey)?.r2Key !== expectedR2Key) {
+      return false;
+    }
+    return this.storageFiles.delete(storageFileKey);
+  }
+
+  async getStorageUsage(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageUsage> {
+    return usageFor(this, userId, clientId);
   }
 }
 
@@ -446,4 +562,77 @@ function stripSecret(
 
 function storageKey(userId: string, clientId: string, key: string): string {
   return `${userId}:${clientId}:${key}`;
+}
+
+function isAfterPosition(
+  item: { updatedAt: number; key: string },
+  after: StorageListPosition | null,
+): boolean {
+  return (
+    !after ||
+    item.updatedAt < after.updatedAt ||
+    (item.updatedAt === after.updatedAt && item.key > after.key)
+  );
+}
+
+function usageFor(
+  store: MemoryAuthStore,
+  userId?: string,
+  clientId?: string,
+): StorageUsage {
+  let itemCount = 0;
+  let byteCount = 0;
+  for (const record of store.storageRecords.values()) {
+    if (userId && record.userId !== userId) continue;
+    if (clientId && record.clientId !== clientId) continue;
+    itemCount += 1;
+    byteCount += utf8Bytes(record.valueJson);
+  }
+  for (const file of store.storageFiles.values()) {
+    if (userId && file.userId !== userId) continue;
+    if (clientId && file.clientId !== clientId) continue;
+    itemCount += 1;
+    byteCount += file.size;
+  }
+  return { itemCount, byteCount };
+}
+
+function fitsStorageLimits(
+  store: MemoryAuthStore,
+  userId: string,
+  clientId: string,
+  itemDelta: number,
+  byteDelta: number,
+  limits: StorageLimits,
+): boolean {
+  const global = usageFor(store);
+  const user = usageFor(store, userId);
+  const namespace = usageFor(store, userId, clientId);
+  return (
+    global.itemCount + itemDelta <= limits.globalMaxItems &&
+    global.byteCount + byteDelta <= limits.globalMaxBytes &&
+    user.itemCount + itemDelta <= limits.userMaxItems &&
+    user.byteCount + byteDelta <= limits.userMaxBytes &&
+    namespace.itemCount + itemDelta <= limits.namespaceMaxItems &&
+    namespace.byteCount + byteDelta <= limits.namespaceMaxBytes
+  );
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function redactAuditData(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [
+      key,
+      /token|secret|code|cookie|authorization|password|credential|access_key/i.test(
+        key,
+      )
+        ? "[REDACTED]"
+        : value,
+    ]),
+  );
 }

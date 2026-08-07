@@ -58,6 +58,21 @@ test("AGENTS.md requires intended changes to be committed before handoff", async
   );
 });
 
+test("AGENTS.md requires evidence-based readiness confidence", async () => {
+  const policy = await readFile(AGENTS_PATH, "utf8");
+
+  assert.match(policy, /readiness confidence from `0\/100` to `100\/100`/);
+  assert.match(policy, /rarely use `100\/100`/);
+  assert.match(
+    policy,
+    /never replaces security gates or the definition of done/,
+  );
+  assert.match(
+    policy,
+    /Capture every material residual finding in `PLAN\.md`, `ROADMAP\.md`, or `BACKLOG\.md`/,
+  );
+});
+
 test("ROADMAP.md is one stable flat list of unchecked future items", async () => {
   const roadmap = await readFile(ROADMAP_PATH, "utf8");
   const checkboxLines = roadmap

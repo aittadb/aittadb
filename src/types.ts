@@ -36,7 +36,30 @@ export interface RuntimeEnv {
   DEVICE_POLL_INTERVAL_SECONDS?: string;
   REFRESH_TOKEN_TTL_SECONDS?: string;
   ALLOWED_CORS_ORIGINS?: string;
+  STORAGE_WRITES_ENABLED?: string;
+  STORAGE_GLOBAL_MAX_ITEMS?: string;
+  STORAGE_GLOBAL_MAX_BYTES?: string;
+  STORAGE_USER_MAX_ITEMS?: string;
+  STORAGE_USER_MAX_BYTES?: string;
+  STORAGE_NAMESPACE_MAX_ITEMS?: string;
+  STORAGE_NAMESPACE_MAX_BYTES?: string;
+  STORAGE_DEFAULT_PAGE_SIZE?: string;
+  STORAGE_MAX_PAGE_SIZE?: string;
+  STORAGE_READ_RATE_LIMIT?: string;
+  STORAGE_WRITE_RATE_LIMIT?: string;
+  ADMIN_SUBJECTS?: string;
+  ADMIN_ACCESS_KEY_HASH?: string;
   NODE_ENV?: string;
+}
+
+export interface StorageLimits {
+  writesEnabled: boolean;
+  globalMaxItems: number;
+  globalMaxBytes: number;
+  userMaxItems: number;
+  userMaxBytes: number;
+  namespaceMaxItems: number;
+  namespaceMaxBytes: number;
 }
 
 export interface AppConfig {
@@ -50,6 +73,13 @@ export interface AppConfig {
   devicePollIntervalSeconds: number;
   refreshTokenTtlSeconds: number;
   allowedCorsOrigins: readonly string[];
+  storageLimits: StorageLimits;
+  storageDefaultPageSize: number;
+  storageMaxPageSize: number;
+  storageReadRateLimit: number;
+  storageWriteRateLimit: number;
+  adminSubjects: readonly string[];
+  adminAccessKeyHash: string | null;
   isTest: boolean;
   isProduction: boolean;
 }
@@ -179,6 +209,21 @@ export interface StorageFileMetadata {
   updatedAt: number;
 }
 
+export interface StorageListPosition {
+  updatedAt: number;
+  key: string;
+}
+
+export interface StorageListPage<T> {
+  items: T[];
+  hasMore: boolean;
+}
+
+export interface StorageUsage {
+  itemCount: number;
+  byteCount: number;
+}
+
 export interface AuthStore {
   cleanup(now: number): Promise<void>;
   rateLimit(
@@ -205,6 +250,7 @@ export interface AuthStore {
   listClients(): Promise<ClientView[]>;
   getClient(id: string): Promise<ClientView | null>;
   getClientSecretHash(id: string): Promise<string | null>;
+  hasActiveClientOrigin(origin: string): Promise<boolean>;
   setClientDisabled(id: string, disabledAt: number | null): Promise<void>;
   rotateClientSecret(
     id: string,
@@ -277,13 +323,18 @@ export interface AuthStore {
   listStorageRecords(
     userId: string,
     clientId: string,
-  ): Promise<StorageRecord[]>;
+    after: StorageListPosition | null,
+    limit: number,
+  ): Promise<StorageListPage<StorageRecord>>;
   getStorageRecord(
     userId: string,
     clientId: string,
     key: string,
   ): Promise<StorageRecord | null>;
-  upsertStorageRecord(record: StorageRecord): Promise<void>;
+  upsertStorageRecord(
+    record: StorageRecord,
+    limits: StorageLimits,
+  ): Promise<boolean>;
   deleteStorageRecord(
     userId: string,
     clientId: string,
@@ -293,16 +344,24 @@ export interface AuthStore {
   listStorageFiles(
     userId: string,
     clientId: string,
-  ): Promise<StorageFileMetadata[]>;
+    after: StorageListPosition | null,
+    limit: number,
+  ): Promise<StorageListPage<StorageFileMetadata>>;
   getStorageFileMetadata(
     userId: string,
     clientId: string,
     key: string,
   ): Promise<StorageFileMetadata | null>;
-  upsertStorageFileMetadata(file: StorageFileMetadata): Promise<void>;
+  upsertStorageFileMetadata(
+    file: StorageFileMetadata,
+    expectedR2Key: string | null,
+    limits?: StorageLimits,
+  ): Promise<boolean>;
   deleteStorageFileMetadata(
     userId: string,
     clientId: string,
     key: string,
-  ): Promise<void>;
+    expectedR2Key: string,
+  ): Promise<boolean>;
+  getStorageUsage(userId: string, clientId: string): Promise<StorageUsage>;
 }
