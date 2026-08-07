@@ -15,4 +15,6 @@ Before creating a private Sites deployment:
 
 Do not commit real `.openai/hosting.json` production `project_id` values as part of reusable public templates.
 
+The build configuration falls back to `.openai/hosting.example.json` so type checking and production-build validation work in a clean checkout and in CI. This fallback does not configure a deployable Sites project. A real deployment still requires the ignored checkout-local `.openai/hosting.json` created in step 3.
+
 Forks must create their own Sites project, D1 database, R2 bucket, JWT signing key, and hosted secrets. Do not reuse another deployment's `.openai/hosting.json`, signing key, D1 database, or R2 bucket.
