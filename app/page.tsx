@@ -12,15 +12,16 @@ export default function Page() {
         </span>
       </Link>
       <p className="eyebrow">Hosted application backend</p>
-      <h1>Identity and persistent state for applications.</h1>
+      <h1>Sign-in, data, and files for third-party applications.</h1>
       <p>
-        ChatGPT signs the person into this app inside ChatGPT Sites. AittaDB
-        then creates a separate local user, issues its own OAuth 2.0 and OpenID
-        Connect sessions, and isolates application data by user and client.
+        AittaDB runs inside ChatGPT Sites. It maps ChatGPT sign-in to a separate
+        AittaDB user, issues its own OAuth 2.0 and OpenID Connect sessions, and
+        provides persistent JSON records and file storage isolated by user and
+        client.
       </p>
       <p>
-        This is a REST and hypermedia API service. See{" "}
-        <Link href="/docs">API docs</Link> or{" "}
+        Third-party apps, services, and agents use AittaDB through its REST and
+        hypermedia APIs. See <Link href="/docs">API docs</Link> or{" "}
         <Link href="/health">health metadata</Link>.
       </p>
     </main>

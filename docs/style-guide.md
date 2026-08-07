@@ -1,12 +1,12 @@
 # AittaDB Browser UI Style Guide
 
-AittaDB is a REST API, application-data service, and authentication service, so its browser UI must stay focused on service metadata and mandatory browser-mediated operations. The expected quality level is contemporary ChatGPT Sites generated pages: careful spacing, strong typographic hierarchy, polished panels, responsive composition, and purposeful visual treatment. The UI must not look like an unstyled form or a default server error page.
+AittaDB is a hosted application backend for third-party apps, services, and agents. Its browser UI must stay focused on the signed-in user's real AittaDB identity and data operations, service metadata, and mandatory browser-mediated protocol steps. The expected quality level is contemporary ChatGPT Sites generated pages: careful spacing, strong typographic hierarchy, polished panels, responsive composition, and purposeful visual treatment. The UI must not look like an unstyled form or a default server error page.
 
 This style guide describes style-level alignment only. Do not copy ChatGPT product branding, imply affiliation, or make AittaDB-issued tokens look like OpenAI or ChatGPT tokens.
 
 ## Page Model
 
-Use one shared authentication-service shell for all normal HTML responses:
+Use one shared application-backend shell for all normal HTML responses:
 
 - A full-bleed visual panel that communicates the sign-in, independent identity, session, and application-data boundary.
 - One focused content panel for the current task.
@@ -15,15 +15,19 @@ Use one shared authentication-service shell for all normal HTML responses:
 
 The normal page set is limited to service metadata, the protected local-session boundary, health, real OAuth/OIDC protocol forms and results, real storage operation forms and results, device-code entry, device approval or denial, OAuth consent, OAuth errors, administrator client registration, and the interactive OpenAPI viewer.
 
-The public service home is an operation map, not a simulated demo. Its links must enter the real production routes. The protected session view must use the production Sites identity adapter and durable local-user repository; protocol and storage forms must invoke the same services, scope checks, and persistence as non-browser API requests. Never add mock sign-in, sample-only tokens, fake storage, or browser-only grants.
+The public service home is an operation map, not a simulated demo. Its links must enter real user-facing production routes. Do not promote sign-in-flow internals such as authorization, device authorization initiation, consent, token exchange, revocation, or introspection as ordinary user operations; clients enter those routes as part of their protocol flows, and developers can open their forms directly or through Swagger UI. The protected session view must use the production Sites identity adapter and durable local-user repository; protocol and storage forms must invoke the same services, scope checks, and persistence as non-browser API requests. Never add mock sign-in, sample-only tokens, fake storage, or browser-only grants.
 
 ## Terminology
+
+Lead with **hosted application backend for third-party apps**. Follow with the concrete capabilities available now: ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage. Treat persistent events as planned until implemented. Do not lead with OAuth/OIDC terminology or describe AittaDB as only an authentication broker.
 
 The first user-facing reference to the upstream authentication must say "ChatGPT sign-in inside ChatGPT Sites." Later references on the same page may say "ChatGPT sign-in." Do not present the standalone phrase "Sites identity" to users.
 
 Always pair the upstream description with the boundary: AittaDB creates a separate user with an immutable UUID, issues its own tokens, and stores application data only inside AittaDB. Those tokens are not OpenAI or ChatGPT tokens, and AittaDB never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
 
 Label the downstream credential source as **Session issuer**, never **Token authority**. The latter can be mistaken for AI-model token accounting. Supporting copy may name OAuth, OIDC, and JWT credentials explicitly.
+
+Call current-session D1/R2 storage the user's private or signed-in AittaDB namespace. Do not call it "browser-session storage" because that suggests temporary browser state; the data is durable even though a reserved internal browser client provides its isolation boundary.
 
 ## Brand System
 
@@ -40,7 +44,7 @@ Use `public/aittadb-mark.svg` as the canonical mark and favicon. It depicts a ge
 
 Prefer:
 
-- A calm, high-trust authentication-product aesthetic.
+- A calm, high-trust application-backend aesthetic.
 - Off-white or lightly tinted page backgrounds with depth from panels, borders, and shadows.
 - Balanced contrast with one dark anchoring area and one light task area.
 - Midnight navy `#0B234A` for structural anchors, teal `#159CA6` for active/service accents, and red-orange `#F04A32` for the `DB` wordmark and focused highlights.

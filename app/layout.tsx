@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import "./globals.css";
 
 const description =
-  "A hosted application backend with ChatGPT sign-in, independent OAuth and OpenID Connect sessions, and per-user storage.";
+  "A hosted application backend for third-party apps, with ChatGPT sign-in, AittaDB-issued sessions, isolated JSON records, and file storage.";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

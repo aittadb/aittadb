@@ -36,6 +36,7 @@ export interface PageOptions {
 
 export function serviceHomePage(metadata: {
   service: string;
+  description: string;
   issuer: string;
   docs: string;
   openapi: string;
@@ -47,27 +48,26 @@ export function serviceHomePage(metadata: {
     credentialsForwarded: boolean;
   };
   sessionIssuer: string;
+  capabilities: readonly string[];
+  plannedCapabilities: readonly string[];
   _links?: Record<string, { href: string; type?: string }>;
   actions?: Record<string, unknown>;
 }): string {
-  const description =
-    "ChatGPT sign-in, app-ready identity and data through independent OAuth, OpenID Connect, D1, and R2 services.";
   return pageDocument({
     title: metadata.service,
     eyebrow: "Hosted application backend",
     heading: metadata.service,
-    summary:
-      "Independent OAuth and OpenID Connect sessions with per-user application data, based on ChatGPT sign-in inside ChatGPT Sites.",
+    summary: metadata.description,
     visualEyebrow: "ChatGPT sign-in boundary",
-    visualHeading: "ChatGPT sign-in. App-ready identity and data.",
+    visualHeading: "One hosted backend for sign-in, data, and files.",
     visualSummary:
-      "AittaDB turns the server-side sign-in signal into independent sessions and isolated app storage without forwarding ChatGPT credentials.",
+      "Third-party apps use AittaDB for identity, sessions, isolated JSON records, and file storage while ChatGPT credentials stay inside Sites.",
     social: {
-      description,
+      description: metadata.description,
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID, issues its own OAuth, OIDC, and JWT tokens, and provides client-isolated storage. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Service operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB session</strong><span>Sign in and inspect the local identity created by this service.</span></a><a href="/device"><strong>Device confirmation</strong><span>Enter and approve a code created by a real device authorization.</span></a><a href="/authorize"><strong>Authorization code</strong><span>Start the production OAuth authorization endpoint with PKCE.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Use scoped D1-backed application data operations.</span></a><a href="/storage/files"><strong>File objects</strong><span>Use scoped D1 metadata and R2 object operations.</span></a><a href="/admin/clients"><strong>OAuth clients</strong><span>Register and manage clients when the signed-in email is allowed.</span></a></div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div></section><p class="note"><strong>AittaDB runs as a hosted backend on ChatGPT Sites.</strong> Third-party apps, services, and agents use its HTTP APIs for AittaDB identity, sessions, persistent JSON records, and files. Persistent events are planned and are not available in the current MVP.</p><p class="note"><strong>ChatGPT supplies browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID and issues its own OAuth, OIDC, and JWT credentials. It never forwards ChatGPT credentials, and its credentials and stored data are not OpenAI or ChatGPT credentials or data.</p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>Sign in to view your AittaDB identity and reach your private records and files.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients when the signed-in email is allowlisted.</span></a></div></section>`,
     actions: [
       { href: "/session", label: "Sign in to AittaDB" },
       { href: "/docs", label: "API docs", secondary: true },
@@ -87,14 +87,15 @@ export function sessionPage(user: LocalUser): string {
     eyebrow: "Authenticated identity",
     heading: "My AittaDB session",
     summary:
-      "This is the local identity AittaDB created after ChatGPT sign-in inside ChatGPT Sites.",
+      "Use the AittaDB identity created from your ChatGPT sign-in to access private data or approve a registered application's request.",
     visualEyebrow: "Identity boundary",
-    visualHeading: "Signed in upstream. Independent here.",
+    visualHeading: "Your AittaDB identity, records, and files.",
     visualSummary:
-      "Your ChatGPT credential stays inside the Sites boundary. AittaDB stores a separate immutable subject for its own sessions and application data.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current session can access its own browser-storage namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/oauth/device_authorization"><strong>Device authorization</strong><span>Create a real client grant, then approve its code with this signed-in identity.</span></a><a href="/authorize"><strong>Authorization code</strong><span>Use this identity at consent while preserving client, redirect, and PKCE checks.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Use this session's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/files"><strong>File objects</strong><span>Use this session's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>UserInfo</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a><a href="/admin/clients"><strong>OAuth clients</strong><span>Manage clients with this session only when its email is allowlisted.</span></a></div></section>`,
+      "ChatGPT establishes the upstream sign-in. AittaDB uses its own immutable user ID for sessions and persistent storage.",
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a><a href="/admin/clients"><strong>Application clients</strong><span>Manage OAuth clients only when this signed-in email is allowlisted.</span></a></div></section>`,
     actions: [
-      { href: "/device", label: "Enter device code" },
+      { href: "/storage/records", label: "Open my records" },
+      { href: "/storage/files", label: "Open my files", secondary: true },
       {
         href: "/signout-with-chatgpt?return_to=%2F",
         label: "Sign out",
@@ -140,11 +141,11 @@ export function docsPage(): string {
     eyebrow: "API reference",
     heading: "AittaDB API",
     summary:
-      "Interactive OpenAPI reference for OAuth, OpenID Connect, application storage, and administration.",
-    visualEyebrow: "Protocol surface",
-    visualHeading: "Familiar standards. One independent issuer.",
+      "Interactive OpenAPI reference for AittaDB identity, sessions, JSON records, file storage, and administration.",
+    visualEyebrow: "Application backend API",
+    visualHeading: "Build against the real AittaDB service.",
     visualSummary:
-      "Discovery, authorization, tokens, records, and objects remain explicit parts of the same application boundary.",
+      "Discovery, authorization, credentials, records, and files are available through documented production endpoints.",
     body: `<p class="note">This self-hosted Swagger UI reads the canonical OpenAPI 3.1 document from <code>/openapi.json</code>. "Try it out" calls the real AittaDB routes on this origin. Credentials entered here are sent only in the selected request and are not retained by AittaDB browser state.</p><div id="swagger-ui" aria-label="Interactive AittaDB OpenAPI documentation"><p>Loading API reference...</p></div><noscript><p class="notice">The interactive API reference requires JavaScript. The canonical OpenAPI JSON remains available below.</p></noscript>`,
     actions: [
       { href: "/openapi.json?format=json", label: "OpenAPI JSON" },
@@ -329,7 +330,7 @@ export function pageDocument(options: PageOptions): string {
     ? `<meta name="description" content="${escapeHtml(options.social.description)}"><link rel="canonical" href="${escapeHtml(options.social.url)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(options.title)}"><meta property="og:description" content="${escapeHtml(options.social.description)}"><meta property="og:url" content="${escapeHtml(options.social.url)}"><meta property="og:image" content="${escapeHtml(options.social.imageUrl)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="AittaDB: ChatGPT sign-in, app-ready identity and data."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(options.title)}"><meta name="twitter:description" content="${escapeHtml(options.social.description)}"><meta name="twitter:image" content="${escapeHtml(options.social.imageUrl)}">`
     : "";
   const layout = options.layout ?? "default";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "Identity and data, ready for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate local user, standard credentials, and isolated application storage without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Local identity</strong></div><div><span>Application</span><strong>Sessions + storage</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth / OIDC / Storage</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main>${options.scripts ?? ""}</body></html>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application backend")}</p><h2>${escapeHtml(options.visualHeading ?? "Hosted identity, data, and files for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate user, its own credentials, and isolated persistent storage without forwarding ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Identity + sessions</strong></div><div><span>App data</span><strong>JSON + files</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">Identity / Data / Files</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main>${options.scripts ?? ""}</body></html>`;
 }
 
 function brandWordmark(): string {

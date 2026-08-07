@@ -1,7 +1,7 @@
 {
   "name": "aittadb",
   "version": "0.1.0",
-  "description": "An independent hosted application backend with ChatGPT sign-in, OAuth 2.0 and OpenID Connect sessions, and per-user D1/R2 storage.",
+  "description": "A hosted application backend for third-party apps, with ChatGPT sign-in, AittaDB-issued OAuth and OpenID Connect sessions, isolated D1 records, and R2 file storage.",
   "private": true,
   "author": "Jaakko Heusala <jheusala@iki.fi>",
   "license": "FSL-1.1-MIT",

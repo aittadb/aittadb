@@ -22,7 +22,7 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is an independent hosted application backend based on ChatGPT sign-in inside ChatGPT Sites. It creates a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT sessions, and provides client-isolated D1/R2 storage. Its tokens and stored data are not OpenAI or ChatGPT tokens or data. Browser-only forms require same-origin validation and a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages.",
+      "AittaDB is a hosted application backend for third-party apps, services, and agents. It runs inside ChatGPT Sites, maps the server-side ChatGPT sign-in signal to a separate AittaDB user, issues AittaDB's own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1 and files in R2. Persistent events and long-polling delivery are planned and are not part of the current MVP. AittaDB is independent: its credentials and stored data are not OpenAI or ChatGPT credentials or data, and it never forwards ChatGPT credentials. Browser-only forms require same-origin validation and a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages.",
   },
   paths: {
     "/": {
@@ -685,15 +685,23 @@ export const openApiSpec = {
         type: "object",
         required: [
           "service",
+          "description",
           "issuer",
           "officialOpenAIProduct",
           "upstreamSignIn",
           "sessionIssuer",
+          "capabilities",
+          "plannedCapabilities",
           "_links",
           "actions",
         ],
         properties: {
           service: { type: "string", const: "AittaDB" },
+          description: {
+            type: "string",
+            description:
+              "Current AittaDB product scope for human and machine clients.",
+          },
           issuer: { type: "string", format: "uri" },
           docs: { type: "string", format: "uri" },
           openapi: { type: "string", format: "uri" },
@@ -725,6 +733,17 @@ export const openApiSpec = {
             const: "AittaDB",
             description:
               "Service that issues the downstream OAuth, OIDC, and JWT session credentials.",
+          },
+          capabilities: {
+            type: "array",
+            description: "Capabilities available in the current deployment.",
+            items: { type: "string" },
+          },
+          plannedCapabilities: {
+            type: "array",
+            description:
+              "Planned capabilities that are not available in the current MVP.",
+            items: { type: "string" },
           },
           _links: { $ref: "#/components/schemas/HypermediaLinks" },
           actions: { type: "object", additionalProperties: true },

@@ -2,7 +2,9 @@
 
 ## Project Purpose and Boundary
 
-AittaDB is an independent hosted application backend based on ChatGPT sign-in inside ChatGPT Sites. It maps the server-side identity signal to a separate AittaDB user, issues standard OAuth 2.0, OpenID Connect, and JWT sessions, and provides per-user, per-client JSON record and object storage for web applications, APIs, native applications, and CLI tools.
+AittaDB is a hosted application backend for third-party applications, services, and agents. It runs inside ChatGPT Sites, maps the server-side ChatGPT sign-in signal to a separate AittaDB user, issues its own standard OAuth 2.0, OpenID Connect, and JWT sessions, and provides per-user, per-client JSON record and object storage for web applications, APIs, native applications, and CLI tools.
+
+The current MVP includes identity mapping, OAuth/OIDC/JWT sessions, D1-backed JSON records, and R2-backed files with D1 metadata. Persistent events and long-polling delivery are planned and must never be described as currently available until their complete interface, implementation, tests, documentation, and validation task is finished.
 
 This project is independent and is not affiliated with, endorsed by, or an official product of OpenAI. Do not describe it as "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or anything that implies tokens issued by this service are OpenAI or ChatGPT tokens.
 
@@ -69,11 +71,15 @@ These scopes grant claims, refresh behavior, or AittaDB application-storage oper
 
 ## Product Terminology
 
+Lead public product descriptions with **hosted application backend for third-party apps**, followed by the implemented capabilities: ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage. OAuth, OpenID Connect, JWT, D1, and R2 are important implementation details, but must not replace the product description or make AittaDB sound like only an authentication broker.
+
 On first reference in user-facing UI, JSON metadata, and documentation, call the upstream browser authentication "ChatGPT sign-in inside ChatGPT Sites." A shorter later reference may use "ChatGPT sign-in." Do not use the standalone phrase "Sites identity" in user-facing content because it does not explain the identity source.
 
 "ChatGPT sign-in" names only the upstream browser authentication supplied by the Sites runtime. In the same context, distinguish the immutable local UUID and tokens issued independently by AittaDB. Never imply a general OpenAI or ChatGPT OAuth service, credential issuance, endorsement, or access to ChatGPT data. Internal implementation names may use "Sites identity adapter" or "Sites identity provider" when discussing the runtime interface precisely.
 
 Use "Session issuer" in user-facing metadata for the service that issues downstream OAuth, OIDC, and JWT credentials. Do not use "Token authority" in browser copy or JSON metadata because it can be confused with AI-model token accounting.
+
+Do not call durable D1/R2 data "browser-session storage" in user-facing text. Call it the user's private or signed-in AittaDB namespace and explain that it persists. The internal reserved browser client remains the precise implementation term in architecture and code.
 
 ## Repository Structure
 
