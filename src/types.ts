@@ -37,8 +37,6 @@ export interface RuntimeEnv {
   REFRESH_TOKEN_TTL_SECONDS?: string;
   ALLOWED_CORS_ORIGINS?: string;
   NODE_ENV?: string;
-  TEST_AUTH_EMAIL?: string;
-  TEST_AUTH_FULL_NAME?: string;
 }
 
 export interface AppConfig {
@@ -197,6 +195,7 @@ export interface AuthStore {
 
   findOrCreateUser(identity: UpstreamIdentity, now: number): Promise<LocalUser>;
   getUser(id: string): Promise<LocalUser | null>;
+  countUsers(): Promise<number>;
 
   createClient(
     input: ClientRegistrationInput,
@@ -218,13 +217,31 @@ export interface AuthStore {
   getDeviceGrantByDeviceHash(hash: string): Promise<DeviceGrant | null>;
   getDeviceGrantByUserCodeHash(hash: string): Promise<DeviceGrant | null>;
   updateDeviceGrant(grant: DeviceGrant): Promise<void>;
+  transitionDeviceGrant(
+    userCodeHash: string,
+    status: "approved" | "denied",
+    userId: string | null,
+    now: number,
+  ): Promise<DeviceGrant | null>;
+  consumeDeviceGrant(
+    deviceCodeHash: string,
+    clientId: string,
+    now: number,
+  ): Promise<DeviceGrant | null>;
 
   createAuthorizationRequest(request: AuthorizationRequest): Promise<void>;
   getAuthorizationRequest(id: string): Promise<AuthorizationRequest | null>;
-  updateAuthorizationRequest(request: AuthorizationRequest): Promise<void>;
+  transitionAuthorizationRequest(
+    id: string,
+    status: "approved" | "denied",
+    userId: string | null,
+    now: number,
+  ): Promise<boolean>;
   createAuthorizationCode(code: AuthorizationCode): Promise<void>;
   consumeAuthorizationCode(
     hash: string,
+    clientId: string,
+    redirectUri: string,
     now: number,
   ): Promise<AuthorizationCode | null>;
 
@@ -240,10 +257,15 @@ export interface AuthStore {
   createRefreshToken(token: RefreshTokenRecord): Promise<void>;
   consumeRefreshToken(
     hash: string,
+    clientId: string,
     now: number,
   ): Promise<RefreshTokenRecord | null>;
   revokeRefreshFamily(familyId: string, now: number): Promise<void>;
-  revokeRefreshToken(hash: string, now: number): Promise<void>;
+  revokeRefreshToken(
+    hash: string,
+    clientId: string,
+    now: number,
+  ): Promise<boolean>;
 
   revokeAccessTokenJti(
     jti: string,

@@ -21,6 +21,8 @@ The public service home is an operation map, not a simulated demo. Its links mus
 
 Lead with **hosted application backend for third-party apps**. Follow with the concrete capabilities available now: ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage. Treat persistent events as planned until implemented. Do not lead with OAuth/OIDC terminology or describe AittaDB as only an authentication broker.
 
+Use **Identity / Data / Files / Events** as the compact product-capability label. Whenever the page explains capabilities in prose, make clear that Events is planned while identity, data, and files are available now.
+
 Describe AittaDB as deployed on OpenAI-hosted ChatGPT Sites. Distinguish the platform relationship from AittaDB itself, which remains independent.
 
 The first user-facing reference to the upstream authentication must say "ChatGPT sign-in inside ChatGPT Sites." Later references on the same page may say "ChatGPT sign-in." Do not present the standalone phrase "Sites identity" to users.
@@ -107,17 +109,17 @@ Tables should be used only where density is useful, such as client administratio
 
 Storage and UserInfo forms use an explicit authentication selector. Prefer the current signed-in session when available and otherwise prefer explicit access-token mode. Hide and disable the bearer field in session mode, reveal and require it in token mode, and leave it visible without JavaScript so the form still works through server validation.
 
-Each storage URL owns its browser interface. A collection page may list that collection and provide navigation to a logical key. An item page may expose `GET`, `PUT`, and `DELETE` actions only for the key already encoded in that exact URL. Do not use an operation selector to mix collection and item URLs, and never accept a second form key that can override an item URL. Browser actions post back to the same resource URL with an explicit canonical-method override; the server must validate that the override is valid for that resource. Show record JSON in a monospace textarea, use the native accessible file input for R2 uploads, and render escaped operation results in the shared shell. A download response may leave the shell to return the actual attachment.
+Each storage URL owns its browser interface. A collection page renders a useful list or explicit empty state plus navigation to a logical key. `GET /storage/files` also presents the real collection-level `POST` upload form. Use a labeled native file input as the accessible baseline; drag and drop may progressively select that input, must provide status text, and must not upload without the user's explicit submit action. An item page may expose `GET`, `PUT`, and `DELETE` actions only for the key already encoded in that exact URL. Do not use an operation selector to mix collection and item URLs, and never accept a second form key that can override an item URL. Render record values, file metadata, results, and errors as readable HTML rather than a JSON dump. A download response may leave the shell to return the actual attachment.
 
 `/auth-ui.js` is the only general progressive-enhancement script. It is same-origin, CSP-compatible, and limited to conditional form disclosure plus encoded storage-item navigation. Initial markup must remain complete without it: conditional controls start enabled, collection navigation submits `?key=...`, and the server validates and redirects to the canonical same-origin item path. Client-side visibility never replaces server authorization, CSRF, origin, scope, key, method, or request-size checks.
 
 ## Hypermedia Equivalence
 
-HTML pages show available actions as buttons or links. JSON responses should expose equivalent `_links` and `actions` objects where protocol compatibility allows. OAuth token success responses remain standards-compliant and do not include decorative hypermedia.
+One URI serves equivalent application state and capabilities. `Accept: text/html` renders links, forms, tables, details, and errors for people; the versioned JSON representation renders `data`, semantic `links`, and currently available `actions` for machines. Do not select HTML from `User-Agent`, build separate `/api` and `/web` trees, or expose a button in HTML without its equivalent authorized JSON action. OAuth/OIDC wire responses remain standards-compliant where an AittaDB envelope would break interoperability.
 
-The root remains publicly readable so clients can discover the issuer and begin OAuth flows before authentication. Identity-aware browser operations enter through `/session`, which starts the Sites-owned ChatGPT sign-in flow when needed and displays only the signed-in user's local AittaDB subject. The current session may use its isolated browser-client storage and UserInfo; it is never a substitute for a third-party client's registration, redirect URI, PKCE, consent, scopes, token, secret, revocation, or introspection requirements.
+The root remains publicly readable so clients can discover the issuer and begin OAuth flows before authentication. Its primary session control says **Sign in** only when the trusted Sites identity is absent and **Sign out** when it is present. Identity-aware browser operations enter through `/session`, which starts the Sites-owned ChatGPT sign-in flow when needed and displays only the signed-in user's local AittaDB subject. The current session may use its isolated browser-client storage and UserInfo; it is never a substitute for a third-party client's registration, redirect URI, PKCE, consent, scopes, token, secret, revocation, or introspection requirements.
 
-`/docs` uses the self-hosted Swagger UI distribution inside the branded wide documentation layout. Load its CSS and scripts only from checked-in same-origin assets, point it at the canonical `/openapi.json`, disable persisted authorization, and keep the raw JSON link available. Swagger operations call the real API; do not populate them with working secrets or production credentials as examples.
+`/docs` uses the self-hosted Swagger UI distribution inside the branded wide documentation layout. Load its CSS and scripts only from checked-in same-origin assets, point it at the canonical `/openapi.json`, disable persisted authorization, and keep the raw JSON link available. "Try it out" must call the origin serving the viewer, including on a custom domain, rather than trusting a stale server URL. Do not populate examples with working secrets or production credentials.
 
 All AittaDB form, button, heading, table, code-output, and focus selectors must be rooted in the shared shell's direct content or named components. Never use global element selectors that can restyle Swagger controls. Verify operation expansion and the Schemas `Expand all` control after shell CSS changes.
 
@@ -134,6 +136,9 @@ Before completing browser UI work:
 - Check no runtime-loaded third-party fonts, external images, or scripts were introduced.
 - Check inactive conditional fields are hidden, disabled, and required only when visible, while the no-JavaScript form remains complete.
 - Check collection and item storage pages expose only operations owned by their exact resource URL.
+- Check file collections show list/empty state and the `POST` upload control, drag and drop remains keyboard-accessible progressive enhancement, and item `PUT` is labeled as create or update according to state.
+- Check HTML and JSON advertise equivalent authorized operations and root sign-in/sign-out state agrees with the trusted Sites identity.
+- Check Swagger can execute a simple same-origin `GET` through "Try it out" without disturbing operation or Schemas controls.
 - Check `aittadb-boundary.jpg` remains local, decorative, and free of text, marks, secrets, PII, and deployment identifiers.
 - Check `og.png` is 1200x630, uses exact brand text, and is advertised through issuer-derived root metadata.
 - Check errors are content-aware and not default/plain server output.

@@ -127,6 +127,13 @@ export class D1AuthStore implements AuthStore {
     return row ? rowToUser(row) : null;
   }
 
+  async countUsers(): Promise<number> {
+    const row = await this.db
+      .prepare("SELECT COUNT(*) AS identity_count FROM users")
+      .first<Row>();
+    return Number(row?.identity_count ?? 0);
+  }
+
   async createClient(
     input: ClientRegistrationInput,
     secretHash: string | null,
@@ -276,16 +283,41 @@ export class D1AuthStore implements AuthStore {
   async updateDeviceGrant(grant: DeviceGrant): Promise<void> {
     await this.db
       .prepare(
-        "UPDATE device_grants SET status = ?, user_id = ?, last_poll_at = ?, slow_down_count = ? WHERE id = ?",
+        "UPDATE device_grants SET last_poll_at = ?, slow_down_count = ? WHERE id = ?",
       )
-      .bind(
-        grant.status,
-        grant.userId,
-        grant.lastPollAt,
-        grant.slowDownCount,
-        grant.id,
-      )
+      .bind(grant.lastPollAt, grant.slowDownCount, grant.id)
       .run();
+  }
+
+  async transitionDeviceGrant(
+    userCodeHash: string,
+    status: "approved" | "denied",
+    userId: string | null,
+    now: number,
+  ): Promise<DeviceGrant | null> {
+    const result = await this.db
+      .prepare(
+        "UPDATE device_grants SET status = ?, user_id = ? WHERE user_code_hash = ? AND status = 'pending' AND expires_at > ?",
+      )
+      .bind(status, userId, userCodeHash, now)
+      .run();
+    if (mutationChanges(result) !== 1) return null;
+    return this.getDeviceGrantByUserCodeHash(userCodeHash);
+  }
+
+  async consumeDeviceGrant(
+    deviceCodeHash: string,
+    clientId: string,
+    now: number,
+  ): Promise<DeviceGrant | null> {
+    const result = await this.db
+      .prepare(
+        "UPDATE device_grants SET status = 'used' WHERE device_code_hash = ? AND client_id = ? AND status = 'approved' AND user_id IS NOT NULL AND expires_at > ?",
+      )
+      .bind(deviceCodeHash, clientId, now)
+      .run();
+    if (mutationChanges(result) !== 1) return null;
+    return this.getDeviceGrantByDeviceHash(deviceCodeHash);
   }
 
   async createAuthorizationRequest(
@@ -321,15 +353,19 @@ export class D1AuthStore implements AuthStore {
     return row ? rowToAuthRequest(row) : null;
   }
 
-  async updateAuthorizationRequest(
-    request: AuthorizationRequest,
-  ): Promise<void> {
-    await this.db
+  async transitionAuthorizationRequest(
+    id: string,
+    status: "approved" | "denied",
+    userId: string | null,
+    now: number,
+  ): Promise<boolean> {
+    const result = await this.db
       .prepare(
-        "UPDATE authorization_requests SET status = ?, user_id = ? WHERE id = ?",
+        "UPDATE authorization_requests SET status = ?, user_id = ? WHERE id = ? AND status = 'pending' AND expires_at > ?",
       )
-      .bind(request.status, request.userId, request.id)
+      .bind(status, userId, id, now)
       .run();
+    return mutationChanges(result) === 1;
   }
 
   async createAuthorizationCode(code: AuthorizationCode): Promise<void> {
@@ -353,20 +389,22 @@ export class D1AuthStore implements AuthStore {
 
   async consumeAuthorizationCode(
     hash: string,
+    clientId: string,
+    redirectUri: string,
     now: number,
   ): Promise<AuthorizationCode | null> {
+    const result = await this.db
+      .prepare(
+        "UPDATE authorization_codes SET consumed_at = ? WHERE code_hash = ? AND client_id = ? AND redirect_uri = ? AND consumed_at IS NULL AND expires_at > ?",
+      )
+      .bind(now, hash, clientId, redirectUri, now)
+      .run();
+    if (mutationChanges(result) !== 1) return null;
     const row = await this.db
       .prepare("SELECT * FROM authorization_codes WHERE code_hash = ?")
       .bind(hash)
       .first<Row>();
-    if (!row || row.consumed_at || Number(row.expires_at) <= now) return null;
-    await this.db
-      .prepare(
-        "UPDATE authorization_codes SET consumed_at = ? WHERE code_hash = ?",
-      )
-      .bind(now, hash)
-      .run();
-    return rowToAuthCode({ ...row, consumed_at: now });
+    return row ? rowToAuthCode(row) : null;
   }
 
   async hasConsent(
@@ -433,13 +471,14 @@ export class D1AuthStore implements AuthStore {
 
   async consumeRefreshToken(
     hash: string,
+    clientId: string,
     now: number,
   ): Promise<RefreshTokenRecord | null> {
     const row = await this.db
       .prepare(
-        "SELECT rt.*, rtf.status AS family_status FROM refresh_tokens rt JOIN refresh_token_families rtf ON rtf.id = rt.family_id WHERE rt.token_hash = ?",
+        "SELECT rt.*, rtf.status AS family_status FROM refresh_tokens rt JOIN refresh_token_families rtf ON rtf.id = rt.family_id WHERE rt.token_hash = ? AND rt.client_id = ?",
       )
-      .bind(hash)
+      .bind(hash, clientId)
       .first<Row>();
     if (
       !row ||
@@ -452,10 +491,24 @@ export class D1AuthStore implements AuthStore {
       await this.revokeRefreshFamily(String(row.family_id), now);
       return null;
     }
-    await this.db
-      .prepare("UPDATE refresh_tokens SET used_at = ? WHERE token_hash = ?")
-      .bind(now, hash)
+    const result = await this.db
+      .prepare(
+        "UPDATE refresh_tokens SET used_at = ? WHERE token_hash = ? AND client_id = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ? AND EXISTS (SELECT 1 FROM refresh_token_families WHERE id = refresh_tokens.family_id AND status = 'active')",
+      )
+      .bind(now, hash, clientId, now)
       .run();
+    if (mutationChanges(result) !== 1) {
+      const raced = await this.db
+        .prepare(
+          "SELECT rt.*, rtf.status AS family_status FROM refresh_tokens rt JOIN refresh_token_families rtf ON rtf.id = rt.family_id WHERE rt.token_hash = ? AND rt.client_id = ?",
+        )
+        .bind(hash, clientId)
+        .first<Row>();
+      if (raced?.used_at) {
+        await this.revokeRefreshFamily(String(raced.family_id), now);
+      }
+      return null;
+    }
     return rowToRefresh({ ...row, used_at: now });
   }
 
@@ -472,11 +525,20 @@ export class D1AuthStore implements AuthStore {
       .run();
   }
 
-  async revokeRefreshToken(hash: string, now: number): Promise<void> {
-    await this.db
-      .prepare("UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ?")
-      .bind(now, hash)
-      .run();
+  async revokeRefreshToken(
+    hash: string,
+    clientId: string,
+    now: number,
+  ): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        "SELECT family_id FROM refresh_tokens WHERE token_hash = ? AND client_id = ?",
+      )
+      .bind(hash, clientId)
+      .first<Row>();
+    if (!row) return false;
+    await this.revokeRefreshFamily(String(row.family_id), now);
+    return true;
   }
 
   async revokeAccessTokenJti(
@@ -762,6 +824,13 @@ function rowToStorageFile(row: Row): StorageFileMetadata {
 
 function nullableNumber(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+
+function mutationChanges(result: D1Result): number {
+  if (!result.success || !result.meta || typeof result.meta !== "object")
+    return 0;
+  const changes = (result.meta as { changes?: unknown }).changes;
+  return typeof changes === "number" ? changes : 0;
 }
 
 function redact(data: Record<string, unknown>): Record<string, unknown> {

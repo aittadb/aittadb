@@ -12,17 +12,23 @@ export default function Page() {
         </span>
       </Link>
       <p className="eyebrow">Hosted application backend</p>
-      <h1>Sign-in, data, and files for third-party applications.</h1>
+      <h1>Identity, data, and files for third-party applications.</h1>
       <p>
-        AittaDB is deployed as an application on OpenAI-hosted ChatGPT Sites. It
-        maps ChatGPT sign-in to a separate AittaDB user, issues its own OAuth
-        2.0 and OpenID Connect sessions, and provides persistent JSON records
-        and file storage isolated by user and client.
+        Developers can deploy AittaDB as an independent application on
+        OpenAI-hosted ChatGPT Sites. It maps ChatGPT sign-in to a separate
+        AittaDB user, issues its own OAuth 2.0 and OpenID Connect sessions, and
+        provides persistent JSON records and file storage isolated by user and
+        client.
       </p>
       <p>
         Third-party apps, services, and agents use AittaDB through its REST and
-        hypermedia APIs. See <Link href="/docs">API docs</Link> or{" "}
-        <Link href="/health">health metadata</Link>.
+        hypermedia APIs. Persistent Events are planned and are not part of the
+        current MVP. See <Link href="/docs">API docs</Link>,{" "}
+        <Link href="/health">health metadata</Link>, or the{" "}
+        <Link href="https://github.com/aittadb/aittadb">
+          project repository
+        </Link>
+        .
       </p>
     </main>
   );

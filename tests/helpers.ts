@@ -1,4 +1,12 @@
-import type { RuntimeEnv } from "../src/types";
+import { createAittaDBWithStore, type AittaDBApp } from "../src/handler";
+import type { UpstreamIdentityProvider } from "../src/identity";
+import type { AuthStore, RuntimeEnv, UpstreamIdentity } from "../src/types";
+
+const DEFAULT_TEST_IDENTITY: UpstreamIdentity = {
+  email: "user@example.test",
+  fullName: "Test User",
+  displayName: "Test User",
+};
 
 class MemoryR2Object {
   constructor(
@@ -66,11 +74,31 @@ export async function testEnv(
     JWT_KEY_ID: "test-key",
     JWT_PRIVATE_JWK: JSON.stringify(privateJwk),
     ADMIN_EMAILS: "admin@example.test",
-    TEST_AUTH_EMAIL: "user@example.test",
-    TEST_AUTH_FULL_NAME: "Test User",
     BUCKET: new MemoryR2Bucket(),
     ...extra,
   };
+}
+
+export function testIdentityProvider(
+  identity: UpstreamIdentity | null = DEFAULT_TEST_IDENTITY,
+): UpstreamIdentityProvider {
+  return {
+    read: () => identity,
+  };
+}
+
+export function createTestAittaDB(
+  env: RuntimeEnv,
+  store: AuthStore | null,
+  identity: UpstreamIdentity | null = DEFAULT_TEST_IDENTITY,
+): AittaDBApp {
+  return createAittaDBWithStore(
+    env,
+    store,
+    undefined,
+    undefined,
+    testIdentityProvider(identity),
+  );
 }
 
 export function form(data: Record<string, string>): string {

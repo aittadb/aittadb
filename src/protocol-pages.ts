@@ -163,10 +163,10 @@ export function revocationFormPage(csrf: string): string {
     title: "Token revocation",
     eyebrow: "OAuth 2.0 revocation",
     summary:
-      "Submit a production refresh token for revocation. The endpoint intentionally returns success even when a token is already invalid.",
+      "Submit an AittaDB access or refresh token with its owning client credentials. The endpoint intentionally returns success even when a token is already invalid.",
     action: "/oauth/revoke",
     csrf,
-    fields: `<label for="revoke_token">Token</label><textarea id="revoke_token" name="token" class="credential-input" autocomplete="off" spellcheck="false" required></textarea><label for="revoke_hint">Token type hint</label><select id="revoke_hint" name="token_type_hint"><option value="refresh_token">refresh_token</option><option value="access_token">access_token</option></select><label for="revoke_client_id">Client ID <span class="optional">when required by client policy</span></label><input id="revoke_client_id" name="client_id" autocomplete="off"><label for="revoke_client_secret">Client secret</label><input id="revoke_client_secret" name="client_secret" type="password" autocomplete="new-password">`,
+    fields: `<label for="revoke_token">Token</label><textarea id="revoke_token" name="token" class="credential-input" autocomplete="off" spellcheck="false" required></textarea><label for="revoke_hint">Token type hint</label><select id="revoke_hint" name="token_type_hint"><option value="refresh_token">refresh_token</option><option value="access_token">access_token</option></select><label for="revoke_client_id">Client ID</label><input id="revoke_client_id" name="client_id" autocomplete="off" required><label for="revoke_client_secret">Client secret <span class="optional">confidential clients only</span></label><input id="revoke_client_secret" name="client_secret" type="password" autocomplete="new-password">`,
     submitLabel: "Revoke token",
     visualHeading: "End a credential without revealing its state.",
   });

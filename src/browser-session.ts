@@ -1,30 +1,38 @@
 import { nowSeconds } from "./crypto";
-import { readSitesIdentity, requireSitesIdentity } from "./identity";
+import {
+  requireSitesIdentity,
+  type UpstreamIdentityProvider,
+} from "./identity";
 import { oauthError } from "./http";
 import { issueTokens } from "./oauth";
 import { BROWSER_SESSION_CLIENT_ID } from "./system-client";
-import type { AppConfig, AuthStore, RuntimeEnv } from "./types";
+import type { AppConfig, AuthStore } from "./types";
 
 export type BrowserSessionScope =
+  | "openid"
   | "email"
   | "profile"
   | "storage.read"
   | "storage.write"
   | "storage.delete";
 
-export function hasBrowserSession(request: Request, env: RuntimeEnv): boolean {
-  return readSitesIdentity(request, env) !== null;
+export function hasBrowserSession(
+  request: Request,
+  identityProvider: UpstreamIdentityProvider,
+): boolean {
+  return identityProvider.read(request) !== null;
 }
 
 export async function issueBrowserSessionAccessToken(
   request: Request,
-  env: RuntimeEnv,
+  identityProvider: UpstreamIdentityProvider,
   store: AuthStore,
   config: AppConfig,
   scopes: readonly BrowserSessionScope[],
 ): Promise<string | Response> {
-  const identity = readSitesIdentity(request, env);
-  if (!identity) return requireSitesIdentity(request, env) as Response;
+  const identity = identityProvider.read(request);
+  if (!identity)
+    return requireSitesIdentity(request, identityProvider) as Response;
 
   const client = await store.getClient(BROWSER_SESSION_CLIENT_ID);
   if (!client || client.disabledAt) {

@@ -1,9 +1,40 @@
 import { randomToken } from "./crypto";
+import {
+  HYPERMEDIA_API_VERSION,
+  HYPERMEDIA_MEDIA_TYPE,
+  action,
+  link,
+  negotiateHypermediaRepresentation,
+  prefersVendorHypermedia,
+  resourceDocument,
+  type HypermediaAction,
+  type HypermediaDocument,
+  type HypermediaLink,
+} from "./hypermedia";
 
 export function json(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
   headers.set("cache-control", "no-store");
+  addSecurityHeaders(headers);
+  return new Response(JSON.stringify(data), { ...init, headers });
+}
+
+export function hypermediaJson<T>(
+  request: Request,
+  data: HypermediaDocument<T>,
+  init: ResponseInit = {},
+): Response {
+  const headers = new Headers(init.headers);
+  headers.set(
+    "content-type",
+    prefersVendorHypermedia(request)
+      ? `${HYPERMEDIA_MEDIA_TYPE}; version=${HYPERMEDIA_API_VERSION}; charset=utf-8`
+      : "application/json; charset=utf-8",
+  );
+  headers.set("aittadb-api-version", HYPERMEDIA_API_VERSION);
+  headers.set("cache-control", "no-store");
+  appendVary(headers, "Accept");
   addSecurityHeaders(headers);
   return new Response(JSON.stringify(data), { ...init, headers });
 }
@@ -20,83 +51,59 @@ export function oauthError(
   error: string,
   description?: string,
   status = 400,
+  controls: {
+    links?: readonly HypermediaLink[];
+    actions?: readonly HypermediaAction[];
+  } = {},
 ): Response {
-  return json(
-    {
-      error,
-      ...(description ? { error_description: description } : {}),
-      _links: defaultHypermediaLinks(),
-      actions: defaultHypermediaActions(),
-    },
-    { status },
-  );
+  return json(errorDocument(error, description, controls), {
+    status,
+    headers: { "aittadb-api-version": HYPERMEDIA_API_VERSION },
+  });
 }
 
-export function defaultHypermediaLinks(): Record<
-  string,
-  { href: string; type?: string }
-> {
-  return {
-    service: { href: "/", type: "text/html" },
-    session: { href: "/session", type: "text/html" },
-    health: { href: "/health", type: "application/json" },
-    docs: { href: "/docs", type: "text/html" },
-    openapi: { href: "/openapi.json", type: "application/json" },
-    oidcConfiguration: {
-      href: "/.well-known/openid-configuration",
+/**
+ * Render an application error using the selected compatible JSON media type.
+ * OAuth protocol endpoints intentionally continue to use oauthError().
+ */
+export function hypermediaError(
+  request: Request,
+  error: string,
+  description?: string,
+  status = 400,
+  controls: {
+    links?: readonly HypermediaLink[];
+    actions?: readonly HypermediaAction[];
+  } = {},
+): Response {
+  return hypermediaJson(request, errorDocument(error, description, controls), {
+    status,
+  });
+}
+
+export function defaultHypermediaLinks(): HypermediaLink[] {
+  return [
+    link("service", "/", { type: HYPERMEDIA_MEDIA_TYPE }),
+    link("session", "/session", { type: HYPERMEDIA_MEDIA_TYPE }),
+    link("health", "/health", { type: HYPERMEDIA_MEDIA_TYPE }),
+    link("documentation", "/docs", { type: "text/html" }),
+    link("describedby", "/openapi.json", { type: "application/json" }),
+    link("openid-configuration", "/.well-known/openid-configuration", {
       type: "application/json",
-    },
-    jwks: { href: "/.well-known/jwks.json", type: "application/json" },
-  };
+    }),
+    link("jwks", "/.well-known/jwks.json", { type: "application/json" }),
+  ];
 }
 
-export function defaultHypermediaActions(): Record<string, unknown> {
-  return {
-    authorize: {
-      method: "GET",
-      href: "/authorize",
-      parameters: [
-        "response_type",
-        "client_id",
-        "redirect_uri",
-        "scope",
-        "state",
-        "nonce",
-        "code_challenge",
-        "code_challenge_method",
-      ],
-    },
-    deviceAuthorization: {
-      method: "POST",
-      href: "/oauth/device_authorization",
-      encoding: "application/x-www-form-urlencoded",
-      parameters: ["client_id", "scope"],
-    },
-    token: {
-      method: "POST",
-      href: "/oauth/token",
-      encoding: "application/x-www-form-urlencoded",
-      parameters: ["grant_type"],
-    },
-    revoke: {
-      method: "POST",
-      href: "/oauth/revoke",
-      encoding: "application/x-www-form-urlencoded",
-      parameters: ["token", "token_type_hint"],
-    },
-    introspect: {
-      method: "POST",
-      href: "/oauth/introspect",
-      encoding: "application/x-www-form-urlencoded",
-      parameters: ["token", "token_type_hint"],
-    },
-  };
+export function defaultHypermediaActions(): HypermediaAction[] {
+  return [action("open-service", "Open service", "GET", "/", { fields: [] })];
 }
 
 export function html(body: string, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "text/html; charset=utf-8");
   headers.set("cache-control", "no-store");
+  appendVary(headers, "Accept");
   addSecurityHeaders(headers);
   return new Response(`<!doctype html>${body}`, { ...init, headers });
 }
@@ -177,7 +184,7 @@ export function requireSameOrigin(
 
 function isSameOrigin(request: Request, canonicalOrigin?: string): boolean {
   const origin = request.headers.get("origin");
-  if (!origin) return true;
+  if (!origin) return false;
   if (origin === "null") {
     return request.headers.get("sec-fetch-site") === "same-origin";
   }
@@ -243,30 +250,55 @@ export function csrfTokenMatches(
 }
 
 export function acceptsHtml(request: Request): boolean {
-  const accept = request.headers.get("accept");
-  if (!accept) return false;
-  const ranges = accept
+  return negotiateHypermediaRepresentation(request) === "html";
+}
+
+export function acceptsJson(request: Request): boolean {
+  const representation = negotiateHypermediaRepresentation(request);
+  return representation === "json" || representation === "hypermedia";
+}
+
+export function isJsonMediaType(value: string): boolean {
+  const mediaType = value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return mediaType === "application/json" || mediaType.endsWith("+json");
+}
+
+function appendVary(headers: Headers, value: string): void {
+  const existing = (headers.get("vary") ?? "")
     .split(",")
-    .map((part) => {
-      const [type, ...params] = part.trim().split(";");
-      const q = params
-        .map((param) => param.trim())
-        .find((param) => param.startsWith("q="));
-      return {
-        type: type.toLowerCase(),
-        q: q ? Number.parseFloat(q.slice(2)) : 1,
-      };
-    })
-    .filter((range) => Number.isFinite(range.q) && range.q > 0);
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!existing.some((part) => part.toLowerCase() === value.toLowerCase())) {
+    existing.push(value);
+  }
+  headers.set("vary", existing.join(", "));
+}
 
-  const html = ranges.find((range) => range.type === "text/html");
-  if (!html) return false;
-
-  const json = ranges.find(
-    (range) =>
-      range.type === "application/json" ||
-      range.type === "application/*" ||
-      range.type === "*/*",
-  );
-  return !json || html.q >= json.q;
+function errorDocument(
+  error: string,
+  description: string | undefined,
+  controls: {
+    links?: readonly HypermediaLink[];
+    actions?: readonly HypermediaAction[];
+  },
+): HypermediaDocument<{
+  error: string;
+  error_description?: string;
+}> & {
+  error: string;
+  error_description?: string;
+} {
+  const data = {
+    error,
+    ...(description ? { error_description: description } : {}),
+  };
+  return {
+    ...data,
+    ...resourceDocument({
+      type: "error",
+      data,
+      links: controls.links ?? defaultHypermediaLinks(),
+      actions: controls.actions ?? [],
+    }),
+  };
 }

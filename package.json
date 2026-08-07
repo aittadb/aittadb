@@ -29,11 +29,18 @@
     "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run openapi:check && npm run swagger:check && npm run db:check && npm run agents:check && npm run audit:high && npm run build"
   },
   "dependencies": {
+    "image-dimensions": "2.5.1",
+    "image-size": "file:vendor/image-size-compat",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-server-dom-webpack": "19.2.8",
     "swagger-ui-dist": "5.32.12",
     "vinext": "1.0.0-beta.4"
+  },
+  "overrides": {
+    "vinext": {
+      "image-size": "$image-size"
+    }
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.51.1",

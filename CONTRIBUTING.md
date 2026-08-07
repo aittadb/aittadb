@@ -2,6 +2,8 @@
 
 Read `AGENTS.md` before changing code. Every implementation change must include the public contract, implementation, automated tests, documentation, validation evidence, and any necessary `AGENTS.md`, OpenAPI, schema, migration, or architecture updates in the same task.
 
+Use [PLAN.md](PLAN.md) for dependency-ordered implementation work and [ROADMAP.md](ROADMAP.md) for stable future product direction. Every roadmap checkbox is intentionally unchecked and describes planned, unavailable work; moving an item into implementation requires a complete PLAN task rather than marking the roadmap item complete.
+
 Use feature branches. Do not push directly to `main`, merge without review, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
 
 Run `npm run validate` before requesting review. It includes `npm run agents:check`; keep the authoritative root `AGENTS.md` below 32,000 bytes so Codex loads the complete instruction set by default. Prefer concise rules and move explanatory background to linked files in `docs/`.

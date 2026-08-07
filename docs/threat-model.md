@@ -2,14 +2,14 @@
 
 Covered MVP threats:
 
-- Forged ChatGPT Sites identity headers: production trusts these only inside the Sites runtime; tests use an explicit `NODE_ENV=test` adapter.
+- Forged ChatGPT Sites identity headers: production trusts these only inside the Sites runtime. Its app assembly always injects the sole Sites header adapter and exposes no mock-identity binding or environment switch; tests explicitly inject a provider defined only under `tests/`.
 - Deployment outside the trusted Sites edge: self-hosting requires replacing the upstream identity adapter.
 - Stolen device and user codes: device codes are high entropy, user codes expire, both are stored as hashes, polling is rate limited, and the polling client must authenticate and match the client that created the grant.
-- Authorization-code interception: PKCE `S256`, exact redirect URI matching, short expiry, and one-time code consumption are required.
+- Authorization-code interception and transaction replay: PKCE `S256`, exact redirect URI matching, short expiry, and affected-row-gated one-time authorization-request and code transitions are required; repeated or concurrent approval, denial, or exchange has one winner.
 - Redirect URI injection: redirect URIs must exactly match registered values and must not include fragments.
 - CSRF and login CSRF: browser approval, denial, protocol-console, UserInfo, storage-console, and admin forms require same-origin submissions and a high-entropy double-submit CSRF cookie. The host-only, secure, `HttpOnly`, `SameSite=Lax` token remains stable during its bounded browser-session window so concurrent tabs cannot invalidate each other; malformed, missing, or mismatched tokens fail closed. The origin validator recognizes the configured public issuer behind Sites' internal dispatch URL, accepts a `null` origin only when browser fetch metadata says `same-origin`, and rejects arbitrary origins. Standards-defined API POST requests remain usable without the browser-only `ui=1` marker.
-- Token replay: access tokens are short-lived and revocable by `jti`.
-- Refresh-token theft and reuse: refresh tokens are opaque, hashed, rotated on every use, and reuse revokes the token family.
+- Token replay and token-type confusion: access tokens are short-lived and revocable by `jti`; every bearer consumer requires a signed `token_use=access`, so an ID token cannot authorize UserInfo, introspection, or storage.
+- Refresh-token theft and reuse: refresh tokens are opaque, hashed, client-bound, rotated through affected-row-gated consumption, and reuse revokes the token family. Revocation handles omitted or incorrect hints without disclosing token state.
 - JWT algorithm confusion: validation accepts ES256 only and rejects unknown keys.
 - Signing-key exposure: keys are generated locally and configured as hosted secrets.
 - Email reassignment: email maps to local user lookup only; downstream tokens use immutable local UUIDs.
@@ -18,12 +18,17 @@ Covered MVP threats:
 - Accidental credential logging: audit logging redacts credential-like fields.
 - Browser credential exposure: bearer values are accepted only in request headers or protected form bodies, never query strings or browser storage. Token results use no-store responses and display credentials only as the direct one-time result of the real exchange.
 - Interactive API documentation compromise: Swagger UI is version-pinned, checked into same-origin static assets, verified against the lockfile package in CI, restricted by CSP, and configured without persistent authorization state or external CDNs.
+- Swagger cross-origin credential disclosure: "Try it out" rewrites request targets to the origin serving the viewer and uses same-origin credentials, so a custom-domain viewer does not submit to a stale or legacy OpenAPI server URL.
 - Forks retaining deployment identifiers or keys: reusable source must not publish real `project_id` or committed signing keys.
 - Cross-user and cross-client storage access: every D1 read, list, write, and delete is keyed by both the immutable AittaDB user UUID and OAuth client ID. An access token for another user or client cannot observe, replace, or delete the owner's records or file metadata.
 - Reserved browser-client impersonation: current-session UserInfo and storage use a migration-seeded internal client. It is hidden and non-administrable, and OAuth client authentication, device authorization/polling, and Authorization Code initiation reject its fixed ID. Its short-lived internal tokens are never returned to HTML, cookies, URLs, logs, or browser storage.
 - Internal deployment-data probing: there is no generic D1, SQL, R2 listing, environment, binding, or secret endpoint. Storage responses omit local owner IDs, client IDs, physical object keys, signing material, and configuration values. JWKS publishes verification-only public key material.
+- Public statistics inference: `/statistics` returns only one aggregate local-identity count. It exposes no rows, email addresses, display names, UUIDs, client relationships, storage totals, or filtering controls.
 - R2 object-key injection: caller-provided storage keys are logical metadata only; physical R2 keys are generated by AittaDB.
+- File-creation key injection: collection `POST /storage/files` generates the logical key server-side; item `PUT` accepts only its validated URL key. Both generate a separate physical R2 key and enforce the same user/client ownership boundary.
 - Oversized storage writes: JSON records and files have request-size limits before persistence.
-- Multipart browser abuse: the file adapter rejects oversized declared form bodies before parsing, validates the actual uploaded `File.size`, permits only the four documented operations, and passes accepted bytes through the canonical 10 MiB R2 write limit.
+- Multipart browser abuse: the file adapter streams the complete body through an aggregate bound before parsing, rejects missing/invalid/understated-length bypass attempts, validates the uploaded `File.size`, permits only documented resource operations, and passes accepted bytes through the canonical 10 MiB R2 write limit.
 - Browser storage-token leakage: forms use POST bodies with no token query parameter, results omit submitted and internally issued tokens, and no cookie, local storage, session storage, or hidden follow-up form retains bearer values.
 - Bucket misconfiguration: file endpoints fail closed when the `BUCKET` binding is unavailable.
+- D1/R2 partial failure: file create, replacement, and deletion order writes and use bounded compensation to keep committed metadata paired with bytes after isolated failures. D1 and R2 have no shared transaction, so simultaneous persistent failure of a primary operation and compensation may require operator repair; responses remain generic and disclose no physical key.
+- Hypermedia action tampering: advertised actions are convenience controls, not authorization grants. Every followed HTML or JSON action revalidates identity, client, scopes, ownership, state, origin, CSRF where applicable, input, and size limits.

@@ -6,6 +6,24 @@ const storageKeyParameter = {
   description: "Application-defined logical object key.",
 } as const;
 
+const hypermediaVendorType = "application/vnd.aittadb+json; version=0.1";
+
+function hypermediaContent(schema: string, includeHtml = true) {
+  return {
+    "application/json": { schema: { $ref: schema } },
+    [hypermediaVendorType]: {
+      schema: { $ref: schema },
+      examples: {
+        versioned: {
+          summary: "AittaDB Hypermedia JSON preview contract",
+          value: { api_version: "0.1" },
+        },
+      },
+    },
+    ...(includeHtml ? { "text/html": { schema: { type: "string" } } } : {}),
+  };
+}
+
 const representationFormatParameter = {
   name: "format",
   in: "query",
@@ -13,6 +31,16 @@ const representationFormatParameter = {
   schema: { type: "string", enum: ["json"] },
   description:
     "Force canonical JSON when a browser Accept header would otherwise select HTML.",
+} as const;
+
+const notAcceptableResponse = {
+  description:
+    "No supported HTML, compatible JSON, or versioned AittaDB hypermedia representation matches Accept. OAuth/OIDC protocol responses and file bytes retain their standards-defined media types instead.",
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/HypermediaError" },
+    },
+  },
 } as const;
 
 const storageBrowserKeyParameter = {
@@ -31,7 +59,7 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is a hosted application backend for third-party apps, services, and agents. It runs inside ChatGPT Sites, maps the server-side ChatGPT sign-in signal to a separate AittaDB user, issues AittaDB's own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1 and files in R2. Persistent events and long-polling delivery are planned and are not part of the current MVP. AittaDB is independent: its credentials and stored data are not OpenAI or ChatGPT credentials or data, and it never forwards ChatGPT credentials. Browser-only forms require same-origin validation and a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages.",
+      "AittaDB is a hosted application backend for third-party apps, services, and agents. It runs inside ChatGPT Sites, maps the server-side ChatGPT sign-in signal to a separate AittaDB user, issues AittaDB's own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1 and files in R2. Persistent events and long-polling delivery are planned and are not part of the current MVP. AittaDB is independent: its credentials and stored data are not OpenAI or ChatGPT credentials or data, and it never forwards ChatGPT credentials. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
   },
   paths: {
     "/": {
@@ -42,20 +70,42 @@ export const openApiSpec = {
         responses: {
           "200": {
             description: "AittaDB service metadata",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/ServiceMetadata" },
-              },
-              "text/html": { schema: { type: "string" } },
-            },
+            content: hypermediaContent("#/components/schemas/ServiceDocument"),
           },
+          "406": notAcceptableResponse,
         },
       },
     },
     "/health": {
       get: {
         summary: "Service health",
-        responses: { "200": { description: "Healthy" } },
+        responses: {
+          "200": {
+            description: "Current binding health without secret values",
+            content: hypermediaContent("#/components/schemas/HealthDocument"),
+          },
+          "406": notAcceptableResponse,
+        },
+      },
+    },
+    "/statistics": {
+      get: {
+        summary: "Privacy-preserving public service statistics",
+        description:
+          "Returns only the aggregate number of durable local AittaDB identities in this deployment. It never returns names, email addresses, subjects, activity, client dimensions, storage data, or deployment secrets. Responses are not cached.",
+        responses: {
+          "200": {
+            description: "Aggregate local identity count",
+            content: hypermediaContent(
+              "#/components/schemas/StatisticsDocument",
+            ),
+          },
+          "503": {
+            description: "D1 is unavailable",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "406": notAcceptableResponse,
+        },
       },
     },
     "/session": {
@@ -68,13 +118,21 @@ export const openApiSpec = {
             description: "Current local AittaDB identity",
             content: {
               "application/json": {
-                schema: { $ref: "#/components/schemas/LocalSession" },
+                schema: {
+                  $ref: "#/components/schemas/LocalSessionDocument",
+                },
+              },
+              [hypermediaVendorType]: {
+                schema: {
+                  $ref: "#/components/schemas/LocalSessionDocument",
+                },
               },
               "text/html": { schema: { type: "string" } },
             },
           },
           "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
           "401": { description: "No upstream browser session for JSON client" },
+          "406": notAcceptableResponse,
         },
       },
     },
@@ -120,19 +178,21 @@ export const openApiSpec = {
             name: "response_type",
             in: "query",
             schema: { const: "code" },
-            required: true,
+            required: false,
+            description:
+              "Required with client_id to begin a protocol authorization request; omit all request parameters to retrieve the operation resource.",
           },
           {
             name: "client_id",
             in: "query",
             schema: { type: "string" },
-            required: true,
+            required: false,
           },
           {
             name: "redirect_uri",
             in: "query",
             schema: { type: "string", format: "uri" },
-            required: true,
+            required: false,
           },
           { name: "scope", in: "query", schema: { type: "string" } },
           { name: "state", in: "query", schema: { type: "string" } },
@@ -141,20 +201,22 @@ export const openApiSpec = {
             name: "code_challenge",
             in: "query",
             schema: { type: "string" },
-            required: true,
+            required: false,
           },
           {
             name: "code_challenge_method",
             in: "query",
             schema: { const: "S256" },
-            required: true,
+            required: false,
           },
         ],
         responses: {
           "200": {
             description:
-              "Browser request form when no client request parameters are supplied",
-            content: { "text/html": { schema: { type: "string" } } },
+              "Operation resource or browser request form when no client request parameters are supplied",
+            content: hypermediaContent(
+              "#/components/schemas/ProtocolEndpointDocument",
+            ),
           },
           "302": {
             description:
@@ -165,15 +227,16 @@ export const openApiSpec = {
     },
     "/oauth/device_authorization": {
       get: {
-        summary: "Browser form for Device Authorization Grant initiation",
+        summary: "Device Authorization Grant operation resource",
         description:
-          "Returns an HTML form that posts to the production device authorization operation. API clients should use POST directly.",
+          "Returns hypermedia controls or an HTML form that posts to the production device authorization operation. API clients may follow the advertised POST action.",
         responses: {
           "200": {
-            description: "Same-origin HTML form with CSRF protection",
-            content: { "text/html": { schema: { type: "string" } } },
+            description: "Device authorization operation",
+            content: hypermediaContent(
+              "#/components/schemas/ProtocolEndpointDocument",
+            ),
           },
-          "405": { description: "JSON clients must use POST" },
         },
       },
       post: {
@@ -222,15 +285,16 @@ export const openApiSpec = {
     },
     "/oauth/token": {
       get: {
-        summary: "Browser form for token exchange",
+        summary: "Token exchange operation resource",
         description:
-          "Returns an HTML form that posts to the production token operation. API clients should use POST directly.",
+          "Returns hypermedia controls or an HTML form for the production token operation. Grant-specific fields are conditional in HTML and described by action fields in JSON.",
         responses: {
           "200": {
-            description: "Same-origin HTML form with CSRF protection",
-            content: { "text/html": { schema: { type: "string" } } },
+            description: "Token operation",
+            content: hypermediaContent(
+              "#/components/schemas/ProtocolEndpointDocument",
+            ),
           },
-          "405": { description: "JSON clients must use POST" },
         },
       },
       post: {
@@ -285,17 +349,20 @@ export const openApiSpec = {
     },
     "/oauth/revoke": {
       get: {
-        summary: "Browser form for token revocation",
+        summary: "Token revocation operation resource",
         responses: {
           "200": {
-            description: "Same-origin HTML form with CSRF protection",
-            content: { "text/html": { schema: { type: "string" } } },
+            description: "Revocation operation",
+            content: hypermediaContent(
+              "#/components/schemas/ProtocolEndpointDocument",
+            ),
           },
-          "405": { description: "JSON clients must use POST" },
         },
       },
       post: {
         summary: "Token revocation",
+        description:
+          "The owning public or confidential client authenticates as at the token endpoint. Access tokens are revoked by verified jti; opaque refresh tokens revoke their family. An omitted or incorrect token_type_hint is treated only as a lookup hint, and success never discloses prior token state.",
         requestBody: {
           required: true,
           content: {
@@ -328,13 +395,14 @@ export const openApiSpec = {
     },
     "/oauth/introspect": {
       get: {
-        summary: "Browser form for token introspection",
+        summary: "Token introspection operation resource",
         responses: {
           "200": {
-            description: "Same-origin HTML form with CSRF protection",
-            content: { "text/html": { schema: { type: "string" } } },
+            description: "Introspection operation",
+            content: hypermediaContent(
+              "#/components/schemas/ProtocolEndpointDocument",
+            ),
           },
-          "405": { description: "JSON clients must use POST" },
         },
       },
       post: {
@@ -377,11 +445,33 @@ export const openApiSpec = {
       get: {
         summary: "OpenID Connect UserInfo",
         description:
-          "API clients send an AittaDB bearer access token. A browser requesting HTML without a bearer token receives a same-origin form that can use either the current ChatGPT-signed-in AittaDB session or an explicit access token.",
+          "API clients send an AittaDB bearer access token containing the openid scope; ID tokens and access tokens without openid are rejected. A browser requesting HTML without a bearer token receives a same-origin form that can use either the current ChatGPT-signed-in AittaDB session or an explicit access token.",
         security: [{ bearer: [] }],
         responses: {
-          "200": { description: "Local user claims" },
-          "401": { description: "Invalid bearer token" },
+          "200": {
+            description:
+              "Local user claims, an operation resource when no bearer token is supplied with the vendor media type, or the equivalent HTML interface",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/UserInfo" },
+              },
+              [hypermediaVendorType]: {
+                schema: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/UserInfo" },
+                    {
+                      $ref: "#/components/schemas/ProtocolEndpointDocument",
+                    },
+                  ],
+                },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+          "401": {
+            description: "Invalid bearer token",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
         },
       },
       post: {
@@ -415,8 +505,14 @@ export const openApiSpec = {
         },
         responses: {
           "200": {
-            description: "Readable UserInfo claims",
-            content: { "text/html": { schema: { type: "string" } } },
+            description:
+              "Standard UserInfo JSON or its equivalent readable browser representation",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/UserInfo" },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
           },
           "401": { description: "Invalid AittaDB access token" },
           "302": {
@@ -440,10 +536,9 @@ export const openApiSpec = {
           "200": {
             description:
               "Record collection for bearer clients or a protected browser operation form when no Authorization header is present",
-            content: {
-              "application/json": { schema: { type: "object" } },
-              "text/html": { schema: { type: "string" } },
-            },
+            content: hypermediaContent(
+              "#/components/schemas/StorageCollectionDocument",
+            ),
           },
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
@@ -480,7 +575,9 @@ export const openApiSpec = {
         responses: {
           "200": {
             description: "Readable result from the production storage route",
-            content: { "text/html": { schema: { type: "string" } } },
+            content: hypermediaContent(
+              "#/components/schemas/StorageCollectionDocument",
+            ),
           },
           "302": {
             description:
@@ -503,12 +600,9 @@ export const openApiSpec = {
           "200": {
             description:
               "Storage record or a browser operation form when no Authorization header is present",
-            content: {
-              "application/json": {
-                schema: { $ref: "#/components/schemas/StorageRecord" },
-              },
-              "text/html": { schema: { type: "string" } },
-            },
+            content: hypermediaContent(
+              "#/components/schemas/StorageRecordDocument",
+            ),
           },
           "404": { description: "Record not found" },
         },
@@ -552,7 +646,25 @@ export const openApiSpec = {
         responses: {
           "200": {
             description: "Readable result from the canonical item operation",
-            content: { "text/html": { schema: { type: "string" } } },
+            content: {
+              "application/json": {
+                schema: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/StorageRecordDocument" },
+                    { $ref: "#/components/schemas/StorageDeletionDocument" },
+                  ],
+                },
+              },
+              [hypermediaVendorType]: {
+                schema: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/StorageRecordDocument" },
+                    { $ref: "#/components/schemas/StorageDeletionDocument" },
+                  ],
+                },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
           },
           "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
           "400": {
@@ -573,7 +685,13 @@ export const openApiSpec = {
           content: { "application/json": { schema: true } },
         },
         responses: {
-          "200": { description: "Stored record" },
+          "200": {
+            description: "Stored record",
+            content: hypermediaContent(
+              "#/components/schemas/StorageRecordDocument",
+              false,
+            ),
+          },
           "413": { description: "Record exceeds the AittaDB limit" },
         },
       },
@@ -581,7 +699,15 @@ export const openApiSpec = {
         summary: "Delete one JSON record",
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
-        responses: { "200": { description: "Deleted" } },
+        responses: {
+          "200": {
+            description: "Deleted",
+            content: hypermediaContent(
+              "#/components/schemas/StorageDeletionDocument",
+              false,
+            ),
+          },
+        },
       },
     },
     "/storage/files": {
@@ -596,22 +722,25 @@ export const openApiSpec = {
           "200": {
             description:
               "File metadata collection for bearer clients or a protected browser operation form when no Authorization header is present",
-            content: {
-              "application/json": { schema: { type: "object" } },
-              "text/html": { schema: { type: "string" } },
-            },
+            content: hypermediaContent(
+              "#/components/schemas/StorageCollectionDocument",
+            ),
           },
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
         },
       },
       post: {
-        summary: "Browser-only file collection read",
+        summary: "Create a file or submit the browser file-collection form",
         description:
-          "CSRF-protected same-origin form action for this exact collection URL. The fixed _method=GET override invokes the canonical metadata collection GET. Item downloads, uploads, and deletes post only to /storage/files/{key}. Current-session mode uses a minimal short-lived internal credential; token mode uses the submitted AittaDB access token.",
+          "A bearer API request uploads raw bytes and creates a file under a server-generated logical UUID key. It returns 201 Created and the exact item Location. The same URL also accepts the CSRF-protected browser multipart upload form and the no-JavaScript collection-read adapter. Caller-selected logical keys use PUT /storage/files/{key} instead.",
+        security: [{ bearer: [] }],
         requestBody: {
           required: true,
           content: {
+            "application/octet-stream": {
+              schema: { type: "string", format: "binary" },
+            },
             "application/x-www-form-urlencoded": {
               schema: {
                 type: "object",
@@ -631,12 +760,47 @@ export const openApiSpec = {
                 },
               },
             },
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["ui", "csrf_token", "_method", "auth_mode", "file"],
+                properties: {
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                  _method: { type: "string", const: "POST" },
+                  auth_mode: {
+                    type: "string",
+                    enum: ["session", "token"],
+                  },
+                  access_token: {
+                    type: "string",
+                    description: "Required only when auth_mode is token.",
+                  },
+                  file: { type: "string", format: "binary" },
+                },
+              },
+            },
           },
         },
         responses: {
+          "201": {
+            description: "Created file metadata and canonical item location",
+            headers: {
+              Location: {
+                description: "Absolute canonical URL for the generated key.",
+                schema: { type: "string", format: "uri" },
+              },
+            },
+            content: hypermediaContent(
+              "#/components/schemas/StorageFileDocument",
+            ),
+          },
           "200": {
             description:
-              "Readable operation result or original file bytes as an attachment for download",
+              "Readable collection result for the browser _method=GET adapter",
+            content: hypermediaContent(
+              "#/components/schemas/StorageCollectionDocument",
+            ),
           },
           "302": {
             description:
@@ -669,6 +833,18 @@ export const openApiSpec = {
                 description: "Percent-encoded logical application key.",
                 schema: { type: "string" },
               },
+            },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/StorageFileDocument" },
+              },
+              [hypermediaVendorType]: {
+                schema: { $ref: "#/components/schemas/StorageFileDocument" },
+              },
+              "application/octet-stream": {
+                schema: { type: "string", format: "binary" },
+              },
+              "text/html": { schema: { type: "string" } },
             },
           },
           "404": { description: "File not found" },
@@ -727,6 +903,28 @@ export const openApiSpec = {
           "200": {
             description:
               "Readable metadata/deletion result or original attachment bytes for download",
+            content: {
+              "application/json": {
+                schema: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/StorageFileDocument" },
+                    { $ref: "#/components/schemas/StorageDeletionDocument" },
+                  ],
+                },
+              },
+              [hypermediaVendorType]: {
+                schema: {
+                  oneOf: [
+                    { $ref: "#/components/schemas/StorageFileDocument" },
+                    { $ref: "#/components/schemas/StorageDeletionDocument" },
+                  ],
+                },
+              },
+              "text/html": { schema: { type: "string" } },
+              "application/octet-stream": {
+                schema: { type: "string", format: "binary" },
+              },
+            },
           },
           "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
           "400": {
@@ -752,7 +950,13 @@ export const openApiSpec = {
           },
         },
         responses: {
-          "200": { description: "Stored file metadata" },
+          "200": {
+            description: "Stored file metadata",
+            content: hypermediaContent(
+              "#/components/schemas/StorageFileDocument",
+              false,
+            ),
+          },
           "413": { description: "File exceeds the AittaDB limit" },
           "503": { description: "R2 bucket is unavailable" },
         },
@@ -761,7 +965,299 @@ export const openApiSpec = {
         summary: "Delete one file from R2 and D1 metadata",
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
-        responses: { "200": { description: "Deleted" } },
+        responses: {
+          "200": {
+            description: "Deleted",
+            content: hypermediaContent(
+              "#/components/schemas/StorageDeletionDocument",
+              false,
+            ),
+          },
+        },
+      },
+    },
+    "/auth-ui.css": {
+      get: {
+        summary: "Self-hosted authentication interface styles",
+        description:
+          "Internal same-origin static stylesheet used by AittaDB's minimal HTML representations.",
+        responses: {
+          "200": {
+            description: "AittaDB interface stylesheet",
+            content: { "text/css": { schema: { type: "string" } } },
+          },
+        },
+      },
+    },
+    "/auth-ui.js": {
+      get: {
+        summary: "Self-hosted progressive-enhancement script",
+        description:
+          "Internal same-origin JavaScript for conditional form controls and accessible file drag-and-drop. Core forms remain usable without it.",
+        responses: {
+          "200": {
+            description: "AittaDB interface script",
+            content: {
+              "text/javascript": { schema: { type: "string" } },
+            },
+          },
+        },
+      },
+    },
+    "/device": {
+      get: {
+        summary: "Enter an RFC 8628 user code",
+        description:
+          "Returns the same device-code entry resource as hypermedia JSON or accessible HTML. The subsequent review requires ChatGPT sign-in supplied by the trusted Sites runtime.",
+        parameters: [
+          {
+            name: "user_code",
+            in: "query",
+            required: false,
+            schema: { type: "string", minLength: 8, maxLength: 9 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Device-code entry resource",
+            content: hypermediaContent(
+              "#/components/schemas/DeviceCodeEntryDocument",
+            ),
+          },
+        },
+      },
+      post: {
+        summary: "Review a pending device authorization request",
+        description:
+          "CSRF-protected same-origin transition. A valid code is resolved server-side and the trusted Sites identity is required; browser-supplied identity values are never accepted.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["csrf_token", "user_code"],
+                properties: {
+                  csrf_token: { type: "string" },
+                  user_code: { type: "string", minLength: 8, maxLength: 9 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Pending device request and approve/deny controls",
+            content: hypermediaContent(
+              "#/components/schemas/DeviceRequestDocument",
+            ),
+          },
+          "302": { description: "Continue through Sites-owned sign-in" },
+          "400": {
+            description: "Invalid or expired user code",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description: "Trusted Sites browser identity is required",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "CSRF or same-origin rejection",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+        },
+      },
+    },
+    "/device/decision": {
+      post: {
+        summary: "Approve or deny a pending device request",
+        description:
+          "One-time CSRF-protected decision by the trusted Sites-signed-in user. Terminal, expired, and unknown grants are rejected without exposing credentials.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["csrf_token", "user_code", "decision"],
+                properties: {
+                  csrf_token: { type: "string" },
+                  user_code: { type: "string", minLength: 8, maxLength: 9 },
+                  decision: {
+                    type: "string",
+                    enum: ["approve", "deny"],
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Terminal device decision",
+            content: hypermediaContent(
+              "#/components/schemas/DeviceDecisionDocument",
+            ),
+          },
+          "302": { description: "Continue through Sites-owned sign-in" },
+          "400": {
+            description: "Request is no longer pending",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description: "Trusted Sites browser identity is required",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "CSRF or same-origin rejection",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+        },
+      },
+    },
+    "/consent": {
+      get: {
+        summary: "Review an authorization-code consent request",
+        description:
+          "Returns consent controls when remembered consent does not already cover the exact client and local scopes. Existing exact consent immediately continues through a one-time authorization-code redirect.",
+        parameters: [
+          {
+            name: "request_id",
+            in: "query",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Authorization consent resource",
+            content: hypermediaContent(
+              "#/components/schemas/AuthorizationConsentDocument",
+            ),
+          },
+          "302": {
+            description:
+              "Sites-owned sign-in continuation or standard OAuth redirect after remembered consent",
+          },
+          "400": {
+            description: "Expired or invalid authorization request",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description: "Trusted Sites browser identity is required",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+        },
+      },
+      post: {
+        summary: "Approve or deny authorization consent",
+        description:
+          "CSRF-protected same-origin decision followed by a standards-defined redirect to the exact registered client redirect URI. The redirect carries a one-time code or OAuth error, never an access token.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["csrf_token", "request_id", "decision"],
+                properties: {
+                  csrf_token: { type: "string" },
+                  request_id: { type: "string", format: "uuid" },
+                  decision: {
+                    type: "string",
+                    enum: ["approve", "deny"],
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "302": {
+            description:
+              "Redirect to the exact registered client URI with a one-time code, state, or standard OAuth denial",
+          },
+          "400": {
+            description: "Expired or invalid authorization request",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description: "Trusted Sites browser identity is required",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "CSRF or same-origin rejection",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+        },
+      },
+    },
+    "/admin/clients": {
+      get: {
+        summary: "List and manage registered OAuth clients",
+        description:
+          "Available only to a trusted Sites-signed-in identity whose exact email appears in the server-side administrator allowlist. The response advertises only actions valid for each current client state and never repeats a confidential secret.",
+        responses: {
+          "200": {
+            description: "OAuth client administration resource",
+            content: hypermediaContent(
+              "#/components/schemas/OAuthClientCollectionDocument",
+            ),
+          },
+          "302": { description: "Continue through Sites-owned sign-in" },
+          "401": {
+            description: "Trusted Sites browser identity is required",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "Signed-in identity is not allowlisted",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+        },
+      },
+      post: {
+        summary: "Create or operate on an OAuth client",
+        description:
+          "CSRF-protected same-origin administration for creation, enable/disable, confidential-secret rotation, and active-grant revocation. Generated confidential secrets are returned exactly once and stored only as SHA-256 hashes.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                oneOf: [
+                  { $ref: "#/components/schemas/OAuthClientCreateInput" },
+                  { $ref: "#/components/schemas/OAuthClientOperationInput" },
+                ],
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "Updated client collection, with a newly generated confidential secret only when applicable",
+            content: hypermediaContent(
+              "#/components/schemas/OAuthClientCollectionDocument",
+            ),
+          },
+          "302": { description: "Continue through Sites-owned sign-in" },
+          "400": {
+            description: "Invalid registration or operation input",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description: "Trusted Sites browser identity is required",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "Allowlist, CSRF, or same-origin rejection",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "404": {
+            description: "Client is unavailable",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+        },
       },
     },
     "/openapi.json": {
@@ -785,7 +1281,12 @@ export const openApiSpec = {
         summary: "Self-hosted interactive Swagger UI",
         description:
           "Loads the canonical /openapi.json document and calls real same-origin AittaDB routes. Browser assets are pinned and self-hosted; no CDN is used.",
-        responses: { "200": { description: "Interactive HTML API viewer" } },
+        responses: {
+          "200": {
+            description: "Interactive HTML API viewer",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+        },
       },
     },
   },
@@ -795,33 +1296,152 @@ export const openApiSpec = {
       clientSecretBasic: { type: "http", scheme: "basic" },
     },
     schemas: {
-      ServiceMetadata: {
+      HypermediaLink: {
+        type: "object",
+        required: ["rel", "href"],
+        properties: {
+          rel: {
+            type: "array",
+            minItems: 1,
+            uniqueItems: true,
+            items: { type: "string", minLength: 1 },
+          },
+          href: { type: "string", format: "uri-reference" },
+          type: { type: "string" },
+          title: { type: "string" },
+          templated: { type: "boolean" },
+        },
+        additionalProperties: false,
+      },
+      HypermediaFieldOption: {
+        type: "object",
+        required: ["value", "title"],
+        properties: {
+          value: { type: "string" },
+          title: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      HypermediaFieldCondition: {
+        type: "object",
+        required: ["field", "value"],
+        properties: {
+          field: { type: "string" },
+          value: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      HypermediaField: {
+        type: "object",
+        required: ["name", "title", "type", "location"],
+        properties: {
+          name: { type: "string" },
+          title: { type: "string" },
+          type: {
+            type: "string",
+            enum: ["string", "integer", "number", "boolean", "object", "file"],
+          },
+          location: {
+            type: "string",
+            enum: ["path", "query", "header", "body"],
+          },
+          required: { type: "boolean" },
+          secret: { type: "boolean" },
+          value: true,
+          min: { type: "number" },
+          max: { type: "number" },
+          min_length: { type: "integer", minimum: 0 },
+          max_length: { type: "integer", minimum: 0 },
+          max_bytes: { type: "integer", minimum: 0 },
+          options: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaFieldOption" },
+          },
+          visible_when: {
+            $ref: "#/components/schemas/HypermediaFieldCondition",
+          },
+          description: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      HypermediaAuthorization: {
+        type: "object",
+        required: ["scheme"],
+        properties: {
+          scheme: {
+            type: "string",
+            enum: ["none", "bearer", "basic", "sites-session"],
+          },
+          scopes: { type: "array", items: { type: "string" } },
+          description: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      HypermediaAction: {
+        type: "object",
+        required: ["name", "title", "method", "href", "fields"],
+        properties: {
+          name: { type: "string" },
+          title: { type: "string" },
+          method: {
+            type: "string",
+            enum: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+          },
+          href: { type: "string", format: "uri-reference" },
+          type: { type: "string" },
+          accept: { type: "string" },
+          templated: { type: "boolean" },
+          fields: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaField" },
+          },
+          authorization: {
+            $ref: "#/components/schemas/HypermediaAuthorization",
+          },
+          description: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      HypermediaDocument: {
+        type: "object",
+        required: ["api_version", "type", "data", "links", "actions"],
+        properties: {
+          api_version: { type: "string", const: "0.1" },
+          type: { type: "string" },
+          id: { type: "string" },
+          data: true,
+          links: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaLink" },
+          },
+          actions: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaAction" },
+          },
+        },
+        additionalProperties: false,
+      },
+      ServiceMetadataData: {
         type: "object",
         required: [
           "service",
           "description",
           "hostingPlatform",
           "issuer",
+          "docs",
+          "openapi",
           "officialOpenAIProduct",
           "upstreamSignIn",
           "sessionIssuer",
           "capabilities",
           "plannedCapabilities",
-          "_links",
-          "actions",
         ],
         properties: {
           service: { type: "string", const: "AittaDB" },
-          description: {
-            type: "string",
-            description:
-              "Current AittaDB product scope for human and machine clients.",
-          },
+          description: { type: "string" },
           hostingPlatform: {
             type: "string",
             const: "OpenAI-hosted ChatGPT Sites",
-            description:
-              "Hosted platform on which this AittaDB deployment runs; AittaDB itself remains independent.",
           },
           issuer: { type: "string", format: "uri" },
           docs: { type: "string", format: "uri" },
@@ -840,35 +1460,75 @@ export const openApiSpec = {
                 type: "string",
                 const: "ChatGPT sign-in inside ChatGPT Sites",
               },
-              identitySignal: {
-                type: "string",
-                description:
-                  "Server-side email and optional display name supplied after ChatGPT sign-in.",
-              },
+              identitySignal: { type: "string" },
               stableSubjectSupplied: { type: "boolean", const: false },
               credentialsForwarded: { type: "boolean", const: false },
             },
+            additionalProperties: false,
           },
-          sessionIssuer: {
-            type: "string",
-            const: "AittaDB",
-            description:
-              "Service that issues the downstream OAuth, OIDC, and JWT session credentials.",
-          },
-          capabilities: {
-            type: "array",
-            description: "Capabilities available in the current deployment.",
-            items: { type: "string" },
-          },
+          sessionIssuer: { type: "string", const: "AittaDB" },
+          capabilities: { type: "array", items: { type: "string" } },
           plannedCapabilities: {
             type: "array",
             description:
-              "Planned capabilities that are not available in the current MVP.",
+              "Planned capabilities, including Events, that are not available in the current MVP.",
             items: { type: "string" },
           },
-          _links: { $ref: "#/components/schemas/HypermediaLinks" },
-          actions: { type: "object", additionalProperties: true },
         },
+        additionalProperties: false,
+      },
+      ServiceDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "service" },
+              data: { $ref: "#/components/schemas/ServiceMetadataData" },
+            },
+          },
+        ],
+      },
+      HealthDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "health" },
+              data: {
+                type: "object",
+                required: ["ok", "service", "d1", "r2"],
+                properties: {
+                  ok: { type: "boolean" },
+                  service: { type: "string", const: "aittadb" },
+                  d1: { type: "boolean" },
+                  r2: { type: "boolean" },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        ],
+      },
+      StatisticsDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "service-statistics" },
+              data: {
+                type: "object",
+                required: ["identity_count"],
+                properties: {
+                  identity_count: { type: "integer", minimum: 0 },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        ],
       },
       JsonWebKeySet: {
         type: "object",
@@ -901,6 +1561,9 @@ export const openApiSpec = {
           "verification_uri_complete",
           "expires_in",
           "interval",
+          "api_version",
+          "links",
+          "actions",
         ],
         properties: {
           device_code: { type: "string" },
@@ -909,8 +1572,15 @@ export const openApiSpec = {
           verification_uri_complete: { type: "string", format: "uri" },
           expires_in: { type: "integer" },
           interval: { type: "integer" },
-          _links: { $ref: "#/components/schemas/HypermediaLinks" },
-          actions: { type: "object", additionalProperties: true },
+          api_version: { type: "string", const: "0.1" },
+          links: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaLink" },
+          },
+          actions: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaAction" },
+          },
         },
         examples: [
           {
@@ -952,20 +1622,34 @@ export const openApiSpec = {
           token_use: { type: "string", const: "access" },
         },
       },
-      OAuthError: {
+      HypermediaError: {
         type: "object",
-        required: ["error", "_links"],
+        required: ["error", "api_version", "type", "data", "links", "actions"],
         properties: {
           error: { type: "string" },
           error_description: { type: "string" },
-          _links: { $ref: "#/components/schemas/HypermediaLinks" },
-          actions: {
+          api_version: { type: "string", const: "0.1" },
+          type: { type: "string", const: "error" },
+          data: {
             type: "object",
-            additionalProperties: true,
+            required: ["error"],
+            properties: {
+              error: { type: "string" },
+              error_description: { type: "string" },
+            },
+          },
+          links: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaLink" },
+          },
+          actions: {
+            type: "array",
+            items: { $ref: "#/components/schemas/HypermediaAction" },
           },
         },
       },
-      LocalSession: {
+      OAuthError: { $ref: "#/components/schemas/HypermediaError" },
+      LocalSessionData: {
         type: "object",
         required: [
           "authenticated",
@@ -973,8 +1657,6 @@ export const openApiSpec = {
           "upstreamSignIn",
           "sessionIssuer",
           "credentialsForwarded",
-          "_links",
-          "actions",
         ],
         properties: {
           authenticated: { type: "boolean", const: true },
@@ -995,34 +1677,51 @@ export const openApiSpec = {
           },
           sessionIssuer: { type: "string", const: "AittaDB" },
           credentialsForwarded: { type: "boolean", const: false },
-          _links: { $ref: "#/components/schemas/HypermediaLinks" },
-          actions: { type: "object", additionalProperties: true },
         },
+        additionalProperties: false,
       },
-      HypermediaLinks: {
-        type: "object",
-        additionalProperties: {
-          type: "object",
-          required: ["href"],
-          properties: {
-            href: { type: "string" },
-            type: { type: "string" },
+      LocalSessionDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "local-session" },
+              data: { $ref: "#/components/schemas/LocalSessionData" },
+            },
           },
-        },
+        ],
       },
-      StorageRecord: {
+      ProtocolEndpointDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              data: {
+                type: "object",
+                required: ["title", "protocol_response"],
+                properties: {
+                  title: { type: "string" },
+                  protocol_response: { type: "string" },
+                },
+              },
+            },
+          },
+        ],
+      },
+      StorageRecordData: {
         type: "object",
-        required: ["key", "value", "created_at", "updated_at", "_links"],
+        required: ["key", "value", "created_at", "updated_at"],
         properties: {
           key: { type: "string" },
           value: true,
           created_at: { type: "integer" },
           updated_at: { type: "integer" },
-          _links: { $ref: "#/components/schemas/HypermediaLinks" },
-          actions: { type: "object", additionalProperties: true },
         },
+        additionalProperties: false,
       },
-      StorageFile: {
+      StorageFileData: {
         type: "object",
         required: [
           "key",
@@ -1031,7 +1730,6 @@ export const openApiSpec = {
           "sha256",
           "created_at",
           "updated_at",
-          "_links",
         ],
         properties: {
           key: { type: "string" },
@@ -1040,9 +1738,290 @@ export const openApiSpec = {
           sha256: { type: "string" },
           created_at: { type: "integer" },
           updated_at: { type: "integer" },
-          _links: { $ref: "#/components/schemas/HypermediaLinks" },
-          actions: { type: "object", additionalProperties: true },
         },
+        additionalProperties: false,
+      },
+      StorageRecordDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "storage-record" },
+              data: { $ref: "#/components/schemas/StorageRecordData" },
+            },
+          },
+        ],
+      },
+      StorageFileDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "storage-file" },
+              data: { $ref: "#/components/schemas/StorageFileData" },
+            },
+          },
+        ],
+      },
+      StorageCollectionData: {
+        type: "object",
+        required: ["count", "items"],
+        properties: {
+          count: { type: "integer", minimum: 0 },
+          items: {
+            type: "array",
+            items: {
+              oneOf: [
+                { $ref: "#/components/schemas/StorageRecordDocument" },
+                { $ref: "#/components/schemas/StorageFileDocument" },
+              ],
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      StorageCollectionDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: [
+                  "storage-records-collection",
+                  "storage-files-collection",
+                ],
+              },
+              data: { $ref: "#/components/schemas/StorageCollectionData" },
+            },
+          },
+        ],
+      },
+      StorageDeletionDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: ["storage-record-deletion", "storage-file-deletion"],
+              },
+              data: {
+                type: "object",
+                required: ["deleted", "key", "resource_type"],
+                properties: {
+                  deleted: { type: "boolean", const: true },
+                  key: { type: "string" },
+                  resource_type: { type: "string" },
+                },
+              },
+            },
+          },
+        ],
+      },
+      UserInfo: {
+        type: "object",
+        required: ["sub"],
+        properties: {
+          sub: { type: "string", format: "uuid" },
+          email: { type: "string", format: "email" },
+          email_verified: { type: "boolean", const: false },
+          name: { type: "string" },
+        },
+      },
+      DeviceCodeEntryDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "device-code-entry" },
+              data: {
+                type: "object",
+                required: ["user_code"],
+                properties: { user_code: { type: "string" } },
+              },
+            },
+          },
+        ],
+      },
+      DeviceRequestDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "device-request" },
+              data: {
+                type: "object",
+                required: [
+                  "client_name",
+                  "user_code",
+                  "scopes",
+                  "status",
+                  "expires_at",
+                ],
+                properties: {
+                  client_name: { type: "string" },
+                  user_code: { type: "string" },
+                  scopes: { type: "array", items: { type: "string" } },
+                  status: { type: "string", const: "pending" },
+                  expires_at: { type: "integer" },
+                },
+              },
+            },
+          },
+        ],
+      },
+      DeviceDecisionDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "device-request-decision" },
+              data: {
+                type: "object",
+                required: ["status"],
+                properties: {
+                  status: {
+                    type: "string",
+                    enum: ["approved", "denied", "used"],
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      AuthorizationConsentDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "authorization-consent" },
+              data: {
+                type: "object",
+                required: [
+                  "client_name",
+                  "scopes",
+                  "redirect_uri",
+                  "status",
+                  "expires_at",
+                ],
+                properties: {
+                  client_name: { type: "string" },
+                  scopes: { type: "array", items: { type: "string" } },
+                  redirect_uri: { type: "string", format: "uri" },
+                  status: { type: "string", const: "pending" },
+                  expires_at: { type: "integer" },
+                },
+              },
+            },
+          },
+        ],
+      },
+      OAuthClientCreateInput: {
+        type: "object",
+        required: ["csrf_token", "name", "type", "redirect_uris", "scopes"],
+        properties: {
+          csrf_token: { type: "string" },
+          name: { type: "string", minLength: 1, maxLength: 120 },
+          type: { type: "string", enum: ["public", "confidential"] },
+          redirect_uris: {
+            type: "string",
+            description: "One exact redirect URI per line.",
+          },
+          scopes: {
+            type: "string",
+            description: "Space-separated allowed AittaDB scopes.",
+          },
+          origins: {
+            type: "string",
+            description: "One exact allowed browser origin per line.",
+          },
+        },
+        additionalProperties: false,
+      },
+      OAuthClientOperationInput: {
+        type: "object",
+        required: ["csrf_token", "action", "client_id"],
+        properties: {
+          csrf_token: { type: "string" },
+          action: {
+            type: "string",
+            enum: ["enable", "disable", "rotate_secret", "revoke_grants"],
+          },
+          client_id: { type: "string", format: "uuid" },
+        },
+        additionalProperties: false,
+      },
+      OAuthClientCollectionDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "oauth-client-collection" },
+              data: {
+                type: "object",
+                required: ["clients"],
+                properties: {
+                  clients: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: [
+                        "id",
+                        "name",
+                        "type",
+                        "disabled",
+                        "redirect_uris",
+                        "scopes",
+                        "origins",
+                        "created_at",
+                      ],
+                      properties: {
+                        id: { type: "string", format: "uuid" },
+                        name: { type: "string" },
+                        type: {
+                          type: "string",
+                          enum: ["public", "confidential"],
+                        },
+                        disabled: { type: "boolean" },
+                        redirect_uris: {
+                          type: "array",
+                          items: { type: "string", format: "uri" },
+                        },
+                        scopes: {
+                          type: "array",
+                          items: { type: "string" },
+                        },
+                        origins: {
+                          type: "array",
+                          items: { type: "string", format: "uri" },
+                        },
+                        created_at: { type: "integer" },
+                      },
+                    },
+                  },
+                  new_client_secret: {
+                    type: "string",
+                    writeOnly: true,
+                    description:
+                      "Returned once immediately after creation or rotation.",
+                  },
+                  secret_displayed_once: { type: "boolean", const: true },
+                },
+              },
+            },
+          },
+        ],
       },
     },
   },

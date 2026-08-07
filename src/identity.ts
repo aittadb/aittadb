@@ -1,22 +1,15 @@
-import type { RuntimeEnv, UpstreamIdentity } from "./types";
+import type { UpstreamIdentity } from "./types";
 
 const EMAIL_HEADER = "oai-authenticated-user-email";
 const FULL_NAME_HEADER = "oai-authenticated-user-full-name";
 const FULL_NAME_ENCODING_HEADER = "oai-authenticated-user-full-name-encoding";
 const PERCENT_ENCODED_UTF8 = "percent-encoded-utf-8";
 
-export function readSitesIdentity(
-  request: Request,
-  env: RuntimeEnv,
-): UpstreamIdentity | null {
-  if (env.NODE_ENV === "test" && env.TEST_AUTH_EMAIL) {
-    return {
-      email: env.TEST_AUTH_EMAIL,
-      fullName: env.TEST_AUTH_FULL_NAME ?? null,
-      displayName: env.TEST_AUTH_FULL_NAME || env.TEST_AUTH_EMAIL,
-    };
-  }
+export interface UpstreamIdentityProvider {
+  read(request: Request): UpstreamIdentity | null;
+}
 
+export function readSitesIdentity(request: Request): UpstreamIdentity | null {
   const email = request.headers.get(EMAIL_HEADER);
   if (!email || !isLikelyEmail(email)) return null;
 
@@ -34,11 +27,15 @@ export function readSitesIdentity(
   };
 }
 
+export const sitesIdentityProvider: UpstreamIdentityProvider = {
+  read: readSitesIdentity,
+};
+
 export function requireSitesIdentity(
   request: Request,
-  env: RuntimeEnv,
+  provider: UpstreamIdentityProvider,
 ): UpstreamIdentity | Response {
-  const identity = readSitesIdentity(request, env);
+  const identity = provider.read(request);
   if (identity) return identity;
 
   const url = new URL(request.url);

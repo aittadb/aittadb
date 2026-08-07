@@ -1,17 +1,31 @@
 import { loadConfig } from "./config";
 import { nowSeconds, publicJwk, randomToken, sha256 } from "./crypto";
 import { D1AuthStore } from "./store/d1";
-import type { RuntimeEnv, AuthStore, ClientRegistrationInput } from "./types";
-import { readSitesIdentity, requireSitesIdentity } from "./identity";
+import type {
+  RuntimeEnv,
+  AuthStore,
+  ClientRegistrationInput,
+  ClientView,
+  UpstreamIdentity,
+} from "./types";
+import {
+  requireSitesIdentity,
+  sitesIdentityProvider,
+  type UpstreamIdentityProvider,
+} from "./identity";
 import {
   addSecurityHeaders,
   acceptsHtml,
+  acceptsJson,
   bearerToken,
   cors,
   csrfCookie,
   csrfTokenForRequest,
   csrfTokenMatches,
   html,
+  hypermediaError,
+  hypermediaJson,
+  isJsonMediaType,
   javascript,
   json,
   oauthError,
@@ -20,6 +34,18 @@ import {
   requireSameOrigin,
   stylesheet,
 } from "./http";
+import {
+  HYPERMEDIA_MEDIA_TYPE,
+  HYPERMEDIA_API_VERSION,
+  action,
+  endpointActions,
+  field,
+  hypermediaNegotiationError,
+  link,
+  prefersVendorHypermedia,
+  resourceDocument,
+  type HypermediaAction,
+} from "./hypermedia";
 import { oidcConfiguration, openApiSpec } from "./openapi";
 import { storageEndpoint } from "./storage";
 import { storageBrowserEndpoint } from "./storage-browser";
@@ -28,6 +54,12 @@ import {
   issueBrowserSessionAccessToken,
 } from "./browser-session";
 import { isBrowserSessionClientId } from "./system-client";
+import {
+  authorizationConsentDocument,
+  deviceApprovalDocument,
+  deviceDecisionDocument,
+  deviceEntryDocument,
+} from "./transaction-resources";
 import {
   adminClientsPage,
   authUiJs,
@@ -41,6 +73,7 @@ import {
   healthPage,
   sessionPage,
   serviceHomePage,
+  statisticsPage,
 } from "./pages";
 import {
   authorizationFormPage,
@@ -61,6 +94,7 @@ import {
   createAuthorizeRequest,
   createClientRegistration,
   createDeviceAuthorization,
+  denyAuthorizationRequest,
   exchangeAuthorizationCode,
   normalizeUserCode,
   parseScopes,
@@ -83,7 +117,7 @@ export async function createAittaDB(
   const fallbackUrl = env.ISSUER_URL ?? "https://aittadb.local";
   const config = loadConfig(env, fallbackUrl);
   const store = env.DB ? new D1AuthStore(env.DB) : null;
-  return createAittaDBWithStore(env, store, config, ctx);
+  return createAittaDBWithStore(env, store, config, ctx, sitesIdentityProvider);
 }
 
 export function createAittaDBWithStore(
@@ -91,6 +125,7 @@ export function createAittaDBWithStore(
   store: AuthStore | null,
   config = loadConfig(env, env.ISSUER_URL ?? "https://aittadb.local"),
   ctx?: { waitUntil(promise: Promise<unknown>): void },
+  identityProvider: UpstreamIdentityProvider = sitesIdentityProvider,
 ): AittaDBApp {
   return {
     async fetch(request: Request): Promise<Response | null> {
@@ -112,6 +147,18 @@ export function createAittaDBWithStore(
         );
       }
 
+      const negotiationError = usesApplicationNegotiation(request, url)
+        ? hypermediaNegotiationError(request)
+        : null;
+      if (negotiationError) {
+        return finalizeResponse(
+          request,
+          hypermediaError(request, "not_acceptable", negotiationError, 406),
+          config,
+          corsHeaders,
+        );
+      }
+
       try {
         if (!store && needsStore(url.pathname))
           return finalizeResponse(
@@ -121,7 +168,14 @@ export function createAittaDBWithStore(
             corsHeaders,
           );
 
-        const routed = await route(request, url, env, store, config);
+        const routed = await route(
+          request,
+          url,
+          env,
+          store,
+          config,
+          identityProvider,
+        );
         const finalized = await finalizeResponse(
           request,
           routed,
@@ -166,8 +220,14 @@ async function route(
   env: RuntimeEnv,
   store: AuthStore | null,
   config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
   if (url.pathname === "/" && request.method === "GET") {
+    const identity = identityProvider.read(request);
+    const signedIn = Boolean(identity);
+    const showAdmin = Boolean(
+      identity && config.adminEmails.includes(identity.email),
+    );
     const metadata = {
       service: "AittaDB",
       description:
@@ -191,119 +251,111 @@ async function route(
         "R2-backed files with D1 metadata isolated by AittaDB user and client",
       ],
       plannedCapabilities: ["Persistent events and long-polling delivery"],
-      _links: {
-        self: { href: config.issuerUrl },
-        health: { href: `${config.issuerUrl}/health` },
-        docs: { href: `${config.issuerUrl}/docs`, type: "text/html" },
-        openapi: {
-          href: `${config.issuerUrl}/openapi.json`,
-          type: "application/json",
-        },
-        oidcConfiguration: {
-          href: `${config.issuerUrl}/.well-known/openid-configuration`,
-          type: "application/json",
-        },
-        jwks: {
-          href: `${config.issuerUrl}/.well-known/jwks.json`,
-          type: "application/json",
-        },
-        adminClients: {
-          href: `${config.issuerUrl}/admin/clients`,
-          type: "text/html",
-        },
-        session: {
-          href: `${config.issuerUrl}/session`,
-          type: "text/html",
-        },
-        deviceVerification: {
-          href: `${config.issuerUrl}/device`,
-          type: "text/html",
-        },
-        storageRecords: {
-          href: `${config.issuerUrl}/storage/records`,
-          representations: ["application/json", "text/html"],
-        },
-        storageFiles: {
-          href: `${config.issuerUrl}/storage/files`,
-          representations: ["application/json", "text/html"],
-        },
-      },
-      actions: {
-        authenticate: {
-          method: "GET",
-          href: `${config.issuerUrl}/session`,
-          authentication: "ChatGPT sign-in inside ChatGPT Sites",
-        },
-        authorize: {
-          method: "GET",
-          href: `${config.issuerUrl}/authorize`,
-          parameters: [
-            "response_type",
-            "client_id",
-            "redirect_uri",
-            "scope",
-            "state",
-            "nonce",
-            "code_challenge",
-            "code_challenge_method",
-          ],
-        },
-        deviceAuthorization: {
-          method: "POST",
-          href: `${config.issuerUrl}/oauth/device_authorization`,
-          encoding: "application/x-www-form-urlencoded",
-          parameters: ["client_id", "scope"],
-        },
-        token: {
-          method: "POST",
-          href: `${config.issuerUrl}/oauth/token`,
-          encoding: "application/x-www-form-urlencoded",
-          parameters: ["grant_type"],
-        },
-        revoke: {
-          method: "POST",
-          href: `${config.issuerUrl}/oauth/revoke`,
-          encoding: "application/x-www-form-urlencoded",
-          parameters: ["token", "token_type_hint"],
-        },
-        introspect: {
-          method: "POST",
-          href: `${config.issuerUrl}/oauth/introspect`,
-          encoding: "application/x-www-form-urlencoded",
-          parameters: ["token", "token_type_hint"],
-        },
-        listStorageRecords: {
-          method: "GET",
-          href: `${config.issuerUrl}/storage/records`,
-          authorization: "Bearer access token with storage.read",
-        },
-        putStorageRecord: {
-          method: "PUT",
-          href: `${config.issuerUrl}/storage/records/{key}`,
-          encoding: "application/json",
-          authorization: "Bearer access token with storage.write",
-        },
-        listStorageFiles: {
-          method: "GET",
-          href: `${config.issuerUrl}/storage/files`,
-          authorization: "Bearer access token with storage.read",
-        },
-        putStorageFile: {
-          method: "PUT",
-          href: `${config.issuerUrl}/storage/files/{key}`,
-          authorization: "Bearer access token with storage.write",
-        },
-        useCurrentSessionStorage: {
-          method: "GET",
-          href: `${config.issuerUrl}/storage/records`,
-          representation: "text/html",
-          authentication: "ChatGPT sign-in inside ChatGPT Sites",
-        },
-      },
     };
+    const endpoints = endpointActions(config.issuerUrl);
+    const links = [
+      link("self", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("health", `${config.issuerUrl}/health`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("statistics", `${config.issuerUrl}/statistics`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("session", `${config.issuerUrl}/session`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("storage-records", `${config.issuerUrl}/storage/records`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("storage-files", `${config.issuerUrl}/storage/files`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("documentation", `${config.issuerUrl}/docs`, { type: "text/html" }),
+      link("describedby", `${config.issuerUrl}/openapi.json`, {
+        type: "application/json",
+      }),
+      link(
+        "openid-configuration",
+        `${config.issuerUrl}/.well-known/openid-configuration`,
+        { type: "application/json" },
+      ),
+      link("jwks", `${config.issuerUrl}/.well-known/jwks.json`, {
+        type: "application/json",
+      }),
+      link("oauth-authorization", endpoints.authorize.href, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("oauth-device-authorization", endpoints.deviceAuthorization.href, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("oauth-token", endpoints.token.href, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      ...(showAdmin
+        ? [
+            link("client-administration", `${config.issuerUrl}/admin/clients`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+    ];
+    const actions = [
+      action(
+        signedIn ? "sign-out" : "begin-session",
+        signedIn ? "Sign out" : "Sign in to AittaDB",
+        "GET",
+        signedIn
+          ? `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`
+          : `${config.issuerUrl}/session`,
+        { authorization: { scheme: "sites-session" }, fields: [] },
+      ),
+      action(
+        "read-statistics",
+        "View service statistics",
+        "GET",
+        `${config.issuerUrl}/statistics`,
+        { authorization: { scheme: "none" }, fields: [] },
+      ),
+      ...(signedIn
+        ? [
+            action(
+              "open-records",
+              "Open JSON records",
+              "GET",
+              `${config.issuerUrl}/storage/records`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+            action(
+              "open-files",
+              "Open file storage",
+              "GET",
+              `${config.issuerUrl}/storage/files`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+      ...(showAdmin
+        ? [
+            action(
+              "manage-clients",
+              "Manage OAuth clients",
+              "GET",
+              `${config.issuerUrl}/admin/clients`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+    ];
+    const document = resourceDocument({
+      type: "service",
+      id: config.issuerUrl,
+      data: metadata,
+      links,
+      actions,
+    });
     return acceptsHtml(request)
-      ? html(serviceHomePage(metadata))
-      : json(metadata);
+      ? html(serviceHomePage(metadata, { showAdmin, signedIn }))
+      : hypermediaJson(request, document);
   }
   if (url.pathname === "/health" && request.method === "GET") {
     const status = {
@@ -311,17 +363,24 @@ async function route(
       service: "aittadb",
       d1: Boolean(store),
       r2: Boolean(env.BUCKET),
-      _links: {
-        self: { href: `${config.issuerUrl}/health` },
-        service: { href: config.issuerUrl },
-        docs: { href: `${config.issuerUrl}/docs`, type: "text/html" },
-        openapi: {
-          href: `${config.issuerUrl}/openapi.json`,
-          type: "application/json",
-        },
-      },
     };
-    return acceptsHtml(request) ? html(healthPage(status)) : json(status);
+    const document = resourceDocument({
+      type: "health",
+      id: `${config.issuerUrl}/health`,
+      data: status,
+      links: [
+        link("self", `${config.issuerUrl}/health`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("documentation", `${config.issuerUrl}/docs`, {
+          type: "text/html",
+        }),
+      ],
+    });
+    return acceptsHtml(request)
+      ? html(healthPage(status))
+      : hypermediaJson(request, document);
   }
   if (url.pathname === "/auth-ui.css" && request.method === "GET") {
     return stylesheet(authUiCss());
@@ -390,12 +449,44 @@ async function route(
   if (!store)
     return oauthError("database_unavailable", "Database is unavailable", 503);
 
+  if (url.pathname === "/statistics" && request.method === "GET") {
+    const identityCount = await store.countUsers();
+    const document = resourceDocument({
+      type: "service-statistics",
+      id: `${config.issuerUrl}/statistics`,
+      data: { identity_count: identityCount },
+      links: [
+        link("self", `${config.issuerUrl}/statistics`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("documentation", `${config.issuerUrl}/docs`, {
+          type: "text/html",
+        }),
+      ],
+    });
+    const response = acceptsHtml(request)
+      ? html(statisticsPage(identityCount))
+      : hypermediaJson(request, document);
+    response.headers.set("cache-control", "no-store");
+    return response;
+  }
+
   if (url.pathname === "/session" && request.method === "GET") {
-    return localSessionEndpoint(request, env, store, config);
+    return localSessionEndpoint(request, store, config, identityProvider);
   }
   if (url.pathname === "/authorize" && request.method === "GET") {
-    if (acceptsHtml(request) && !url.searchParams.has("client_id")) {
-      return html(authorizationFormPage());
+    if (!url.searchParams.has("client_id")) {
+      return acceptsHtml(request)
+        ? html(authorizationFormPage())
+        : hypermediaJson(
+            request,
+            protocolEndpointDocument(
+              "authorization-endpoint",
+              endpointActions(config.issuerUrl).authorize,
+              config.issuerUrl,
+            ),
+          );
     }
     return createAuthorizeRequest(url, config, store);
   }
@@ -405,7 +496,14 @@ async function route(
   ) {
     return acceptsHtml(request)
       ? browserFormPage(request, deviceAuthorizationFormPage)
-      : methodNotAllowed("POST");
+      : hypermediaJson(
+          request,
+          protocolEndpointDocument(
+            "device-authorization-endpoint",
+            endpointActions(config.issuerUrl).deviceAuthorization,
+            config.issuerUrl,
+          ),
+        );
   }
   if (
     url.pathname === "/oauth/device_authorization" &&
@@ -448,7 +546,14 @@ async function route(
   if (url.pathname === "/oauth/token" && request.method === "GET") {
     return acceptsHtml(request)
       ? browserFormPage(request, tokenFormPage)
-      : methodNotAllowed("POST");
+      : hypermediaJson(
+          request,
+          protocolEndpointDocument(
+            "token-endpoint",
+            endpointActions(config.issuerUrl).token,
+            config.issuerUrl,
+          ),
+        );
   }
   if (url.pathname === "/oauth/token" && request.method === "POST") {
     const form = await readForm(request);
@@ -469,7 +574,14 @@ async function route(
   if (url.pathname === "/oauth/revoke" && request.method === "GET") {
     return acceptsHtml(request)
       ? browserFormPage(request, revocationFormPage)
-      : methodNotAllowed("POST");
+      : hypermediaJson(
+          request,
+          protocolEndpointDocument(
+            "revocation-endpoint",
+            endpointActions(config.issuerUrl).revoke,
+            config.issuerUrl,
+          ),
+        );
   }
   if (url.pathname === "/oauth/revoke" && request.method === "POST") {
     const form = await readForm(request);
@@ -482,7 +594,7 @@ async function route(
       );
       if (rejected) return rejected;
     }
-    const response = await revokeEndpoint(request, store, form);
+    const response = await revokeEndpoint(request, config, store, form);
     return browser
       ? browserJsonResponse(
           response,
@@ -510,7 +622,14 @@ async function route(
   if (url.pathname === "/oauth/introspect" && request.method === "GET") {
     return acceptsHtml(request)
       ? browserFormPage(request, introspectionFormPage)
-      : methodNotAllowed("POST");
+      : hypermediaJson(
+          request,
+          protocolEndpointDocument(
+            "introspection-endpoint",
+            endpointActions(config.issuerUrl).introspect,
+            config.issuerUrl,
+          ),
+        );
   }
   if (url.pathname === "/oauth/introspect" && request.method === "POST") {
     const form = await readForm(request);
@@ -550,7 +669,66 @@ async function route(
   if (url.pathname === "/userinfo" && request.method === "GET") {
     if (!bearerToken(request) && acceptsHtml(request)) {
       return browserFormPage(request, (csrf) =>
-        userInfoFormPage(csrf, hasBrowserSession(request, env)),
+        userInfoFormPage(csrf, hasBrowserSession(request, identityProvider)),
+      );
+    }
+    if (!bearerToken(request) && acceptsJson(request)) {
+      const csrf = csrfTokenForRequest(request);
+      const signedIn = hasBrowserSession(request, identityProvider);
+      const operations: HypermediaAction[] = [
+        endpointActions(config.issuerUrl).userInfo,
+        ...(signedIn
+          ? [
+              action(
+                "read-userinfo-with-session",
+                "Read current identity claims",
+                "POST",
+                `${config.issuerUrl}/userinfo`,
+                {
+                  type: "application/x-www-form-urlencoded",
+                  authorization: { scheme: "sites-session" },
+                  fields: [
+                    field("ui", "Browser operation", "string", "body", {
+                      required: true,
+                      value: "1",
+                    }),
+                    field("csrf_token", "CSRF token", "string", "body", {
+                      required: true,
+                      secret: true,
+                      value: csrf,
+                    }),
+                    field("auth_mode", "Authentication", "string", "body", {
+                      required: true,
+                      value: "session",
+                      options: [
+                        {
+                          value: "session",
+                          title: "Current signed-in session",
+                        },
+                      ],
+                    }),
+                  ],
+                },
+              ),
+            ]
+          : [
+              action(
+                "begin-session",
+                "Sign in to AittaDB",
+                "GET",
+                `${config.issuerUrl}/session`,
+                { authorization: { scheme: "none" }, fields: [] },
+              ),
+            ]),
+      ];
+      return hypermediaJson(
+        request,
+        protocolEndpointDocument(
+          "userinfo-endpoint",
+          operations,
+          config.issuerUrl,
+        ),
+        signedIn ? { headers: { "set-cookie": csrfCookie(csrf) } } : undefined,
       );
     }
     const response = await userInfoEndpoint(request, config, store);
@@ -583,10 +761,13 @@ async function route(
       form.get("auth_mode") === "session" ||
       (!form.has("auth_mode") && !submittedToken);
     const accessToken = useSession
-      ? await issueBrowserSessionAccessToken(request, env, store, config, [
-          "email",
-          "profile",
-        ])
+      ? await issueBrowserSessionAccessToken(
+          request,
+          identityProvider,
+          store,
+          config,
+          ["openid", "email", "profile"],
+        )
       : submittedToken;
     if (accessToken instanceof Response) return accessToken;
     const headers = new Headers(request.headers);
@@ -597,22 +778,24 @@ async function route(
       config,
       store,
     );
-    return browserJsonResponse(
-      response,
-      (payload) =>
-        operationResultPage({
-          title: "UserInfo claims",
-          eyebrow: "OpenID Connect UserInfo",
-          summary:
-            "Claims returned by the production UserInfo service for the supplied AittaDB access token and local scopes.",
-          payload,
-          actions: [
-            { href: "/userinfo", label: "Inspect another token" },
-            { href: "/session", label: "My session", secondary: true },
-          ],
-        }),
-      "/userinfo",
-    );
+    return acceptsHtml(request)
+      ? browserJsonResponse(
+          response,
+          (payload) =>
+            operationResultPage({
+              title: "UserInfo claims",
+              eyebrow: "OpenID Connect UserInfo",
+              summary:
+                "Claims returned by the production UserInfo service for the supplied AittaDB access token and local scopes.",
+              payload,
+              actions: [
+                { href: "/userinfo", label: "Inspect another token" },
+                { href: "/session", label: "My session", secondary: true },
+              ],
+            }),
+          "/userinfo",
+        )
+      : response;
   }
   if (url.pathname.startsWith("/storage/")) {
     const browserResponse = await storageBrowserEndpoint(
@@ -621,6 +804,7 @@ async function route(
       env,
       store,
       config,
+      identityProvider,
     );
     if (browserResponse) return browserResponse;
     return storageEndpoint(request, url, env, store, config);
@@ -628,68 +812,78 @@ async function route(
   if (url.pathname === "/device" && request.method === "GET") {
     const csrf = csrfTokenForRequest(request);
     const headers = new Headers({ "set-cookie": csrfCookie(csrf) });
-    return html(
-      deviceEntryPage(url.searchParams.get("user_code") || "", csrf),
-      { headers },
-    );
+    const userCode = url.searchParams.get("user_code") || "";
+    return acceptsHtml(request)
+      ? html(deviceEntryPage(userCode, csrf), { headers })
+      : hypermediaJson(
+          request,
+          deviceEntryDocument(config.issuerUrl, csrf, userCode),
+          { headers },
+        );
   }
   if (url.pathname === "/device" && request.method === "POST") {
-    return deviceEntryPost(request, env, store, config);
+    return deviceEntryPost(request, store, config, identityProvider);
   }
   if (url.pathname === "/device/decision" && request.method === "POST") {
-    return deviceDecisionPost(request, env, store, config);
+    return deviceDecisionPost(request, store, config, identityProvider);
   }
   if (url.pathname === "/consent" && request.method === "GET") {
-    return consentGet(request, env, store);
+    return consentGet(request, store, config, identityProvider);
   }
   if (url.pathname === "/consent" && request.method === "POST") {
-    return consentPost(request, env, store, config);
+    return consentPost(request, store, config, identityProvider);
   }
   if (url.pathname === "/admin/clients" && request.method === "GET") {
-    return adminClientsGet(request, env, config, store);
+    return adminClientsGet(request, config, store, identityProvider);
   }
   if (url.pathname === "/admin/clients" && request.method === "POST") {
-    return adminClientsPost(request, env, config, store);
+    return adminClientsPost(request, config, store, identityProvider);
   }
   return oauthError("not_found", "No AittaDB route matches this request", 404);
 }
 
 async function localSessionEndpoint(
   request: Request,
-  env: RuntimeEnv,
   store: AuthStore,
   config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
-  const identity = readSitesIdentity(request, env);
+  const identity = identityProvider.read(request);
   if (!identity) {
     if (acceptsHtml(request))
-      return requireSitesIdentity(request, env) as Response;
-    return json(
+      return requireSitesIdentity(request, identityProvider) as Response;
+    return oauthError(
+      "login_required",
+      "ChatGPT sign-in inside ChatGPT Sites is required for this browser session",
+      401,
       {
-        error: "login_required",
-        error_description:
-          "ChatGPT sign-in inside ChatGPT Sites is required for this browser session",
-        _links: {
-          service: { href: config.issuerUrl, type: "text/html" },
-          signIn: {
-            href: `${config.issuerUrl}/signin-with-chatgpt?return_to=%2Fsession`,
+        links: [
+          link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+          link(
+            "sign-in",
+            `${config.issuerUrl}/signin-with-chatgpt?return_to=%2Fsession`,
+            { type: "text/html" },
+          ),
+          link("documentation", `${config.issuerUrl}/docs`, {
             type: "text/html",
-          },
-          docs: { href: `${config.issuerUrl}/docs`, type: "text/html" },
-        },
-        actions: {
-          authenticate: {
-            method: "GET",
-            href: `${config.issuerUrl}/session`,
-            authentication: "ChatGPT sign-in inside ChatGPT Sites",
-          },
-        },
+          }),
+        ],
+        actions: [
+          action(
+            "begin-session",
+            "Sign in to AittaDB",
+            "GET",
+            `${config.issuerUrl}/session`,
+            { authorization: { scheme: "sites-session" }, fields: [] },
+          ),
+        ],
       },
-      { status: 401 },
     );
   }
 
   const user = await store.findOrCreateUser(identity, nowSeconds());
+  const isAdmin = config.adminEmails.includes(identity.email);
+  const csrf = csrfTokenForRequest(request);
   const session = {
     authenticated: true,
     user: {
@@ -702,72 +896,106 @@ async function localSessionEndpoint(
     upstreamSignIn: "ChatGPT sign-in inside ChatGPT Sites",
     sessionIssuer: "AittaDB",
     credentialsForwarded: false,
-    _links: {
-      self: { href: `${config.issuerUrl}/session` },
-      service: { href: config.issuerUrl, type: "text/html" },
-      deviceAuthorization: {
-        href: `${config.issuerUrl}/oauth/device_authorization`,
-        type: "text/html",
-      },
-      authorize: { href: `${config.issuerUrl}/authorize`, type: "text/html" },
-      userinfo: { href: `${config.issuerUrl}/userinfo`, type: "text/html" },
-      storageRecords: {
-        href: `${config.issuerUrl}/storage/records`,
-        type: "text/html",
-      },
-      storageFiles: {
-        href: `${config.issuerUrl}/storage/files`,
-        type: "text/html",
-      },
-      adminClients: {
-        href: `${config.issuerUrl}/admin/clients`,
-        type: "text/html",
-      },
-      signOut: {
-        href: `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`,
-        type: "text/html",
-      },
-    },
-    actions: {
-      approveDeviceWithCurrentSession: {
-        method: "GET",
-        href: `${config.issuerUrl}/device`,
-        representation: "text/html",
-      },
-      authorizeWithCurrentSession: {
-        method: "GET",
-        href: `${config.issuerUrl}/authorize`,
-        representation: "text/html",
-        note: "Registered client, exact redirect URI, and PKCE remain required",
-      },
-      readCurrentSessionUserInfo: {
-        method: "GET",
-        href: `${config.issuerUrl}/userinfo`,
-        representation: "text/html",
-      },
-      manageCurrentSessionRecords: {
-        method: "GET",
-        href: `${config.issuerUrl}/storage/records`,
-        representation: "text/html",
-      },
-      manageCurrentSessionFiles: {
-        method: "GET",
-        href: `${config.issuerUrl}/storage/files`,
-        representation: "text/html",
-      },
-      administerClientsWithCurrentSession: {
-        method: "GET",
-        href: `${config.issuerUrl}/admin/clients`,
-        representation: "text/html",
-        authorization: "ADMIN_EMAILS allowlist",
-      },
-      signOut: {
-        method: "GET",
-        href: `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`,
-      },
-    },
   };
-  return acceptsHtml(request) ? html(sessionPage(user)) : json(session);
+  const document = resourceDocument({
+    type: "local-session",
+    id: user.id,
+    data: session,
+    links: [
+      link("self", `${config.issuerUrl}/session`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("userinfo", `${config.issuerUrl}/userinfo`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("storage-records", `${config.issuerUrl}/storage/records`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("storage-files", `${config.issuerUrl}/storage/files`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      ...(isAdmin
+        ? [
+            link("client-administration", `${config.issuerUrl}/admin/clients`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+      link(
+        "sign-out",
+        `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`,
+        { type: "text/html" },
+      ),
+    ],
+    actions: [
+      action(
+        "read-userinfo-with-session",
+        "Read current identity claims",
+        "POST",
+        `${config.issuerUrl}/userinfo`,
+        {
+          type: "application/x-www-form-urlencoded",
+          authorization: { scheme: "sites-session" },
+          fields: [
+            field("ui", "Browser operation", "string", "body", {
+              required: true,
+              value: "1",
+            }),
+            field("csrf_token", "CSRF token", "string", "body", {
+              required: true,
+              secret: true,
+              value: csrf,
+            }),
+            field("auth_mode", "Authentication", "string", "body", {
+              required: true,
+              value: "session",
+              options: [
+                { value: "session", title: "Current signed-in session" },
+              ],
+            }),
+          ],
+        },
+      ),
+      action(
+        "manage-session-records",
+        "Manage JSON records",
+        "GET",
+        `${config.issuerUrl}/storage/records`,
+        { authorization: { scheme: "sites-session" }, fields: [] },
+      ),
+      action(
+        "manage-session-files",
+        "Manage files",
+        "GET",
+        `${config.issuerUrl}/storage/files`,
+        { authorization: { scheme: "sites-session" }, fields: [] },
+      ),
+      ...(isAdmin
+        ? [
+            action(
+              "manage-clients",
+              "Manage OAuth clients",
+              "GET",
+              `${config.issuerUrl}/admin/clients`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+      action(
+        "sign-out",
+        "Sign out",
+        "GET",
+        `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`,
+        { authorization: { scheme: "sites-session" }, fields: [] },
+      ),
+    ],
+  });
+  return acceptsHtml(request)
+    ? html(sessionPage(user, isAdmin))
+    : hypermediaJson(request, document, {
+        headers: { "set-cookie": csrfCookie(csrf) },
+      });
 }
 
 async function finalizeResponse(
@@ -776,13 +1004,47 @@ async function finalizeResponse(
   config: ReturnType<typeof loadConfig>,
   corsHeaders = new Headers(),
 ): Promise<Response> {
-  const negotiated = await negotiateBrowserError(request, response);
+  const applicationResponse = negotiateApplicationError(request, response);
+  const negotiated = await negotiateBrowserError(request, applicationResponse);
   const headers = new Headers(negotiated.headers);
   for (const [key, value] of corsHeaders.entries()) headers.set(key, value);
   addSecurityHeaders(headers);
   return new Response(negotiated.body, {
     status: negotiated.status,
     statusText: negotiated.statusText,
+    headers,
+  });
+}
+
+function negotiateApplicationError(
+  request: Request,
+  response: Response,
+): Response {
+  if (
+    response.status < 400 ||
+    !usesApplicationErrorNegotiation(request) ||
+    !prefersVendorHypermedia(request) ||
+    !isJsonMediaType(response.headers.get("content-type") ?? "")
+  ) {
+    return response;
+  }
+  const headers = new Headers(response.headers);
+  headers.set(
+    "content-type",
+    `${HYPERMEDIA_MEDIA_TYPE}; version=${HYPERMEDIA_API_VERSION}; charset=utf-8`,
+  );
+  headers.set("aittadb-api-version", HYPERMEDIA_API_VERSION);
+  const vary = (headers.get("vary") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!vary.some((value) => value.toLowerCase() === "accept")) {
+    vary.push("Accept");
+  }
+  headers.set("vary", vary.join(", "));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
     headers,
   });
 }
@@ -795,7 +1057,7 @@ async function negotiateBrowserError(
   if (
     response.status < 400 ||
     !acceptsHtml(request) ||
-    !contentType.includes("application/json")
+    !isJsonMediaType(contentType)
   ) {
     return response;
   }
@@ -860,6 +1122,34 @@ function prefersRawJson(request: Request, url: URL): boolean {
   return url.searchParams.get("format") === "json" || !acceptsHtml(request);
 }
 
+function protocolEndpointDocument(
+  type: string,
+  operation: HypermediaAction | readonly HypermediaAction[],
+  issuer: string,
+) {
+  const operations = Array.isArray(operation) ? [...operation] : [operation];
+  const primary = operations[0];
+  if (!primary) throw new Error("Protocol endpoint requires an operation");
+  return resourceDocument({
+    type,
+    id: primary.href,
+    data: {
+      title: primary.title,
+      protocol_response:
+        "Successful OAuth 2.0 and OpenID Connect wire responses remain standards-defined and are not wrapped in this resource document.",
+    },
+    links: [
+      link("self", primary.href, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("service", issuer, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("documentation", `${issuer}/docs`, { type: "text/html" }),
+      link("describedby", `${issuer}/openapi.json`, {
+        type: "application/json",
+      }),
+    ],
+    actions: operations,
+  });
+}
+
 function browserFormPage(
   request: Request,
   renderer: (csrf: string) => string,
@@ -901,9 +1191,7 @@ async function browserJsonResponse(
   successPage: (payload: Record<string, unknown>) => string,
   retryHref: string,
 ): Promise<Response> {
-  if (
-    !(response.headers.get("content-type") ?? "").includes("application/json")
-  )
+  if (!isJsonMediaType(response.headers.get("content-type") ?? ""))
     return response;
   const payload = (await response
     .clone()
@@ -963,15 +1251,38 @@ async function tokenEndpoint(
 
 async function revokeEndpoint(
   request: Request,
+  config: ReturnType<typeof loadConfig>,
   store: AuthStore,
   submittedForm?: URLSearchParams,
 ): Promise<Response> {
   const form = submittedForm ?? (await readForm(request));
+  const client = await authenticateClient(request, form, store);
+  if (client instanceof Response) return client;
   const token = form.get("token") || "";
   const hint = form.get("token_type_hint");
   const hash = await sha256(token);
-  if (hint === "refresh_token")
-    await store.revokeRefreshToken(hash, nowSeconds());
+  const now = nowSeconds();
+  const revokeRefresh = () => store.revokeRefreshToken(hash, client.id, now);
+  const revokeAccess = async (): Promise<boolean> => {
+    try {
+      const verified = await verifyAccessToken(token, config, store, client.id);
+      await store.revokeAccessTokenJti(
+        verified.claims.jti,
+        verified.claims.exp,
+        now,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (hint === "access_token") {
+    if (!(await revokeAccess())) await revokeRefresh();
+  } else if (hint === "refresh_token") {
+    if (!(await revokeRefresh())) await revokeAccess();
+  } else if (!(await revokeRefresh())) {
+    await revokeAccess();
+  }
   return json({});
 }
 
@@ -1013,6 +1324,8 @@ async function userInfoEndpoint(
     const user = await store.getUser(verified.claims.sub);
     if (!user) return oauthError("invalid_token", "Invalid token", 401);
     const scopes = parseScopes(String(verified.claims.scope || ""));
+    if (!scopes.includes("openid"))
+      return oauthError("invalid_token", "Invalid token", 401);
     return json({
       sub: user.id,
       ...(scopes.includes("email")
@@ -1027,69 +1340,102 @@ async function userInfoEndpoint(
 
 async function deviceEntryPost(
   request: Request,
-  env: RuntimeEnv,
   store: AuthStore,
   config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
   if (!requireSameOrigin(request, config.issuerUrl))
-    return html(
-      errorPage("Invalid request", "Same-origin form submission is required", {
-        status: 403,
-      }),
-      { status: 403 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Same-origin form submission is required",
+      403,
     );
   const form = await readForm(request);
   if (!validCsrf(request, form))
-    return html(
-      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
-      { status: 403 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "CSRF validation failed",
+      403,
     );
+  const userCode = form.get("user_code") || "";
   const grant = await store.getDeviceGrantByUserCodeHash(
-    await sha256(normalizeUserCode(form.get("user_code") || "")),
+    await sha256(normalizeUserCode(userCode)),
   );
-  if (!grant || grant.expiresAt <= nowSeconds())
-    return html(
-      deviceEntryPage(
-        form.get("user_code") || "",
-        csrfTokenForRequest(request),
-        "Invalid or expired user code",
-      ),
-      { status: 400 },
-    );
-  const identity = requireSitesIdentity(request, env);
+  if (!grant || grant.expiresAt <= nowSeconds()) {
+    const csrf = csrfTokenForRequest(request);
+    if (acceptsHtml(request)) {
+      return html(
+        deviceEntryPage(userCode, csrf, "Invalid or expired user code"),
+        { status: 400, headers: { "set-cookie": csrfCookie(csrf) } },
+      );
+    }
+    const retry = deviceEntryDocument(config.issuerUrl, csrf, userCode);
+    return oauthError("invalid_request", "Invalid or expired user code", 400, {
+      links: retry.links,
+      actions: retry.actions,
+    });
+  }
+  const identity = requireTransactionIdentity(
+    request,
+    identityProvider,
+    config.issuerUrl,
+  );
   if (identity instanceof Response) return identity;
   const client = await store.getClient(grant.clientId);
   if (!client || isBrowserSessionClientId(client.id))
-    return html(
-      errorPage("Invalid request", "Client is unavailable", { status: 400 }),
-      { status: 400 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Client is unavailable",
+      400,
     );
+  if (grant.status !== "pending") {
+    return acceptsHtml(request)
+      ? html(deviceOutcomePage(grant.status))
+      : hypermediaJson(
+          request,
+          deviceDecisionDocument(config.issuerUrl, grant.status),
+        );
+  }
   const csrf = csrfTokenForRequest(request);
-  return html(deviceConsentPage(grant, client, csrf), {
-    headers: { "set-cookie": csrfCookie(csrf) },
-  });
+  const headers = { "set-cookie": csrfCookie(csrf) };
+  return acceptsHtml(request)
+    ? html(deviceConsentPage(grant, client, csrf), { headers })
+    : hypermediaJson(
+        request,
+        deviceApprovalDocument(config.issuerUrl, grant, client, csrf),
+        { headers },
+      );
 }
 
 async function deviceDecisionPost(
   request: Request,
-  env: RuntimeEnv,
   store: AuthStore,
   config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
   if (!requireSameOrigin(request, config.issuerUrl))
-    return html(
-      errorPage("Invalid request", "Same-origin form submission is required", {
-        status: 403,
-      }),
-      { status: 403 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Same-origin form submission is required",
+      403,
     );
   const form = await readForm(request);
   if (!validCsrf(request, form))
-    return html(
-      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
-      { status: 403 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "CSRF validation failed",
+      403,
     );
-  const identity = requireSitesIdentity(request, env);
+  const identity = requireTransactionIdentity(
+    request,
+    identityProvider,
+    config.issuerUrl,
+  );
   if (identity instanceof Response) return identity;
   const grant = await store.getDeviceGrantByUserCodeHash(
     await sha256(normalizeUserCode(form.get("user_code") || "")),
@@ -1100,41 +1446,67 @@ async function deviceDecisionPost(
     grant.status !== "pending" ||
     grant.expiresAt <= nowSeconds()
   ) {
-    return html(
-      errorPage("Invalid request", "Device request is no longer pending", {
-        status: 400,
-      }),
-      { status: 400 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Device request is no longer pending",
+      400,
     );
   }
-  const user = await store.findOrCreateUser(identity, nowSeconds());
-  grant.status = form.get("decision") === "approve" ? "approved" : "denied";
-  grant.userId = grant.status === "approved" ? user.id : null;
-  await store.updateDeviceGrant(grant);
-  return html(deviceOutcomePage(grant.status));
+  const now = nowSeconds();
+  const status = form.get("decision") === "approve" ? "approved" : "denied";
+  const user =
+    status === "approved" ? await store.findOrCreateUser(identity, now) : null;
+  const updated = await store.transitionDeviceGrant(
+    grant.userCodeHash,
+    status,
+    user?.id ?? null,
+    now,
+  );
+  if (!updated)
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Device request is no longer pending",
+      400,
+    );
+  return acceptsHtml(request)
+    ? html(deviceOutcomePage(status))
+    : hypermediaJson(request, deviceDecisionDocument(config.issuerUrl, status));
 }
 
 async function consentGet(
   request: Request,
-  env: RuntimeEnv,
   store: AuthStore,
+  config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
-  const identity = requireSitesIdentity(request, env);
+  const identity = requireTransactionIdentity(
+    request,
+    identityProvider,
+    config.issuerUrl,
+  );
   if (identity instanceof Response) return identity;
   const requestId = new URL(request.url).searchParams.get("request_id") || "";
   const authRequest = await store.getAuthorizationRequest(requestId);
-  if (!authRequest || authRequest.expiresAt <= nowSeconds())
-    return html(
-      errorPage("Invalid request", "Authorization request expired", {
-        status: 400,
-      }),
-      { status: 400 },
+  if (
+    !authRequest ||
+    authRequest.status !== "pending" ||
+    authRequest.expiresAt <= nowSeconds()
+  )
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Authorization request expired",
+      400,
     );
   const client = await store.getClient(authRequest.clientId);
   if (!client || isBrowserSessionClientId(client.id))
-    return html(
-      errorPage("Invalid request", "Client is unavailable", { status: 400 }),
-      { status: 400 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Client is unavailable",
+      400,
     );
   const user = await store.findOrCreateUser(identity, nowSeconds());
   if (await store.hasConsent(user.id, client.id, authRequest.scope)) {
@@ -1144,34 +1516,57 @@ async function consentGet(
       store,
       nowSeconds(),
     );
+    if (!code)
+      return negotiatedFormError(
+        request,
+        "invalid_request",
+        "Authorization request is no longer pending",
+        400,
+      );
     return redirectWithCode(authRequest.redirectUri, code, authRequest.state);
   }
   const csrf = csrfTokenForRequest(request);
-  return html(consentPage(authRequest, client, csrf), {
-    headers: { "set-cookie": csrfCookie(csrf) },
-  });
+  const headers = { "set-cookie": csrfCookie(csrf) };
+  return acceptsHtml(request)
+    ? html(consentPage(authRequest, client, csrf), { headers })
+    : hypermediaJson(
+        request,
+        authorizationConsentDocument(
+          config.issuerUrl,
+          authRequest,
+          client,
+          csrf,
+        ),
+        { headers },
+      );
 }
 
 async function consentPost(
   request: Request,
-  env: RuntimeEnv,
   store: AuthStore,
   config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
   if (!requireSameOrigin(request, config.issuerUrl))
-    return html(
-      errorPage("Invalid request", "Same-origin form submission is required", {
-        status: 403,
-      }),
-      { status: 403 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Same-origin form submission is required",
+      403,
     );
   const form = await readForm(request);
   if (!validCsrf(request, form))
-    return html(
-      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
-      { status: 403 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "CSRF validation failed",
+      403,
     );
-  const identity = requireSitesIdentity(request, env);
+  const identity = requireTransactionIdentity(
+    request,
+    identityProvider,
+    config.issuerUrl,
+  );
   if (identity instanceof Response) return identity;
   const authRequest = await store.getAuthorizationRequest(
     form.get("request_id") || "",
@@ -1179,15 +1574,23 @@ async function consentPost(
   if (
     !authRequest ||
     isBrowserSessionClientId(authRequest.clientId) ||
+    authRequest.status !== "pending" ||
     authRequest.expiresAt <= nowSeconds()
   )
-    return html(
-      errorPage("Invalid request", "Authorization request expired", {
-        status: 400,
-      }),
-      { status: 400 },
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Authorization request expired",
+      400,
     );
   if (form.get("decision") !== "approve") {
+    if (!(await denyAuthorizationRequest(authRequest, store, nowSeconds())))
+      return negotiatedFormError(
+        request,
+        "invalid_request",
+        "Authorization request is no longer pending",
+        400,
+      );
     return redirectWithError(
       authRequest.redirectUri,
       "access_denied",
@@ -1202,54 +1605,68 @@ async function consentPost(
     store,
     nowSeconds(),
   );
+  if (!code)
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Authorization request is no longer pending",
+      400,
+    );
   return redirectWithCode(authRequest.redirectUri, code, authRequest.state);
 }
 
 async function adminClientsGet(
   request: Request,
-  env: RuntimeEnv,
   config: ReturnType<typeof loadConfig>,
   store: AuthStore,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
-  const admin = await requireAdmin(request, env, config, store);
+  const admin = await requireAdmin(request, config, store, identityProvider);
   if (admin instanceof Response) return admin;
   const csrf = csrfTokenForRequest(request);
-  return html(adminClientsPage(await store.listClients(), csrf, null), {
-    headers: { "set-cookie": csrfCookie(csrf) },
-  });
+  return adminClientsResponse(
+    request,
+    config,
+    await store.listClients(),
+    csrf,
+    null,
+  );
 }
 
 async function adminClientsPost(
   request: Request,
-  env: RuntimeEnv,
   config: ReturnType<typeof loadConfig>,
   store: AuthStore,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
-  const admin = await requireAdmin(request, env, config, store);
+  const admin = await requireAdmin(request, config, store, identityProvider);
   if (admin instanceof Response) return admin;
-  if (!requireSameOrigin(request, config.issuerUrl))
-    return html(
-      errorPage("Invalid request", "Same-origin form submission is required", {
-        status: 403,
-      }),
-      { status: 403 },
+  if (!requireSameOrigin(request, config.issuerUrl)) {
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Same-origin form submission is required",
+      403,
     );
+  }
   const form = await readForm(request);
-  if (!validCsrf(request, form))
-    return html(
-      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
-      { status: 403 },
+  if (!validCsrf(request, form)) {
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "CSRF validation failed",
+      403,
     );
+  }
   const action = form.get("action");
   if (action) {
     const clientId = form.get("client_id") || "";
     if (isBrowserSessionClientId(clientId)) {
-      return html(
-        errorPage("Not found", "Client is unavailable", {
-          status: 404,
-          error: "not_found",
-        }),
-        { status: 404 },
+      return negotiatedFormError(
+        request,
+        "not_found",
+        "Client is unavailable",
+        404,
       );
     }
     if (action === "disable")
@@ -1265,14 +1682,22 @@ async function adminClientsPost(
         nowSeconds(),
       );
       const csrf = csrfTokenForRequest(request);
-      return html(adminClientsPage(await store.listClients(), csrf, secret), {
-        headers: { "set-cookie": csrfCookie(csrf) },
-      });
+      return adminClientsResponse(
+        request,
+        config,
+        await store.listClients(),
+        csrf,
+        secret,
+      );
     }
     const csrf = csrfTokenForRequest(request);
-    return html(adminClientsPage(await store.listClients(), csrf, null), {
-      headers: { "set-cookie": csrfCookie(csrf) },
-    });
+    return adminClientsResponse(
+      request,
+      config,
+      await store.listClients(),
+      csrf,
+      null,
+    );
   }
   const input: ClientRegistrationInput = {
     type: form.get("type") === "confidential" ? "confidential" : "public",
@@ -1286,31 +1711,264 @@ async function adminClientsPost(
   };
   const result = await createClientRegistration(input, store, nowSeconds());
   const csrf = csrfTokenForRequest(request);
-  return html(
-    adminClientsPage(await store.listClients(), csrf, result.secret),
-    { headers: { "set-cookie": csrfCookie(csrf) } },
+  return adminClientsResponse(
+    request,
+    config,
+    await store.listClients(),
+    csrf,
+    result.secret,
   );
 }
 
 async function requireAdmin(
   request: Request,
-  env: RuntimeEnv,
   config: ReturnType<typeof loadConfig>,
   store: AuthStore,
+  identityProvider: UpstreamIdentityProvider,
 ): Promise<true | Response> {
-  const identity = requireSitesIdentity(request, env);
-  if (identity instanceof Response) return identity;
-  if (!config.adminEmails.includes(identity.email))
-    return html(
-      errorPage(
-        "Forbidden",
-        "Administrative access is not allowed for this account",
-        { status: 403, error: "forbidden" },
-      ),
-      { status: 403 },
+  const identity = identityProvider.read(request);
+  if (!identity) {
+    if (acceptsHtml(request))
+      return requireSitesIdentity(request, identityProvider) as Response;
+    return oauthError(
+      "login_required",
+      "ChatGPT sign-in inside ChatGPT Sites is required",
+      401,
+      {
+        actions: [
+          action(
+            "begin-session",
+            "Sign in to AittaDB",
+            "GET",
+            `${config.issuerUrl}/admin/clients`,
+            { authorization: { scheme: "sites-session" }, fields: [] },
+          ),
+        ],
+      },
     );
+  }
+  if (!config.adminEmails.includes(identity.email)) {
+    return acceptsHtml(request)
+      ? html(
+          errorPage(
+            "Forbidden",
+            "Administrative access is not allowed for this account",
+            { status: 403, error: "forbidden" },
+          ),
+          { status: 403 },
+        )
+      : oauthError(
+          "forbidden",
+          "Administrative access is not allowed for this account",
+          403,
+        );
+  }
   await store.findOrCreateUser(identity, nowSeconds());
   return true;
+}
+
+function adminClientsResponse(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  clients: readonly ClientView[],
+  csrf: string,
+  newSecret: string | null,
+): Response {
+  const headers = { "set-cookie": csrfCookie(csrf) };
+  if (acceptsHtml(request)) {
+    return html(adminClientsPage(clients, csrf, newSecret), { headers });
+  }
+  return hypermediaJson(
+    request,
+    adminClientsDocument(config.issuerUrl, clients, csrf, newSecret),
+    { headers },
+  );
+}
+
+function adminClientsDocument(
+  issuer: string,
+  clients: readonly ClientView[],
+  csrf: string,
+  newSecret: string | null,
+) {
+  const operationFields = (clientId: string, operation: string) => [
+    field("csrf_token", "CSRF token", "string", "body", {
+      required: true,
+      secret: true,
+      value: csrf,
+    }),
+    field("action", "Action", "string", "body", {
+      required: true,
+      value: operation,
+    }),
+    field("client_id", "Client ID", "string", "body", {
+      required: true,
+      value: clientId,
+    }),
+  ];
+  const actions: HypermediaAction[] = [
+    action(
+      "create-client",
+      "Create OAuth client",
+      "POST",
+      `${issuer}/admin/clients`,
+      {
+        type: "application/x-www-form-urlencoded",
+        authorization: { scheme: "sites-session" },
+        fields: [
+          field("csrf_token", "CSRF token", "string", "body", {
+            required: true,
+            secret: true,
+            value: csrf,
+          }),
+          field("name", "Client display name", "string", "body", {
+            required: true,
+            max_length: 120,
+          }),
+          field("type", "Client type", "string", "body", {
+            required: true,
+            value: "public",
+            options: [
+              { value: "public", title: "Public" },
+              { value: "confidential", title: "Confidential" },
+            ],
+          }),
+          field("redirect_uris", "Exact redirect URIs", "string", "body", {
+            required: true,
+            description: "One URI per line.",
+          }),
+          field("scopes", "Allowed scopes", "string", "body", {
+            required: true,
+            value:
+              "openid email profile offline_access storage.read storage.write storage.delete",
+          }),
+          field("origins", "Allowed browser origins", "string", "body", {
+            description: "One exact origin per line.",
+          }),
+        ],
+      },
+    ),
+  ];
+  for (const client of clients) {
+    actions.push(
+      action(
+        client.disabledAt ? "enable-client" : "disable-client",
+        client.disabledAt ? `Enable ${client.name}` : `Disable ${client.name}`,
+        "POST",
+        `${issuer}/admin/clients`,
+        {
+          type: "application/x-www-form-urlencoded",
+          authorization: { scheme: "sites-session" },
+          fields: operationFields(
+            client.id,
+            client.disabledAt ? "enable" : "disable",
+          ),
+        },
+      ),
+      action(
+        "revoke-client-grants",
+        `Revoke grants for ${client.name}`,
+        "POST",
+        `${issuer}/admin/clients`,
+        {
+          type: "application/x-www-form-urlencoded",
+          authorization: { scheme: "sites-session" },
+          fields: operationFields(client.id, "revoke_grants"),
+        },
+      ),
+    );
+    if (client.type === "confidential") {
+      actions.push(
+        action(
+          "rotate-client-secret",
+          `Rotate secret for ${client.name}`,
+          "POST",
+          `${issuer}/admin/clients`,
+          {
+            type: "application/x-www-form-urlencoded",
+            authorization: { scheme: "sites-session" },
+            fields: operationFields(client.id, "rotate_secret"),
+          },
+        ),
+      );
+    }
+  }
+  return resourceDocument({
+    type: "oauth-client-collection",
+    id: `${issuer}/admin/clients`,
+    data: {
+      clients: clients.map((client) => ({
+        id: client.id,
+        name: client.name,
+        type: client.type,
+        disabled: client.disabledAt !== null,
+        redirect_uris: [...client.redirectUris],
+        scopes: [...client.scopes],
+        origins: [...client.origins],
+        created_at: client.createdAt,
+      })),
+      ...(newSecret
+        ? { new_client_secret: newSecret, secret_displayed_once: true }
+        : {}),
+    },
+    links: [
+      link("self", `${issuer}/admin/clients`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("service", issuer, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("documentation", `${issuer}/docs`, { type: "text/html" }),
+    ],
+    actions,
+  });
+}
+
+function negotiatedFormError(
+  request: Request,
+  error: string,
+  description: string,
+  status: number,
+): Response {
+  return acceptsHtml(request)
+    ? html(
+        errorPage(titleForError(error, status), description, { status, error }),
+        {
+          status,
+        },
+      )
+    : oauthError(error, description, status);
+}
+
+function requireTransactionIdentity(
+  request: Request,
+  identityProvider: UpstreamIdentityProvider,
+  issuer: string,
+): UpstreamIdentity | Response {
+  const identity = identityProvider.read(request);
+  if (identity) return identity;
+  if (acceptsHtml(request))
+    return requireSitesIdentity(request, identityProvider);
+
+  const requestUrl = new URL(request.url);
+  const returnTo = `${requestUrl.pathname}${requestUrl.search}`;
+  const signIn = new URL("/signin-with-chatgpt", issuer);
+  signIn.searchParams.set("return_to", returnTo);
+  return oauthError(
+    "login_required",
+    "ChatGPT sign-in inside ChatGPT Sites is required",
+    401,
+    {
+      links: [
+        link("service", issuer, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("sign-in", signIn.toString(), { type: "text/html" }),
+      ],
+      actions: [
+        action("sign-in", "Sign in to continue", "GET", signIn.toString(), {
+          authorization: { scheme: "none" },
+          fields: [],
+        }),
+      ],
+    },
+  );
 }
 
 function validCsrf(request: Request, form: URLSearchParams): boolean {
@@ -1345,6 +2003,7 @@ export function isAittaDBRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/statistics" ||
     pathname === "/session" ||
     pathname === "/auth-ui.css" ||
     pathname === "/auth-ui.js" ||
@@ -1371,6 +2030,62 @@ export function isAssetRoute(pathname: string): boolean {
   );
 }
 
+function usesApplicationNegotiation(request: Request, url: URL): boolean {
+  const pathname = url.pathname;
+  if (
+    pathname === "/" ||
+    pathname === "/health" ||
+    pathname === "/statistics" ||
+    pathname === "/session" ||
+    pathname === "/device" ||
+    pathname === "/device/decision" ||
+    pathname === "/consent" ||
+    pathname.startsWith("/admin/")
+  ) {
+    return true;
+  }
+  if (pathname === "/authorize") {
+    return request.method === "GET" && !url.searchParams.has("client_id");
+  }
+  if (
+    request.method === "GET" &&
+    [
+      "/oauth/device_authorization",
+      "/oauth/token",
+      "/oauth/revoke",
+      "/oauth/introspect",
+    ].includes(pathname)
+  ) {
+    return true;
+  }
+  if (pathname === "/userinfo") return !bearerToken(request);
+  if (!pathname.startsWith("/storage/")) return false;
+  if (
+    request.method === "GET" &&
+    pathname.startsWith("/storage/files/") &&
+    !acceptsHtml(request) &&
+    !acceptsJson(request)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function usesApplicationErrorNegotiation(request: Request): boolean {
+  const pathname = new URL(request.url).pathname;
+  return (
+    pathname === "/" ||
+    pathname === "/health" ||
+    pathname === "/statistics" ||
+    pathname === "/session" ||
+    pathname === "/device" ||
+    pathname === "/device/decision" ||
+    pathname === "/consent" ||
+    pathname.startsWith("/admin/") ||
+    pathname.startsWith("/storage/")
+  );
+}
+
 function scheduleCleanup(
   store: AuthStore,
   ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
@@ -1383,6 +2098,7 @@ function scheduleCleanup(
 
 function isCorsControlledRoute(pathname: string): boolean {
   return (
+    pathname === "/statistics" ||
     pathname.startsWith("/oauth/") ||
     pathname === "/userinfo" ||
     pathname.startsWith("/storage/") ||
