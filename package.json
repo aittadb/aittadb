@@ -25,6 +25,7 @@
     "db:check": "node --import tsx scripts/check-migrations.ts",
     "agents:check": "node --import tsx scripts/check-agents-size.ts",
     "audit:high": "npm audit --audit-level=high",
+    "admin-key:generate": "node --import tsx scripts/generate-admin-access-key.ts",
     "keys:generate": "node --import tsx scripts/generate-keypair.ts",
     "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run openapi:check && npm run swagger:check && npm run db:check && npm run agents:check && npm run audit:high && npm run build"
   },
