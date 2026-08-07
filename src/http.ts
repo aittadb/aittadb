@@ -87,6 +87,9 @@ export function cors(
 export function requireSameOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return true;
+  if (origin === "null") {
+    return request.headers.get("sec-fetch-site") === "same-origin";
+  }
   return origin === new URL(request.url).origin;
 }
 
