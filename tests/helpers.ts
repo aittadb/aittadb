@@ -62,7 +62,7 @@ export async function testEnv(
   const privateJwk = await crypto.subtle.exportKey("jwk", keyPair.privateKey);
   return {
     NODE_ENV: "test",
-    ISSUER_URL: "https://broker.example.test",
+    ISSUER_URL: "https://aittadb.example.test",
     JWT_KEY_ID: "test-key",
     JWT_PRIVATE_JWK: JSON.stringify(privateJwk),
     ADMIN_EMAILS: "admin@example.test",

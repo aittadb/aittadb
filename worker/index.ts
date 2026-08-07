@@ -4,7 +4,7 @@ import {
   handleImageOptimization,
 } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { createAuthBroker } from "../src/handler";
+import { createAittaDB } from "../src/handler";
 
 export interface Env {
   ASSETS: Fetcher;
@@ -71,9 +71,9 @@ const worker = {
       );
     }
 
-    const broker = await createAuthBroker(env, ctx);
-    const brokerResponse = await broker.fetch(request);
-    if (brokerResponse) return brokerResponse;
+    const aittaDB = await createAittaDB(env, ctx);
+    const aittaDBResponse = await aittaDB.fetch(request);
+    if (aittaDBResponse) return aittaDBResponse;
 
     return handler.fetch(request, env, ctx);
   },

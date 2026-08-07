@@ -51,8 +51,8 @@ export function requireSitesIdentity(
 export function safeRelativeReturnPath(value: string): string {
   if (!value.startsWith("/") || value.startsWith("//")) return "/";
   try {
-    const url = new URL(value, "https://sites-auth-broker.local");
-    if (url.origin !== "https://sites-auth-broker.local") return "/";
+    const url = new URL(value, "https://aittadb.local");
+    if (url.origin !== "https://aittadb.local") return "/";
     if (
       url.pathname === "/signin-with-chatgpt" ||
       url.pathname === "/signout-with-chatgpt"

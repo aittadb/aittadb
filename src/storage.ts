@@ -164,7 +164,7 @@ export async function storageEndpoint(
         headers: {
           "content-type": file.contentType,
           "cache-control": "no-store",
-          "x-sites-auth-broker-storage-key": encodeURIComponent(file.key),
+          "x-aittadb-storage-key": encodeURIComponent(file.key),
         },
       });
     }

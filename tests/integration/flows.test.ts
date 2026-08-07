@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { stat } from "node:fs/promises";
 import { loadConfig } from "../../src/config";
-import { createAuthBrokerWithStore } from "../../src/handler";
+import { createAittaDBWithStore } from "../../src/handler";
 import { MemoryAuthStore } from "../../src/store/memory";
 import { createClientRegistration, issueTokens } from "../../src/oauth";
 import { nowSeconds, sha256 } from "../../src/crypto";
@@ -10,10 +10,10 @@ import { cookieValue, form, testEnv } from "../helpers";
 
 test("metadata routes negotiate HTML for browsers and JSON for API clients", async () => {
   const env = await testEnv();
-  const app = createAuthBrokerWithStore(env, new MemoryAuthStore());
+  const app = createAittaDBWithStore(env, new MemoryAuthStore());
 
   const apiRoot = await app.fetch(
-    new Request("https://broker.example.test/", {
+    new Request("https://aittadb.example.test/", {
       headers: { accept: "application/json" },
     }),
   );
@@ -33,7 +33,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     _links: { docs: { href: string }; oidcConfiguration: { href: string } };
     actions: { deviceAuthorization: { method: string } };
   };
-  assert.equal(apiRootJson.service, "Sites Auth Broker");
+  assert.equal(apiRootJson.service, "AittaDB");
   assert.equal(
     apiRootJson.upstreamSignIn.source,
     "ChatGPT sign-in inside ChatGPT Sites",
@@ -44,19 +44,19 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   assert.equal(apiRootJson.upstreamSignIn.stableSubjectSupplied, false);
   assert.equal(apiRootJson.upstreamSignIn.credentialsForwarded, false);
-  assert.equal(apiRootJson.tokenAuthority, "Sites Auth Broker");
+  assert.equal(apiRootJson.tokenAuthority, "AittaDB");
   assert.equal(
     apiRootJson._links.docs.href,
-    "https://broker.example.test/docs",
+    "https://aittadb.example.test/docs",
   );
   assert.equal(
     apiRootJson._links.oidcConfiguration.href,
-    "https://broker.example.test/.well-known/openid-configuration",
+    "https://aittadb.example.test/.well-known/openid-configuration",
   );
   assert.equal(apiRootJson.actions.deviceAuthorization.method, "POST");
 
   const browserRoot = await app.fetch(
-    new Request("https://broker.example.test/", {
+    new Request("https://aittadb.example.test/", {
       headers: {
         accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -64,59 +64,90 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     }),
   );
   const browserRootHtml = await browserRoot!.text();
-  assert.match(browserRootHtml, /<h1>Sites Auth Broker<\/h1>/);
+  assert.match(browserRootHtml, /class="brand-heading" aria-label="AittaDB"/);
+  assert.match(browserRootHtml, /class="brand-aitta">Aitta<\/span>/);
+  assert.match(browserRootHtml, /class="brand-db">DB<\/span>/);
   assert.match(browserRootHtml, /href="\/auth-ui\.css"/);
   assert.doesNotMatch(browserRootHtml, /<style>/);
+  assert.match(browserRootHtml, /class="aittadb-page"/);
+  assert.match(browserRootHtml, /class="aittadb-shell/);
   assert.match(browserRootHtml, /class="visual-panel"/);
-  assert.match(browserRootHtml, /src="\/broker-aperture\.jpg"/);
+  assert.match(browserRootHtml, /src="\/aittadb-mark\.svg"/);
+  assert.match(browserRootHtml, /src="\/aittadb-boundary\.jpg"/);
+  assert.match(
+    browserRootHtml,
+    /property="og:image" content="https:\/\/aittadb\.example\.test\/og\.png"/,
+  );
+  assert.match(browserRootHtml, /name="twitter:card"/);
   assert.match(browserRootHtml, /ChatGPT sign-in/);
   assert.match(browserRootHtml, /separate local UUID/);
   assert.match(browserRootHtml, /tokens are not OpenAI or ChatGPT tokens/);
   assert.doesNotMatch(browserRootHtml, /Sites identity/);
-  assert.match(
-    browserRootHtml,
-    /https:\/\/github\.com\/sendanor\/sites-auth-broker/,
-  );
+  assert.doesNotMatch(browserRootHtml, /Sites Auth Broker/);
+  assert.match(browserRootHtml, /https:\/\/github\.com\/aittadb\/aittadb/);
   assert.match(browserRootHtml, /View source on GitHub/);
   assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
+  const contentSecurityPolicy =
+    browserRoot!.headers.get("content-security-policy") ?? "";
+  assert.match(contentSecurityPolicy, /font-src 'self'/);
+  assert.match(contentSecurityPolicy, /img-src 'self'/);
 
   const browserCss = await app.fetch(
-    new Request("https://broker.example.test/auth-ui.css", {
+    new Request("https://aittadb.example.test/auth-ui.css", {
       headers: { accept: "text/css,*/*;q=0.1" },
     }),
   );
   assert.match(browserCss!.headers.get("content-type") ?? "", /^text\/css/);
   const browserCssText = await browserCss!.text();
-  assert.match(browserCssText, /\.sab-shell/);
+  assert.match(browserCssText, /@font-face\{font-family:Inter/);
+  assert.match(browserCssText, /\.aittadb-shell/);
+  assert.match(browserCssText, /\.brand-wordmark/);
+  assert.match(browserCssText, /font-weight:750/);
+  assert.match(browserCssText, /#0b234a/);
+  assert.match(browserCssText, /#f04a32/);
+  assert.match(browserCssText, /#159ca6/);
   assert.match(browserCssText, /\.visual-image/);
   assert.match(browserCssText, /\.repo-link/);
 
-  const visualAsset = await stat(
-    new URL("../../public/broker-aperture.jpg", import.meta.url),
-  );
+  const [visualAsset, markAsset, fontAsset, socialAsset] = await Promise.all([
+    stat(new URL("../../public/aittadb-boundary.jpg", import.meta.url)),
+    stat(new URL("../../public/aittadb-mark.svg", import.meta.url)),
+    stat(
+      new URL(
+        "../../public/fonts/inter-latin-wght-normal.woff2",
+        import.meta.url,
+      ),
+    ),
+    stat(new URL("../../public/og.png", import.meta.url)),
+  ]);
   assert.ok(visualAsset.size > 100_000);
+  assert.ok(markAsset.size > 500);
+  assert.ok(fontAsset.size > 40_000);
+  assert.ok(socialAsset.size > 100_000);
   const delegatedAsset = await app.fetch(
-    new Request("https://broker.example.test/broker-aperture.jpg"),
+    new Request("https://aittadb.example.test/aittadb-boundary.jpg"),
   );
   assert.equal(delegatedAsset, null);
 
   const cliHealth = await app.fetch(
-    new Request("https://broker.example.test/health", {
+    new Request("https://aittadb.example.test/health", {
       headers: { accept: "*/*" },
     }),
   );
   const cliHealthJson = (await cliHealth?.json()) as {
     ok: boolean;
+    service: string;
     _links: { service: { href: string } };
   };
   assert.equal(cliHealthJson.ok, true);
+  assert.equal(cliHealthJson.service, "aittadb");
   assert.equal(
     cliHealthJson._links.service.href,
-    "https://broker.example.test",
+    "https://aittadb.example.test",
   );
 
   const browserHealth = await app.fetch(
-    new Request("https://broker.example.test/health", {
+    new Request("https://aittadb.example.test/health", {
       headers: {
         accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -129,7 +160,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserHealth!.headers.get("content-type") ?? "", /^text\/html/);
 
   const apiMissing = await app.fetch(
-    new Request("https://broker.example.test/missing", {
+    new Request("https://aittadb.example.test/missing", {
       headers: { accept: "application/json" },
     }),
   );
@@ -144,7 +175,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiMissingJson.actions.token.method, "POST");
 
   const browserMissing = await app.fetch(
-    new Request("https://broker.example.test/missing", {
+    new Request("https://aittadb.example.test/missing", {
       headers: {
         accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -154,12 +185,12 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   const browserMissingHtml = await browserMissing!.text();
   assert.equal(browserMissing?.status, 404);
   assert.match(browserMissingHtml, /<h1>Not found<\/h1>/);
-  assert.match(browserMissingHtml, /class="sab-shell/);
+  assert.match(browserMissingHtml, /class="aittadb-shell/);
   assert.match(browserMissingHtml, /This request stopped here/);
-  assert.match(browserMissingHtml, /src="\/broker-aperture\.jpg"/);
+  assert.match(browserMissingHtml, /src="\/aittadb-boundary\.jpg"/);
 
   const forbiddenAdmin = await app.fetch(
-    new Request("https://broker.example.test/admin/clients", {
+    new Request("https://aittadb.example.test/admin/clients", {
       headers: {
         accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -175,7 +206,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {
   const env = await testEnv({ DEVICE_POLL_INTERVAL_SECONDS: "1" });
   const store = new MemoryAuthStore();
-  const app = createAuthBrokerWithStore(env, store);
+  const app = createAittaDBWithStore(env, store);
   const { client } = await createClientRegistration(
     {
       type: "public",
@@ -189,7 +220,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   );
 
   const device = await app.fetch(
-    new Request("https://broker.example.test/oauth/device_authorization", {
+    new Request("https://aittadb.example.test/oauth/device_authorization", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form({
@@ -207,12 +238,12 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   };
   assert.equal(
     deviceJson._links.verification.href,
-    "https://broker.example.test/device",
+    "https://aittadb.example.test/device",
   );
   assert.equal(deviceJson.actions.poll.method, "POST");
 
   const pending = await app.fetch(
-    new Request("https://broker.example.test/oauth/token", {
+    new Request("https://aittadb.example.test/oauth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form({
@@ -233,18 +264,18 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
 
   const entry = await app.fetch(
     new Request(
-      `https://broker.example.test/device?user_code=${deviceJson.user_code}`,
+      `https://aittadb.example.test/device?user_code=${deviceJson.user_code}`,
     ),
   );
   assert.match(await entry!.text(), /A short code connects two moments/);
-  const csrf = cookieValue(entry!, "sab_csrf");
+  const csrf = cookieValue(entry!, "aittadb_csrf");
   const continueResponse = await app.fetch(
-    new Request("https://broker.example.test/device", {
+    new Request("https://aittadb.example.test/device", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
-        cookie: `sab_csrf=${csrf}`,
-        origin: "https://broker.example.test",
+        cookie: `aittadb_csrf=${csrf}`,
+        origin: "https://aittadb.example.test",
       },
       body: form({ csrf_token: csrf, user_code: deviceJson.user_code }),
     }),
@@ -253,14 +284,14 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
     await continueResponse!.text(),
     /Match the request before the exchange/,
   );
-  const decisionCsrf = cookieValue(continueResponse!, "sab_csrf");
+  const decisionCsrf = cookieValue(continueResponse!, "aittadb_csrf");
   const approved = await app.fetch(
-    new Request("https://broker.example.test/device/decision", {
+    new Request("https://aittadb.example.test/device/decision", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
-        cookie: `sab_csrf=${decisionCsrf}`,
-        origin: "https://broker.example.test",
+        cookie: `aittadb_csrf=${decisionCsrf}`,
+        origin: "https://aittadb.example.test",
       },
       body: form({
         csrf_token: decisionCsrf,
@@ -273,7 +304,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   await new Promise((resolve) => setTimeout(resolve, 1100));
 
   const token = await app.fetch(
-    new Request("https://broker.example.test/oauth/token", {
+    new Request("https://aittadb.example.test/oauth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form({
@@ -294,7 +325,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   assert.notEqual(tokenJson.access_token.includes("user@example.test"), true);
 
   const userinfo = await app.fetch(
-    new Request("https://broker.example.test/userinfo", {
+    new Request("https://aittadb.example.test/userinfo", {
       headers: { authorization: `Bearer ${tokenJson.access_token}` },
     }),
   );
@@ -318,7 +349,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
     nowSeconds(),
   );
   const introspection = await app.fetch(
-    new Request("https://broker.example.test/oauth/introspect", {
+    new Request("https://aittadb.example.test/oauth/introspect", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
@@ -333,7 +364,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   );
 
   const refreshed = await app.fetch(
-    new Request("https://broker.example.test/oauth/token", {
+    new Request("https://aittadb.example.test/oauth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form({
@@ -348,7 +379,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
   );
 
   const reuse = await app.fetch(
-    new Request("https://broker.example.test/oauth/token", {
+    new Request("https://aittadb.example.test/oauth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form({
@@ -367,7 +398,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
 test("authorization code with PKCE enforces exact redirect URI and one-time code use", async () => {
   const env = await testEnv();
   const store = new MemoryAuthStore();
-  const app = createAuthBrokerWithStore(env, store);
+  const app = createAittaDBWithStore(env, store);
   const verifier =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~";
   const { client } = await createClientRegistration(
@@ -384,30 +415,30 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
 
   const bad = await app.fetch(
     new Request(
-      `https://broker.example.test/authorize?response_type=code&client_id=${client.id}&redirect_uri=${encodeURIComponent("https://client.example.test/other")}&scope=openid&state=s&code_challenge=${await sha256(verifier)}&code_challenge_method=S256`,
+      `https://aittadb.example.test/authorize?response_type=code&client_id=${client.id}&redirect_uri=${encodeURIComponent("https://client.example.test/other")}&scope=openid&state=s&code_challenge=${await sha256(verifier)}&code_challenge_method=S256`,
     ),
   );
   assert.equal(bad?.status, 400);
 
   const authorize = await app.fetch(
     new Request(
-      `https://broker.example.test/authorize?response_type=code&client_id=${client.id}&redirect_uri=${encodeURIComponent("https://client.example.test/callback")}&scope=openid%20email%20profile&state=s&nonce=n&code_challenge=${await sha256(verifier)}&code_challenge_method=S256`,
+      `https://aittadb.example.test/authorize?response_type=code&client_id=${client.id}&redirect_uri=${encodeURIComponent("https://client.example.test/callback")}&scope=openid%20email%20profile&state=s&nonce=n&code_challenge=${await sha256(verifier)}&code_challenge_method=S256`,
     ),
   );
   assert.equal(authorize?.status, 302);
   const consentLocation = authorize?.headers.get("location") ?? "";
   const consent = await app.fetch(new Request(consentLocation));
   assert.match(await consent!.text(), /Scope stays visible and explicit/);
-  const csrf = cookieValue(consent!, "sab_csrf");
+  const csrf = cookieValue(consent!, "aittadb_csrf");
   const requestId =
     new URL(consentLocation).searchParams.get("request_id") ?? "";
   const approved = await app.fetch(
-    new Request("https://broker.example.test/consent", {
+    new Request("https://aittadb.example.test/consent", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
-        cookie: `sab_csrf=${csrf}`,
-        origin: "https://broker.example.test",
+        cookie: `aittadb_csrf=${csrf}`,
+        origin: "https://aittadb.example.test",
       },
       body: form({
         csrf_token: csrf,
@@ -420,7 +451,7 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
   assert.equal(callback.searchParams.get("state"), "s");
   const code = callback.searchParams.get("code") ?? "";
   const token = await app.fetch(
-    new Request("https://broker.example.test/oauth/token", {
+    new Request("https://aittadb.example.test/oauth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form({
@@ -435,7 +466,7 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
   assert.ok(((await token?.json()) as { access_token: string }).access_token);
 
   const secondUse = await app.fetch(
-    new Request("https://broker.example.test/oauth/token", {
+    new Request("https://aittadb.example.test/oauth/token", {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form({
@@ -453,11 +484,13 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
   );
 });
 
-test("broker storage API stores D1 records and R2 files for the local user and client", async () => {
-  const env = await testEnv();
+test("AittaDB storage API stores D1 records and R2 files for the local user and client", async () => {
+  const env = await testEnv({
+    ALLOWED_CORS_ORIGINS: "https://client.example.test",
+  });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
-  const app = createAuthBrokerWithStore(env, store);
+  const app = createAittaDBWithStore(env, store);
   const now = nowSeconds();
   const user = await store.findOrCreateUser(
     {
@@ -490,7 +523,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   const accessToken = String(tokenSet.access_token);
 
   const recordPut = await app.fetch(
-    new Request("https://broker.example.test/storage/records/app/settings", {
+    new Request("https://aittadb.example.test/storage/records/app/settings", {
       method: "PUT",
       headers: {
         authorization: `Bearer ${accessToken}`,
@@ -512,7 +545,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   assert.equal(recordPutJson.actions.replace.method, "PUT");
 
   const recordList = await app.fetch(
-    new Request("https://broker.example.test/storage/records", {
+    new Request("https://aittadb.example.test/storage/records", {
       headers: { authorization: `Bearer ${accessToken}` },
     }),
   );
@@ -526,7 +559,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   );
   assert.equal(
     recordListJson.actions.put.href,
-    "https://broker.example.test/storage/records/{key}",
+    "https://aittadb.example.test/storage/records/{key}",
   );
 
   const { client: writeOnlyClient } = await createClientRegistration(
@@ -550,7 +583,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
     now,
   });
   const missingScope = await app.fetch(
-    new Request("https://broker.example.test/storage/records/app/settings", {
+    new Request("https://aittadb.example.test/storage/records/app/settings", {
       headers: {
         authorization: `Bearer ${String(writeOnlyTokens.access_token)}`,
       },
@@ -563,7 +596,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   );
 
   const filePut = await app.fetch(
-    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
+    new Request("https://aittadb.example.test/storage/files/notes/hello.txt", {
       method: "PUT",
       headers: {
         authorization: `Bearer ${accessToken}`,
@@ -585,16 +618,32 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   assert.ok(filePutJson.sha256);
 
   const fileGet = await app.fetch(
-    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
-      headers: { authorization: `Bearer ${accessToken}` },
+    new Request("https://aittadb.example.test/storage/files/notes/hello.txt", {
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        origin: "https://client.example.test",
+      },
     }),
   );
   assert.equal(fileGet?.status, 200);
   assert.equal(fileGet?.headers.get("content-type"), "text/plain");
+  assert.equal(
+    fileGet?.headers.get("x-aittadb-storage-key"),
+    "notes%2Fhello.txt",
+  );
+  assert.equal(fileGet?.headers.get("x-sites-auth-broker-storage-key"), null);
+  assert.equal(
+    fileGet?.headers.get("access-control-allow-origin"),
+    "https://client.example.test",
+  );
+  assert.equal(
+    fileGet?.headers.get("access-control-expose-headers"),
+    "x-aittadb-storage-key",
+  );
   assert.equal(await fileGet?.text(), "hello storage");
 
   const fileList = await app.fetch(
-    new Request("https://broker.example.test/storage/files", {
+    new Request("https://aittadb.example.test/storage/files", {
       headers: { authorization: `Bearer ${accessToken}` },
     }),
   );
@@ -606,7 +655,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   );
 
   const deleteRecord = await app.fetch(
-    new Request("https://broker.example.test/storage/records/app/settings", {
+    new Request("https://aittadb.example.test/storage/records/app/settings", {
       method: "DELETE",
       headers: { authorization: `Bearer ${accessToken}` },
     }),
@@ -617,7 +666,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   );
 
   const deleteFile = await app.fetch(
-    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
+    new Request("https://aittadb.example.test/storage/files/notes/hello.txt", {
       method: "DELETE",
       headers: { authorization: `Bearer ${accessToken}` },
     }),
@@ -628,7 +677,7 @@ test("broker storage API stores D1 records and R2 files for the local user and c
   );
 
   const missingFile = await app.fetch(
-    new Request("https://broker.example.test/storage/files/notes/hello.txt", {
+    new Request("https://aittadb.example.test/storage/files/notes/hello.txt", {
       headers: { authorization: `Bearer ${accessToken}` },
     }),
   );

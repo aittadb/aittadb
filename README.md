@@ -1,14 +1,49 @@
-# Sites Auth Broker
+# AittaDB
 
-[GitHub repository](https://github.com/sendanor/sites-auth-broker)
+<img src="public/aittadb-mark.svg" width="96" height="96" alt="AittaDB logo">
 
-Sites Auth Broker is an experimental independent authentication broker based on a ChatGPT sign-in performed inside ChatGPT Sites. It maps the server-side identity signal to a separate local user and issues OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.
+[GitHub repository](https://github.com/aittadb/aittadb)
+
+**An application backend that runs entirely on ChatGPT Sites.**
+
+AittaDB provides authentication, persistent data, object storage, and a path toward persistent events through a single self-contained ChatGPT Sites deployment. It is designed for applications that need backend capabilities without requiring separate application servers, database servers, object-storage services, or authentication infrastructure.
+
+> **Experimental:** AittaDB is under active development. Its interfaces and operational requirements may change before a stable release.
 
 It is not an official OpenAI project. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
 
-The service creates its own local user record with an immutable UUID subject. The upstream email address is used only to locate or create that local user. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
+The service creates its own user record with an immutable UUID subject. The upstream email address is used only to locate or create that AittaDB user. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
 
 Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication.
+
+## Built for ChatGPT Sites
+
+AittaDB is designed to run and be hosted on [ChatGPT Sites](https://learn.chatgpt.com/docs/sites). It uses capabilities provided by the Sites platform:
+
+- Managed application hosting and runtime.
+- ChatGPT sign-in supplied inside the Sites trust boundary.
+- D1 storage for persistent structured data.
+- R2 object storage for files and other binary data.
+- Hosted environment configuration and secrets.
+
+Because these capabilities are provided by ChatGPT Sites, a core AittaDB deployment does not need infrastructure outside Sites. Once deployed, AittaDB can act as a shared backend for other websites, ChatGPT Sites, services, native applications, command-line tools, and AI agents through its HTTP APIs.
+
+## What AittaDB Provides
+
+- ChatGPT-based upstream user identity mapped to an independent AittaDB user.
+- OAuth 2.0 and OpenID Connect sessions for third-party applications.
+- Persistent structured application data.
+- Object and file storage.
+- HTTP APIs for applications, services, and AI agents.
+- Persistent events and long-polling delivery as a planned capability, not part of the current MVP.
+
+The goal is to let developers build persistent, authenticated applications without first deploying and maintaining a conventional backend stack.
+
+## Why AittaDB?
+
+In Finnish, an _aitta_ is a traditional detached storehouse on a farmstead. It was built to keep grain, food, tools, and other valuable supplies safe and available.
+
+AittaDB follows the same idea for software: a dependable place for an application's identity, data, files, and events.
 
 ## MVP Capabilities
 
@@ -18,7 +53,7 @@ Current releases are source-available under FSL-1.1-MIT. Each released version c
 - ES256 JWT signing through Web Crypto with a configured private JWK.
 - Opaque hashed refresh tokens with rotation and reuse detection.
 - D1-backed durable state with checked-in migrations.
-- Per-user, per-client broker storage: JSON records in D1 and file bytes in R2.
+- Per-user, per-client application storage: JSON records in D1 and file bytes in R2.
 - Minimal ChatGPT-sign-in-protected browser forms inside ChatGPT Sites for device approval, consent, and admin client bootstrap.
 
 ## Local Setup
@@ -65,14 +100,49 @@ npm run validate
 
 Browser-facing routes and errors use content negotiation. Browsers that prefer `text/html` receive consistent authentication-service HTML views for metadata, health, device entry, consent, administration, and error/outcome pages. API clients that request JSON, or send generic CLI-style `Accept: */*`, receive JSON. JSON metadata and JSON errors are hypermedia-oriented and advertise `_links` and `actions` so clients can discover available operations instead of hard-coding every route. OAuth token success responses remain protocol-standard and do not add decorative browser content.
 
-The browser UI uses a shared responsive auth-service shell with page-aware trust-boundary copy and the original same-origin `broker-aperture.jpg` artwork. The image depicts an upstream signal passing through an independent broker and resolving into local credentials. Styles come from `/auth-ui.css`; the UI loads no external fonts, images, or third-party client scripts.
+The browser UI uses a shared responsive AittaDB shell with page-aware trust-boundary copy, the same-origin `aittadb-boundary.jpg` artwork, the supplied `aittadb-mark.svg` storehouse mark, and an AittaDB-specific `og.png` social card. Inter is self-hosted from `/fonts/inter-latin-wght-normal.woff2`, with `system-ui`, `Segoe UI`, and `sans-serif` fallbacks. Styles come from `/auth-ui.css`; the UI loads no third-party runtime fonts, images, tracking code, or client scripts.
 
-## Broker Storage
+## Application Storage
 
-Client applications may request `storage.read`, `storage.write`, and `storage.delete` local scopes. These scopes authorize storage only inside Sites Auth Broker. They do not grant access to ChatGPT, OpenAI, conversations, files, Projects, connectors, subscriptions, billing, or API quota.
+Client applications may request `storage.read`, `storage.write`, and `storage.delete` AittaDB scopes. These scopes authorize storage only inside AittaDB. They do not grant access to ChatGPT, OpenAI, conversations, files, Projects, connectors, subscriptions, billing, or API quota.
 
-Storage is isolated by the immutable local user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2 at `/storage/files/{key}`. Caller-provided keys are logical metadata; the broker generates physical R2 object keys.
+Storage is isolated by the immutable AittaDB user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2 at `/storage/files/{key}`. Caller-provided keys are logical metadata; AittaDB generates physical R2 object keys.
 
 ## ChatGPT Sites Sign-In Boundary
 
 ChatGPT sign-in is supplied inside ChatGPT Sites through Sites-owned `/signin-with-chatgpt` and `/signout-with-chatgpt` routes. This service reads only server-side `oai-authenticated-user-email`, optional `oai-authenticated-user-full-name`, and the full-name encoding header. It never forwards or exposes ChatGPT cookies, credentials, sessions, or tokens.
+
+## Contributing
+
+AittaDB is under active development. You can contribute by:
+
+- Deploying and testing AittaDB on ChatGPT Sites.
+- Reporting bugs and compatibility issues.
+- Proposing applications and real-world use cases.
+- Building client libraries and integrations.
+- Improving documentation.
+- Reviewing security and privacy.
+- Submitting focused pull requests.
+- Supporting the project as an early startup investor.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the instructions in each AittaDB repository before contributing.
+
+## Early Investors
+
+AittaDB is currently in its pre-startup stage. In addition to technical contributions, I am open to conversations with people interested in supporting the project as early startup investors.
+
+This is currently a friends-and-family-style phase, although I am very open to making new friends who believe in the idea.
+
+This is an invitation to start a conversation rather than an announcement of a formal funding round. If you are interested, contact me through [my GitHub profile](https://github.com/thejhh).
+
+## Resources
+
+- Explore the [AittaDB repositories](https://github.com/aittadb).
+- Read each repository's documentation.
+- Use [GitHub Issues](https://github.com/aittadb/aittadb/issues) for bug reports and feature proposals.
+- Read the [ChatGPT Sites documentation](https://learn.chatgpt.com/docs/sites).
+- Visit the founder's GitHub profile: [@thejhh](https://github.com/thejhh).
+
+## Fun Fact
+
+The name combines _aitta_ with _DB_: a traditional farm storehouse reimagined as hosted application infrastructure.

@@ -1,7 +1,7 @@
 {
-  "name": "sites-auth-broker",
+  "name": "aittadb",
   "version": "0.1.0",
-  "description": "An independent authentication broker that converts ChatGPT Sites identity into standard OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.",
+  "description": "An independent hosted application backend with ChatGPT sign-in, OAuth 2.0 and OpenID Connect sessions, and per-user D1/R2 storage.",
   "private": true,
   "author": "Jaakko Heusala <jheusala@iki.fi>",
   "license": "FSL-1.1-MIT",
@@ -32,6 +32,7 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
     "@eslint/js": "9.39.4",
+    "@fontsource-variable/inter": "^5.3.0",
     "@next/eslint-plugin-next": "16.2.6",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",

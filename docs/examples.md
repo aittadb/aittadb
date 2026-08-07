@@ -51,7 +51,7 @@ make generate-local-jwt-key
 
 The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is ignored by Git.
 
-## Broker Storage
+## AittaDB Storage
 
 Register a client that is allowed to request `storage.read`, `storage.write`, and `storage.delete`. After the user approves those local scopes, use the returned access token with the storage API.
 
@@ -80,4 +80,4 @@ curl -s -X PUT "$ISSUER_URL/storage/files/notes/hello.txt" \
   --data-binary @hello.txt
 ```
 
-The logical key in the URL is application metadata. Sites Auth Broker generates the physical R2 key and isolates data by local user UUID and OAuth client ID.
+The logical key in the URL is application metadata. AittaDB generates the physical R2 key and isolates data by its immutable user UUID and OAuth client ID.

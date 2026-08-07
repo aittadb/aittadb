@@ -113,7 +113,7 @@ export function addSecurityHeaders(headers: Headers): void {
   headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
   headers.set(
     "content-security-policy",
-    "default-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   );
 }
 
@@ -151,6 +151,7 @@ export function cors(
   headers.set("vary", "Origin");
   headers.set("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
   headers.set("access-control-allow-headers", "authorization,content-type");
+  headers.set("access-control-expose-headers", "x-aittadb-storage-key");
   return headers;
 }
 
@@ -197,7 +198,7 @@ export function parseCookies(request: Request): Map<string, string> {
 }
 
 export function csrfCookie(value: string): string {
-  return `sab_csrf=${value}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=900`;
+  return `aittadb_csrf=${value}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=900`;
 }
 
 export function acceptsHtml(request: Request): boolean {

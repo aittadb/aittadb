@@ -45,29 +45,29 @@ import {
   verifyAccessToken,
 } from "./oauth";
 
-export interface BrokerApp {
+export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
 }
 
-export async function createAuthBroker(
+export async function createAittaDB(
   env: RuntimeEnv,
   ctx?: { waitUntil(promise: Promise<unknown>): void },
-): Promise<BrokerApp> {
-  const fallbackUrl = env.ISSUER_URL ?? "https://sites-auth-broker.local";
+): Promise<AittaDBApp> {
+  const fallbackUrl = env.ISSUER_URL ?? "https://aittadb.local";
   const config = loadConfig(env, fallbackUrl);
   const store = env.DB ? new D1AuthStore(env.DB) : null;
   if (store) {
     await store.migrate();
     ctx?.waitUntil(store.cleanup(nowSeconds()));
   }
-  return createAuthBrokerWithStore(env, store, config);
+  return createAittaDBWithStore(env, store, config);
 }
 
-export function createAuthBrokerWithStore(
+export function createAittaDBWithStore(
   env: RuntimeEnv,
   store: AuthStore | null,
-  config = loadConfig(env, env.ISSUER_URL ?? "https://sites-auth-broker.local"),
-): BrokerApp {
+  config = loadConfig(env, env.ISSUER_URL ?? "https://aittadb.local"),
+): AittaDBApp {
   return {
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
@@ -78,11 +78,11 @@ export function createAuthBrokerWithStore(
         return finalizeResponse(request, corsHeaders, config);
       if (request.method === "OPTIONS")
         return new Response(null, { status: 204, headers: corsHeaders });
-      if (!isBrokerRoute(url.pathname)) {
+      if (!isAittaDBRoute(url.pathname)) {
         if (isAssetRoute(url.pathname)) return null;
         return finalizeResponse(
           request,
-          oauthError("not_found", "No broker route matches this request", 404),
+          oauthError("not_found", "No AittaDB route matches this request", 404),
           config,
           corsHeaders,
         );
@@ -136,7 +136,7 @@ async function route(
 ): Promise<Response> {
   if (url.pathname === "/" && request.method === "GET") {
     const metadata = {
-      service: "Sites Auth Broker",
+      service: "AittaDB",
       issuer: config.issuerUrl,
       docs: `${config.issuerUrl}/docs`,
       openapi: `${config.issuerUrl}/openapi.json`,
@@ -147,7 +147,7 @@ async function route(
         stableSubjectSupplied: false,
         credentialsForwarded: false,
       },
-      tokenAuthority: "Sites Auth Broker",
+      tokenAuthority: "AittaDB",
       _links: {
         self: { href: config.issuerUrl },
         health: { href: `${config.issuerUrl}/health` },
@@ -238,7 +238,7 @@ async function route(
   if (url.pathname === "/health" && request.method === "GET") {
     const status = {
       ok: true,
-      service: "sites-auth-broker",
+      service: "aittadb",
       d1: Boolean(store),
       r2: Boolean(env.BUCKET),
       _links: {
@@ -339,7 +339,7 @@ async function route(
   if (url.pathname === "/admin/clients" && request.method === "POST") {
     return adminClientsPost(request, env, config, store);
   }
-  return oauthError("not_found", "No broker route matches this request", 404);
+  return oauthError("not_found", "No AittaDB route matches this request", 404);
 }
 
 async function finalizeResponse(
@@ -795,7 +795,7 @@ async function requireAdmin(
 }
 
 function validCsrf(request: Request, form: URLSearchParams): boolean {
-  const cookie = parseCookies(request).get("sab_csrf");
+  const cookie = parseCookies(request).get("aittadb_csrf");
   const value = form.get("csrf_token");
   return Boolean(cookie && value && cookie === value);
 }
@@ -824,7 +824,7 @@ function redirectWithError(
   return redirect(url.toString());
 }
 
-function isBrokerRoute(pathname: string): boolean {
+function isAittaDBRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||

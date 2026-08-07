@@ -1,18 +1,18 @@
-# Sites Auth Broker Agent Instructions
+# AittaDB Agent Instructions
 
 ## Project Purpose and Boundary
 
-Sites Auth Broker is an independent authentication broker based on ChatGPT sign-in inside ChatGPT Sites. It maps the server-side identity signal to a separate local user and issues standard OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.
+AittaDB is an independent hosted application backend based on ChatGPT sign-in inside ChatGPT Sites. It maps the server-side identity signal to a separate AittaDB user, issues standard OAuth 2.0, OpenID Connect, and JWT sessions, and provides per-user, per-client JSON record and object storage for web applications, APIs, native applications, and CLI tools.
 
 This project is independent and is not affiliated with, endorsed by, or an official product of OpenAI. Do not describe it as "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or anything that implies tokens issued by this service are OpenAI or ChatGPT tokens.
 
-The service uses only the identity signal supplied by the ChatGPT Sites runtime to a server-side request. It creates its own local user identity and issues tokens belonging exclusively to Sites Auth Broker. It does not expose ChatGPT credentials, access ChatGPT conversations, use ChatGPT files, read Projects or Library data, inspect connectors, check subscription state, consume API quota, or infer workspace roles or billing.
+The service uses only the identity signal supplied by the ChatGPT Sites runtime to a server-side request. It creates its own local user identity and issues tokens belonging exclusively to AittaDB. It does not expose ChatGPT credentials, access ChatGPT conversations, use ChatGPT files, read Projects or Library data, inspect connectors, check subscription state, consume API quota, or infer workspace roles or billing.
 
 Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication.
 
 ## Canonical Source
 
-GitHub is the canonical source of truth for this repository. Work in the current Git repository. Do not create a second canonical source tree. Preserve existing files, package-manager choices, lockfiles, local user changes, and repository instructions.
+GitHub at `https://github.com/aittadb/aittadb` is the canonical source of truth for this repository. Work in the current Git repository. Do not create a second canonical source tree. Preserve existing files, package-manager choices, lockfiles, local user changes, and repository instructions.
 
 Use feature branches for all implementation work. The initial MVP branch is `codex/initial-implementation`. Do not push directly to `main`, do not merge branches, and do not deploy, publish, create a production checkpoint, or change Sites access settings without explicit user approval.
 
@@ -23,7 +23,7 @@ The application must use the standard Sites-compatible Vinext and TypeScript sha
 Runtime requirements:
 
 - D1 binding name: `DB`.
-- R2 binding name: `BUCKET` for broker file storage.
+- R2 binding name: `BUCKET` for AittaDB object storage.
 - Web Crypto APIs for cryptography.
 - Durable authoritative state in D1 only.
 - No authoritative state in `localStorage`, `sessionStorage`, browser cookies, or process memory.
@@ -49,7 +49,7 @@ Never trust identity information sent from browser JavaScript. Never accept arbi
 
 ## Local Tokens Versus Upstream Identity
 
-Downstream OAuth access tokens, refresh tokens, ID tokens, authorization codes, device codes, consents, and sessions are issued by Sites Auth Broker only. They are not OpenAI tokens, ChatGPT tokens, ChatGPT sessions, or proof of access to OpenAI services.
+Downstream OAuth access tokens, refresh tokens, ID tokens, authorization codes, device codes, consents, and sessions are issued by AittaDB only. They are not OpenAI tokens, ChatGPT tokens, ChatGPT sessions, or proof of access to OpenAI services.
 
 The supported local scopes for the MVP are:
 
@@ -61,25 +61,26 @@ The supported local scopes for the MVP are:
 - `storage.write`
 - `storage.delete`
 
-These scopes grant claims, refresh behavior, or broker-local storage operations from Sites Auth Broker. They do not grant access to ChatGPT or OpenAI data.
+These scopes grant claims, refresh behavior, or AittaDB application-storage operations. They do not grant access to ChatGPT or OpenAI data.
 
 ## Product Terminology
 
 On first reference in user-facing UI, JSON metadata, and documentation, call the upstream browser authentication "ChatGPT sign-in inside ChatGPT Sites." A shorter later reference may use "ChatGPT sign-in." Do not use the standalone phrase "Sites identity" in user-facing content because it does not explain the identity source.
 
-"ChatGPT sign-in" names only the upstream browser authentication supplied by the Sites runtime. In the same context, distinguish the immutable local UUID and tokens issued independently by Sites Auth Broker. Never imply a general OpenAI or ChatGPT OAuth service, token authority, endorsement, or access to ChatGPT data. Internal implementation names may use "Sites identity adapter" or "Sites identity provider" when discussing the runtime interface precisely.
+"ChatGPT sign-in" names only the upstream browser authentication supplied by the Sites runtime. In the same context, distinguish the immutable local UUID and tokens issued independently by AittaDB. Never imply a general OpenAI or ChatGPT OAuth service, token authority, endorsement, or access to ChatGPT data. Internal implementation names may use "Sites identity adapter" or "Sites identity provider" when discussing the runtime interface precisely.
 
 ## Repository Structure
 
 Maintain this structure unless `AGENTS.md` is updated in the same task that changes it:
 
 - `.github/workflows/`: CI checks for formatting, linting, type checking, tests, OpenAPI validation, production build, and migration consistency.
-- `.openai/hosting.json`: Sites local hosting metadata and logical D1 binding names only.
+- `.openai/hosting.example.json`: safe reusable Sites hosting template with logical D1 and R2 binding names.
+- `.openai/hosting.json`: ignored checkout-local Sites project metadata; it may hold the active `project_id` and must never be committed.
 - `app/`: Vinext route handlers and minimal browser pages. HTTP handlers must delegate protocol and storage behavior to `src/`.
 - `db/`: D1 schema definitions and checked-in SQL migrations.
 - `docs/`: Markdown documentation, architecture notes, threat model, deployment guide, self-hosting notes, examples, and key rotation instructions.
 - `openapi/`: canonical OpenAPI 3.1 source.
-- `public/`: same-origin static assets. `broker-aperture.jpg` is the shared decorative trust-boundary artwork used by browser responses.
+- `public/`: same-origin static assets. `aittadb-mark.svg` is the canonical brand mark, `aittadb-boundary.jpg` is shared decorative boundary artwork, `og.png` is the 1200x630 social preview, and `fonts/` contains the self-hosted Inter variable font and its license.
 - `scripts/`: local administrative scripts such as signing-key generation and OpenAPI checks.
 - `src/`: protocol-independent domain logic, repositories, crypto, configuration, HTTP helpers, identity adapters, and service interfaces.
 - `tests/`: unit and integration tests, including complete token flows using a test-only identity adapter.
@@ -98,7 +99,7 @@ Keep interfaces narrow and explicit:
 - Consent repository owns remembered consent grants keyed by local user, client, and exact scope set.
 - Audit repository owns minimal redacted security events.
 - Rate-limit repository owns bounded counters and enforcement state.
-- Storage repository owns broker-local JSON records, file metadata, and per-user/per-client object ownership. File bytes live in R2 behind generated object keys.
+- Storage repository owns AittaDB JSON records, file metadata, and per-user/per-client object ownership. File bytes live in R2 behind generated object keys.
 - Crypto module owns random value generation, hashing, constant-time comparison, PKCE verification, JWT signing, JWT validation, and JWKS publication.
 - Configuration module owns environment parsing, defaults, secret presence checks, and production/test separation.
 
@@ -175,13 +176,13 @@ Storage rules:
 - File bytes are stored in R2 through binding `BUCKET`.
 - Caller-supplied logical keys must never be used as physical R2 object keys. Generate physical R2 keys server-side.
 - Storage endpoints require this service's own bearer access tokens and `storage.read`, `storage.write`, or `storage.delete` scopes as applicable.
-- Storage scopes are local Sites Auth Broker permissions only; never describe them as granting ChatGPT or OpenAI access.
+- Storage scopes are local AittaDB permissions only; never describe them as granting ChatGPT or OpenAI access.
 
 ## OpenAPI Rules
 
 Maintain one canonical OpenAPI 3.1 specification in `openapi/`. Serve it as JSON from `/openapi.json` and provide a minimal interactive viewer at `/docs`.
 
-The OpenAPI spec must describe every REST endpoint, parameters, request bodies, responses, OAuth errors, schemas, authentication requirements, and examples. It must distinguish ChatGPT Sites browser authentication from tokens issued by Sites Auth Broker. Validate OpenAPI in CI and test that documented routes and implemented routes do not silently diverge.
+The OpenAPI spec must describe every REST endpoint, parameters, request bodies, responses, OAuth errors, schemas, authentication requirements, and examples. It must distinguish ChatGPT Sites browser authentication from tokens issued by AittaDB. Validate OpenAPI in CI and test that documented routes and implemented routes do not silently diverge.
 
 ## Configuration and Secrets
 
@@ -246,9 +247,9 @@ The root route must return concise machine-readable service metadata or redirect
 
 Use semantic HTML, visible focus, meaningful labels, clear validation errors, keyboard accessibility, screen-reader compatibility, and no unnecessary JavaScript.
 
-HTML pages must follow `docs/style-guide.md`. The interface should match the polish level expected from contemporary ChatGPT Sites generated pages while remaining a compact authentication service: strong typography, generous spacing, refined panels, purposeful local visual assets or CSS artwork, responsive layouts, and a consistent GitHub project affordance. Do not load external fonts, tracking scripts, or third-party images from application code.
+HTML pages must follow `docs/style-guide.md`. The interface should match the polish level expected from contemporary ChatGPT Sites generated pages while remaining a compact application-backend service: strong typography, generous spacing, refined panels, purposeful local visual assets or CSS artwork, responsive layouts, and a consistent GitHub project affordance. Do not load runtime fonts, tracking scripts, or images from third-party origins.
 
-The shared browser shell uses `public/broker-aperture.jpg` as decorative, same-origin artwork. Keep it free of text, logos, secrets, PII, and deployment identifiers; render it with empty alternative text and page-specific adjacent copy. New HTML response types must define content-aware visual copy and use the shared shell unless a documented protocol constraint prevents HTML.
+The shared browser shell uses `public/aittadb-mark.svg`, the AittaDB wordmark, the self-hosted Inter variable font, and `public/aittadb-boundary.jpg`. Render `Aitta` at Inter weight `750` in midnight navy `#0B234A`, `DB` at Inter weight `750` in red-orange `#F04A32`, and icon accents in teal `#159CA6`; use `Inter, system-ui, "Segoe UI", sans-serif` as the font stack. Keep decorative artwork free of text, logos, secrets, PII, and deployment identifiers; render it with empty alternative text and page-specific adjacent copy. `public/og.png` is the canonical social card, and root-page Open Graph metadata must construct its absolute URL from the configured issuer. New HTML response types must define content-aware visual copy and use the shared shell unless a documented protocol constraint prevents HTML.
 
 ## Documentation Rules
 

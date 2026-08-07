@@ -9,11 +9,11 @@ const storageKeyParameter = {
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
-    title: "Sites Auth Broker",
+    title: "AittaDB",
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "Independent OAuth 2.0, OpenID Connect, and JWT sessions based on ChatGPT sign-in inside ChatGPT Sites. The broker creates a separate local user and issues its own tokens; they are not OpenAI or ChatGPT tokens.",
+      "AittaDB is an independent hosted application backend based on ChatGPT sign-in inside ChatGPT Sites. It creates a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT sessions, and provides client-isolated D1/R2 storage. Its tokens and stored data are not OpenAI or ChatGPT tokens or data.",
   },
   paths: {
     "/": {
@@ -23,7 +23,7 @@ export const openApiSpec = {
           "Returns hypermedia service metadata to API clients and a concise browser overview when the request prefers HTML.",
         responses: {
           "200": {
-            description: "Sites Auth Broker service metadata",
+            description: "AittaDB service metadata",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/ServiceMetadata" },
@@ -159,7 +159,7 @@ export const openApiSpec = {
         summary:
           "List JSON records for the access token's local user and OAuth client",
         description:
-          "Requires a Sites Auth Broker access token with storage.read. Records are broker-owned local storage; they do not expose ChatGPT or OpenAI data.",
+          "Requires an AittaDB access token with storage.read. Records are AittaDB application storage; they do not expose ChatGPT or OpenAI data.",
         security: [{ bearer: [] }],
         responses: {
           "200": { description: "Record collection" },
@@ -190,7 +190,7 @@ export const openApiSpec = {
         },
         responses: {
           "200": { description: "Stored record" },
-          "413": { description: "Record exceeds the broker limit" },
+          "413": { description: "Record exceeds the AittaDB limit" },
         },
       },
       delete: {
@@ -220,14 +220,22 @@ export const openApiSpec = {
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
-          "200": { description: "File bytes" },
+          "200": {
+            description: "File bytes",
+            headers: {
+              "x-aittadb-storage-key": {
+                description: "Percent-encoded logical application key.",
+                schema: { type: "string" },
+              },
+            },
+          },
           "404": { description: "File not found" },
         },
       },
       put: {
         summary: "Create or replace one file in R2",
         description:
-          "Requires storage.write. The caller's key is metadata only; the broker generates the physical R2 object key.",
+          "Requires storage.write. The caller's key is metadata only; AittaDB generates the physical R2 object key.",
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         requestBody: {
@@ -240,7 +248,7 @@ export const openApiSpec = {
         },
         responses: {
           "200": { description: "Stored file metadata" },
-          "413": { description: "File exceeds the broker limit" },
+          "413": { description: "File exceeds the AittaDB limit" },
           "503": { description: "R2 bucket is unavailable" },
         },
       },
@@ -282,7 +290,7 @@ export const openApiSpec = {
           "actions",
         ],
         properties: {
-          service: { type: "string", const: "Sites Auth Broker" },
+          service: { type: "string", const: "AittaDB" },
           issuer: { type: "string", format: "uri" },
           docs: { type: "string", format: "uri" },
           openapi: { type: "string", format: "uri" },
@@ -311,7 +319,7 @@ export const openApiSpec = {
           },
           tokenAuthority: {
             type: "string",
-            const: "Sites Auth Broker",
+            const: "AittaDB",
           },
           _links: { $ref: "#/components/schemas/HypermediaLinks" },
           actions: { type: "object", additionalProperties: true },
