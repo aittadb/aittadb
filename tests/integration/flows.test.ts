@@ -185,6 +185,11 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /Identity \/ Data \/ Files \/ Events/);
   assert.match(browserRootHtml, />Sign out<\/a>/);
   assert.doesNotMatch(browserRootHtml, />Sign in to AittaDB<\/a>/);
+  assert.match(
+    browserRootHtml,
+    /View your AittaDB identity and open your private records and files\./,
+  );
+  assert.doesNotMatch(browserRootHtml, /Sign in to view your AittaDB identity/);
   assert.match(browserRootHtml, /href="\/session"/);
   assert.match(browserRootHtml, /href="\/storage\/records"/);
   assert.match(browserRootHtml, /href="\/storage\/files"/);
@@ -497,6 +502,11 @@ test("public home enters the real protected local AittaDB session", async () => 
   const anonymousRootHtml = await anonymousRoot!.text();
   assert.match(anonymousRootHtml, />Sign in to AittaDB<\/a>/);
   assert.doesNotMatch(anonymousRootHtml, />Sign out<\/a>/);
+  assert.match(anonymousRootHtml, /Sign in to view your AittaDB identity/);
+  assert.doesNotMatch(
+    anonymousRootHtml,
+    /View your AittaDB identity and open your private records and files\./,
+  );
 
   const anonymousRootJson = (await (
     await anonymousApp.fetch(
