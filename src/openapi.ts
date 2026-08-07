@@ -13,9 +13,27 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "Independent OAuth 2.0, OpenID Connect, and JWT sessions from ChatGPT Sites identity. Tokens are issued by Sites Auth Broker, not by OpenAI or ChatGPT.",
+      "Independent OAuth 2.0, OpenID Connect, and JWT sessions based on ChatGPT sign-in inside ChatGPT Sites. The broker creates a separate local user and issues its own tokens; they are not OpenAI or ChatGPT tokens.",
   },
   paths: {
+    "/": {
+      get: {
+        summary: "Service metadata or browser overview",
+        description:
+          "Returns hypermedia service metadata to API clients and a concise browser overview when the request prefers HTML.",
+        responses: {
+          "200": {
+            description: "Sites Auth Broker service metadata",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ServiceMetadata" },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+        },
+      },
+    },
     "/health": {
       get: {
         summary: "Service health",
@@ -252,6 +270,53 @@ export const openApiSpec = {
       clientSecretBasic: { type: "http", scheme: "basic" },
     },
     schemas: {
+      ServiceMetadata: {
+        type: "object",
+        required: [
+          "service",
+          "issuer",
+          "officialOpenAIProduct",
+          "upstreamSignIn",
+          "tokenAuthority",
+          "_links",
+          "actions",
+        ],
+        properties: {
+          service: { type: "string", const: "Sites Auth Broker" },
+          issuer: { type: "string", format: "uri" },
+          docs: { type: "string", format: "uri" },
+          openapi: { type: "string", format: "uri" },
+          officialOpenAIProduct: { type: "boolean", const: false },
+          upstreamSignIn: {
+            type: "object",
+            required: [
+              "source",
+              "identitySignal",
+              "stableSubjectSupplied",
+              "credentialsForwarded",
+            ],
+            properties: {
+              source: {
+                type: "string",
+                const: "ChatGPT sign-in inside ChatGPT Sites",
+              },
+              identitySignal: {
+                type: "string",
+                description:
+                  "Server-side email and optional display name supplied after ChatGPT sign-in.",
+              },
+              stableSubjectSupplied: { type: "boolean", const: false },
+              credentialsForwarded: { type: "boolean", const: false },
+            },
+          },
+          tokenAuthority: {
+            type: "string",
+            const: "Sites Auth Broker",
+          },
+          _links: { $ref: "#/components/schemas/HypermediaLinks" },
+          actions: { type: "object", additionalProperties: true },
+        },
+      },
       OAuthError: {
         type: "object",
         required: ["error", "_links"],

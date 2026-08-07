@@ -2,7 +2,7 @@
 
 Covered MVP threats:
 
-- Forged Sites identity headers: production trusts these only inside the Sites runtime; tests use an explicit `NODE_ENV=test` adapter.
+- Forged ChatGPT Sites identity headers: production trusts these only inside the Sites runtime; tests use an explicit `NODE_ENV=test` adapter.
 - Deployment outside the trusted Sites edge: self-hosting requires replacing the upstream identity adapter.
 - Stolen device and user codes: device codes are high entropy, user codes expire, both are stored as hashes, and polling is rate limited.
 - Authorization-code interception: PKCE `S256`, exact redirect URI matching, short expiry, and one-time code consumption are required.
@@ -14,7 +14,7 @@ Covered MVP threats:
 - Signing-key exposure: keys are generated locally and configured as hosted secrets.
 - Email reassignment: email maps to local user lookup only; downstream tokens use immutable local UUIDs.
 - Malicious OAuth clients: admin-controlled registration, exact redirects, scoped clients, and disablement are supported.
-- Polling and registration abuse: D1 rate-limit counters protect token and device endpoints; admin operations require allowlisted Sites identity.
+- Polling and registration abuse: D1 rate-limit counters protect token and device endpoints; admin operations require an allowlisted ChatGPT sign-in identity from the Sites runtime.
 - Accidental credential logging: audit logging redacts credential-like fields.
 - Forks retaining deployment identifiers or keys: reusable source must not publish real `project_id` or committed signing keys.
 - Cross-client storage access: storage rows are keyed by local user UUID and OAuth client ID, and endpoints require broker-issued access tokens with storage scopes.

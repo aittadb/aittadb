@@ -2,7 +2,7 @@
 
 [GitHub repository](https://github.com/sendanor/sites-auth-broker)
 
-Sites Auth Broker is an experimental independent authentication broker that converts ChatGPT Sites server-side identity into OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.
+Sites Auth Broker is an experimental independent authentication broker based on a ChatGPT sign-in performed inside ChatGPT Sites. It maps the server-side identity signal to a separate local user and issues OAuth 2.0, OpenID Connect, and JWT sessions for web applications, APIs, native applications, and CLI tools.
 
 It is not an official OpenAI project. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
 
@@ -19,7 +19,7 @@ Current releases are source-available under FSL-1.1-MIT. Each released version c
 - Opaque hashed refresh tokens with rotation and reuse detection.
 - D1-backed durable state with checked-in migrations.
 - Per-user, per-client broker storage: JSON records in D1 and file bytes in R2.
-- Minimal Sites-protected browser forms for device approval, consent, and admin client bootstrap.
+- Minimal ChatGPT-sign-in-protected browser forms inside ChatGPT Sites for device approval, consent, and admin client bootstrap.
 
 ## Local Setup
 
@@ -73,6 +73,6 @@ Client applications may request `storage.read`, `storage.write`, and `storage.de
 
 Storage is isolated by the immutable local user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2 at `/storage/files/{key}`. Caller-provided keys are logical metadata; the broker generates physical R2 object keys.
 
-## Sites Boundary
+## ChatGPT Sites Sign-In Boundary
 
-Sites owns `/signin-with-chatgpt` and `/signout-with-chatgpt`. This service reads only server-side `oai-authenticated-user-email`, optional `oai-authenticated-user-full-name`, and the full-name encoding header. It never forwards or exposes ChatGPT cookies, credentials, sessions, or tokens.
+ChatGPT sign-in is supplied inside ChatGPT Sites through Sites-owned `/signin-with-chatgpt` and `/signout-with-chatgpt` routes. This service reads only server-side `oai-authenticated-user-email`, optional `oai-authenticated-user-full-name`, and the full-name encoding header. It never forwards or exposes ChatGPT cookies, credentials, sessions, or tokens.

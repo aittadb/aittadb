@@ -141,6 +141,13 @@ async function route(
       docs: `${config.issuerUrl}/docs`,
       openapi: `${config.issuerUrl}/openapi.json`,
       officialOpenAIProduct: false,
+      upstreamSignIn: {
+        source: "ChatGPT sign-in inside ChatGPT Sites",
+        identitySignal: "server-side email and optional display name",
+        stableSubjectSupplied: false,
+        credentialsForwarded: false,
+      },
+      tokenAuthority: "Sites Auth Broker",
       _links: {
         self: { href: config.issuerUrl },
         health: { href: `${config.issuerUrl}/health` },

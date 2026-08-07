@@ -26,6 +26,13 @@ export function serviceHomePage(metadata: {
   docs: string;
   openapi: string;
   officialOpenAIProduct: boolean;
+  upstreamSignIn: {
+    source: string;
+    identitySignal: string;
+    stableSubjectSupplied: boolean;
+    credentialsForwarded: boolean;
+  };
+  tokenAuthority: string;
   _links?: Record<string, { href: string; type?: string }>;
   actions?: Record<string, unknown>;
 }): string {
@@ -34,12 +41,12 @@ export function serviceHomePage(metadata: {
     eyebrow: "Authentication broker",
     heading: metadata.service,
     summary:
-      "Independent OAuth 2.0, OpenID Connect, and JWT sessions from ChatGPT Sites identity.",
-    visualEyebrow: "Identity boundary",
-    visualHeading: "One trusted signal. Your own local authority.",
+      "Independent OAuth 2.0, OpenID Connect, and JWT sessions based on ChatGPT sign-in inside ChatGPT Sites.",
+    visualEyebrow: "ChatGPT sign-in boundary",
+    visualHeading: "ChatGPT sign-in. Your own local authority.",
     visualSummary:
-      "Sites identity enters once. Broker-issued tokens leave without carrying upstream credentials.",
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Token authority</span><strong>Sites Auth Broker only</strong></div></section><p class="note">This service does not issue OpenAI or ChatGPT tokens and does not expose ChatGPT credentials.</p>`,
+      "ChatGPT signs the person into this Sites app. The broker maps that server-side signal to a separate local user and issues its own tokens.",
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Token authority</span><strong>${escapeHtml(metadata.tokenAuthority)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> Sites Auth Broker creates a separate local UUID and its own OAuth, OIDC, and JWT tokens. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p>`,
     actions: [
       { href: "/docs", label: "API docs" },
       { href: "/openapi.json", label: "OpenAPI JSON", secondary: true },
@@ -88,7 +95,7 @@ export function docsPage(): string {
     visualHeading: "Familiar standards. One independent issuer.",
     visualSummary:
       "Discovery, authorization, tokens, identity, and storage remain explicit parts of the same local trust boundary.",
-    body: `<p class="note">The canonical machine-readable OpenAPI 3.1 document is available as JSON. Browser sign-in is supplied by the Sites runtime; downstream OAuth and OIDC tokens are issued by this service.</p><pre id="spec" aria-label="OpenAPI summary">GET /
+    body: `<p class="note">The canonical machine-readable OpenAPI 3.1 document is available as JSON. ChatGPT supplies the upstream sign-in inside ChatGPT Sites; downstream OAuth and OIDC tokens are issued only by Sites Auth Broker.</p><pre id="spec" aria-label="OpenAPI summary">GET /
 GET /health
 GET /.well-known/openid-configuration
 GET /.well-known/jwks.json
@@ -251,7 +258,7 @@ function pageDocument(options: PageOptions): string {
         )
         .join("")}</nav>`
     : "";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#15372f"><title>${escapeHtml(options.title)}</title><link rel="icon" href="/favicon.svg"><link rel="preload" href="/broker-aperture.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css"></head><body class="sab-page"><main class="sab-shell tone-${tone}"><aside class="visual-panel" aria-label="Sites Auth Broker trust boundary"><img class="visual-image" src="/broker-aperture.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="Sites Auth Broker service home"><span class="brand-symbol" aria-hidden="true"><span></span></span><span>Sites Auth Broker</span></a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Trust boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "Identity in. Local authority out.")}</h2><p>${escapeHtml(options.visualSummary ?? "Standard local credentials without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="Identity exchange"><div><span>Upstream</span><strong>Sites identity</strong></div><div><span>Broker</span><strong>Local subject</strong></div><div><span>Downstream</span><strong>OAuth / OIDC</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth 2.0 / OIDC</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><strong>Sites Auth Broker</strong><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">View source on GitHub</a></footer></section></main></body></html>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#15372f"><title>${escapeHtml(options.title)}</title><link rel="icon" href="/favicon.svg"><link rel="preload" href="/broker-aperture.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css"></head><body class="sab-page"><main class="sab-shell tone-${tone}"><aside class="visual-panel" aria-label="Sites Auth Broker trust boundary"><img class="visual-image" src="/broker-aperture.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="Sites Auth Broker service home"><span class="brand-symbol" aria-hidden="true"><span></span></span><span>Sites Auth Broker</span></a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Trust boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "ChatGPT sign-in. Local authority out.")}</h2><p>${escapeHtml(options.visualSummary ?? "The broker creates a separate local user and standard credentials without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to local token exchange"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>Broker</span><strong>Local user UUID</strong></div><div><span>Downstream</span><strong>OAuth / OIDC</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth 2.0 / OIDC</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><strong>Sites Auth Broker</strong><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">View source on GitHub</a></footer></section></main></body></html>`;
 }
 
 function adminAction(
