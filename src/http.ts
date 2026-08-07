@@ -114,7 +114,7 @@ export function addSecurityHeaders(headers: Headers): void {
   headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
   headers.set(
     "content-security-policy",
-    "default-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   );
 }
 

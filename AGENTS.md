@@ -176,6 +176,8 @@ Store hashes, not plaintext, for authorization codes, device codes, refresh toke
 
 Migration changes must include schema updates, checked-in SQL, automated migration tests, documentation updates, and validation evidence in the same task.
 
+This repository intentionally uses prepared D1 statements and handwritten SQL migrations, not Drizzle ORM or Drizzle Kit. `db/migrations/` is the reviewed SQL history, `db/schema.ts` is the required-table manifest used by consistency checks, and `src/store/migrations.ts` is the Worker-compatible runtime migration sequence. Keep those representations synchronized in the task that changes the schema. Do not add a generation command that exits successfully without producing the authoritative migration, and do not reintroduce ORM tooling unless a future architecture task adopts it completely with schema declarations, generated migrations, tests, and documentation.
+
 Storage rules:
 
 - JSON records are D1 data keyed by local user UUID, OAuth client ID, and logical application key.
@@ -270,7 +272,7 @@ The shared browser shell uses `public/aittadb-mark.svg`, the AittaDB wordmark, t
 
 ## Current Implementation State
 
-The core AittaDB OAuth/OIDC issuer, ChatGPT Sites identity adapter, D1 persistence, R2-backed per-user/per-client storage APIs, security controls, OpenAPI document, tests, CI, shared branded HTML shell, public operation map, and protected local-session view are implemented on `codex/initial-implementation`. The remaining browser representation and hosted-domain acceptance work is authoritative in unchecked `PLAN.md` items `TASK-035` through `TASK-037`. Do not describe those items as complete until each integrated interface, implementation, tests, documentation, validation evidence, deployment checks, and plan checkbox satisfy its full definition of done.
+The core AittaDB OAuth/OIDC issuer, ChatGPT Sites identity adapter, D1 persistence, R2-backed per-user/per-client storage APIs, security controls, OpenAPI document, self-hosted Swagger UI, production-backed protocol browser forms, tests, CI, patched dependency set, shared branded HTML shell, public operation map, and protected local-session view are implemented on `codex/initial-implementation`. The remaining storage browser representation and hosted-domain acceptance work is authoritative in unchecked `PLAN.md` items `TASK-036` and `TASK-037`, in that dependency order. Do not describe those items as complete until each integrated interface, implementation, tests, documentation, validation evidence, deployment checks, and plan checkbox satisfy its full definition of done.
 
 ## Documentation Rules
 
@@ -314,7 +316,10 @@ Keep these commands current as package scripts evolve:
 - Integration tests: `npm run test:integration`
 - Full test suite: `npm test`
 - OpenAPI validation: `npm run openapi:check`
+- Swagger UI vendor consistency: `npm run swagger:check`
+- Refresh pinned Swagger UI browser assets: `npm run swagger:sync`
 - Migration consistency: `npm run db:check`
+- High-severity dependency audit: `npm run audit:high`
 - Production build: `npm run build`
 - Complete local validation: `npm run validate`
 - Generate local ES256 key pair without printing the secret: `make generate-local-jwt-key`

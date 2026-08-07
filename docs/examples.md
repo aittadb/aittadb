@@ -1,5 +1,11 @@
 # Examples
 
+## Browser Interfaces
+
+Open `/docs` for the self-hosted Swagger UI or follow the operation links from the public service root. The direct HTML forms at `/authorize`, `/oauth/device_authorization`, `/oauth/token`, `/oauth/revoke`, `/oauth/introspect`, and `/userinfo` invoke the same production operations shown below. They do not create mock users, grants, tokens, or storage.
+
+Credential-bearing browser forms send values in a same-origin request body and do not persist them in browser storage. A successful browser token exchange deliberately displays newly issued credentials once in a `Cache-Control: no-store` response. Do not put access tokens, refresh tokens, device codes, authorization codes, client secrets, or PKCE verifiers in query strings.
+
 ## Device Authorization CLI
 
 ```sh
@@ -21,7 +27,7 @@ curl -s -X POST "$ISSUER_URL/oauth/token" \
 
 ## Browser or Native PKCE
 
-Create a verifier, send `sha256(verifier)` as `code_challenge`, and request:
+Create a 43-128 character verifier, send its base64url-encoded SHA-256 digest as `code_challenge`, and request:
 
 ```text
 GET /authorize?response_type=code&client_id=...&redirect_uri=...&scope=openid%20email&state=...&nonce=...&code_challenge=...&code_challenge_method=S256

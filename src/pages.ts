@@ -5,13 +5,13 @@ import type {
   LocalUser,
 } from "./types";
 
-interface PageAction {
+export interface PageAction {
   href: string;
   label: string;
   secondary?: boolean;
 }
 
-interface PageOptions {
+export interface PageOptions {
   title: string;
   eyebrow?: string;
   heading: string;
@@ -29,6 +29,9 @@ interface PageOptions {
     imageUrl: string;
     url: string;
   };
+  layout?: "default" | "docs";
+  head?: string;
+  scripts?: string;
 }
 
 export function serviceHomePage(metadata: {
@@ -68,7 +71,11 @@ export function serviceHomePage(metadata: {
     actions: [
       { href: "/session", label: "Sign in to AittaDB" },
       { href: "/docs", label: "API docs", secondary: true },
-      { href: "/openapi.json", label: "OpenAPI JSON", secondary: true },
+      {
+        href: "/openapi.json?format=json",
+        label: "OpenAPI JSON",
+        secondary: true,
+      },
       { href: "/health", label: "Health", secondary: true },
     ],
   });
@@ -133,36 +140,19 @@ export function docsPage(): string {
     eyebrow: "API reference",
     heading: "AittaDB API",
     summary:
-      "Minimal endpoint map for OAuth, OpenID Connect, application storage, and administration.",
+      "Interactive OpenAPI reference for OAuth, OpenID Connect, application storage, and administration.",
     visualEyebrow: "Protocol surface",
     visualHeading: "Familiar standards. One independent issuer.",
     visualSummary:
       "Discovery, authorization, tokens, records, and objects remain explicit parts of the same application boundary.",
-    body: `<p class="note">The canonical machine-readable OpenAPI 3.1 document is available as JSON. ChatGPT supplies the upstream sign-in inside ChatGPT Sites; downstream OAuth and OIDC tokens and stored application data belong only to AittaDB.</p><pre id="spec" aria-label="OpenAPI summary">GET /
-GET /health
-GET /session
-GET /.well-known/openid-configuration
-GET /.well-known/jwks.json
-GET /authorize
-POST /oauth/device_authorization
-POST /oauth/token
-POST /oauth/revoke
-POST /oauth/introspect
-GET /userinfo
-GET /storage/records
-PUT /storage/records/{key}
-GET /storage/records/{key}
-DELETE /storage/records/{key}
-GET /storage/files
-PUT /storage/files/{key}
-GET /storage/files/{key}
-DELETE /storage/files/{key}
-GET /openapi.json
-GET /docs</pre>`,
+    body: `<p class="note">This self-hosted Swagger UI reads the canonical OpenAPI 3.1 document from <code>/openapi.json</code>. "Try it out" calls the real AittaDB routes on this origin. Credentials entered here are sent only in the selected request and are not retained by AittaDB browser state.</p><div id="swagger-ui" aria-label="Interactive AittaDB OpenAPI documentation"><p>Loading API reference...</p></div><noscript><p class="notice">The interactive API reference requires JavaScript. The canonical OpenAPI JSON remains available below.</p></noscript>`,
     actions: [
-      { href: "/openapi.json", label: "OpenAPI JSON" },
+      { href: "/openapi.json?format=json", label: "OpenAPI JSON" },
       { href: "/", label: "Service", secondary: true },
     ],
+    layout: "docs",
+    head: `<link rel="stylesheet" href="/vendor/swagger-ui/swagger-ui.css">`,
+    scripts: `<script src="/vendor/swagger-ui/swagger-ui-bundle.js" defer></script><script src="/swagger-ui/aittadb-swagger.js" defer></script>`,
   });
 }
 
@@ -312,7 +302,7 @@ export function errorPage(
   });
 }
 
-function pageDocument(options: PageOptions): string {
+export function pageDocument(options: PageOptions): string {
   const tone = options.tone ?? "default";
   const toneLabel =
     options.statusLabel ??
@@ -338,7 +328,8 @@ function pageDocument(options: PageOptions): string {
   const social = options.social
     ? `<meta name="description" content="${escapeHtml(options.social.description)}"><link rel="canonical" href="${escapeHtml(options.social.url)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(options.title)}"><meta property="og:description" content="${escapeHtml(options.social.description)}"><meta property="og:url" content="${escapeHtml(options.social.url)}"><meta property="og:image" content="${escapeHtml(options.social.imageUrl)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="AittaDB: ChatGPT sign-in, app-ready identity and data."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(options.title)}"><meta name="twitter:description" content="${escapeHtml(options.social.description)}"><meta name="twitter:image" content="${escapeHtml(options.social.imageUrl)}">`
     : "";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css"></head><body class="aittadb-page"><main class="aittadb-shell tone-${tone}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "Identity and data, ready for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate local user, standard credentials, and isolated application storage without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Local identity</strong></div><div><span>Application</span><strong>Sessions + storage</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth / OIDC / Storage</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main></body></html>`;
+  const layout = options.layout ?? "default";
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "Identity and data, ready for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate local user, standard credentials, and isolated application storage without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Local identity</strong></div><div><span>Application</span><strong>Sessions + storage</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth / OIDC / Storage</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main>${options.scripts ?? ""}</body></html>`;
 }
 
 function brandWordmark(): string {
@@ -390,6 +381,9 @@ export function authUiCss(): string {
   .authority-status{display:inline-flex;align-items:center;gap:8px}.authority-status>span{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
   .protocol-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#65738a}
   .content-frame{width:min(100%,680px);align-self:center;justify-self:center;padding:44px 0}
+  .layout-docs{width:min(100%,1560px);grid-template-columns:minmax(300px,.36fr) minmax(0,1.64fr)}
+  .layout-docs .visual-copy h2{font-size:2.55rem}.layout-docs .visual-legend{grid-template-columns:1fr}.layout-docs .visual-legend div{padding:8px 0;border-left:0;border-top:1px solid rgba(255,255,255,.2)}.layout-docs .visual-legend div:first-child{border-top:0}
+  .layout-docs .content-frame{width:100%;max-width:none;align-self:start;padding:36px 0}.layout-docs #swagger-ui{min-height:540px;margin-top:24px;border:1px solid #dbe3eb;border-radius:6px;overflow:hidden;background:#f7f9fb}.layout-docs #swagger-ui>p{padding:24px}
   .eyebrow{color:var(--accent)}
   h1{margin:0;color:#0b234a;font-size:3.35rem;line-height:1.01;font-weight:790;letter-spacing:0;text-wrap:balance}.brand-heading .brand-wordmark{font-size:inherit;font-weight:750}
   h2{margin:32px 0 14px;color:#13284b;font-size:1.18rem;letter-spacing:0}
@@ -405,10 +399,12 @@ export function authUiCss(): string {
   .operation-grid strong{font-size:.94rem}.operation-grid span{color:#647287;font-size:.82rem;line-height:1.42}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
   label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
+  .optional{color:#6c788a;font-size:.78rem;font-weight:560}
   input,textarea,select{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
   input:hover,textarea:hover,select:hover{border-color:#71839a}
   input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
   textarea{min-height:104px;resize:vertical}
+  textarea.credential-input,textarea.credential-output{min-height:88px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8rem;overflow-wrap:anywhere}.credential-output{background:#f4f7fa;color:#243954}
   a{color:var(--accent-strong)}
   a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #f04a32;outline-offset:3px}
   .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
@@ -431,7 +427,7 @@ export function authUiCss(): string {
   `;
 }
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

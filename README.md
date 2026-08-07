@@ -67,6 +67,8 @@ npm run validate
 
 `make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material.
 
+`npm run validate` includes a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, tests, and the production build. D1 migrations are maintained as reviewed SQL; the project intentionally has no incomplete ORM generation command.
+
 ## Required Configuration
 
 - `ISSUER_URL`: exact public issuer URL.
@@ -102,6 +104,8 @@ npm run validate
 The public service root does not require authentication because issuer discovery and OAuth initiation must work before sign-in. Its browser operation map links to the real production routes, not a separate demo. `/session` starts Sites-owned ChatGPT sign-in when needed and then shows the immutable local AittaDB subject created for the signed-in user; sign-in alone does not grant a client any storage scope.
 
 Browser-facing routes and errors use content negotiation. Browsers that prefer `text/html` receive consistent authentication-service HTML views, while API clients that request JSON, or send generic CLI-style `Accept: */*`, receive canonical machine responses. Browser forms invoke the same identity, OAuth/OIDC, D1, and R2 services as API clients and do not use mock users, fake tokens, or browser-only storage. JSON metadata and JSON errors are hypermedia-oriented and advertise `_links` and `actions` so clients can discover available operations instead of hard-coding every route. OAuth token success responses remain protocol-standard for API clients.
+
+`/docs` is a self-hosted Swagger UI backed directly by the canonical `/openapi.json`. Its assets are pinned and served from AittaDB without a CDN. Browser forms are also available directly on the authorization, device authorization, token, revocation, introspection, and UserInfo routes; state-changing browser submissions are same-origin and CSRF protected, and credential values are never placed in URLs.
 
 The browser UI uses a shared responsive AittaDB shell with page-aware trust-boundary copy, the same-origin `aittadb-boundary.jpg` artwork, the supplied `aittadb-mark.svg` storehouse mark, and an AittaDB-specific `og.png` social card. Inter is self-hosted from `/fonts/inter-latin-wght-normal.woff2`, with `system-ui`, `Segoe UI`, and `sans-serif` fallbacks. Styles come from `/auth-ui.css`; the UI loads no third-party runtime fonts, images, tracking code, or client scripts.
 

@@ -131,7 +131,15 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserCssText, /\.visual-image/);
   assert.match(browserCssText, /\.repo-link/);
 
-  const [visualAsset, markAsset, fontAsset, socialAsset] = await Promise.all([
+  const [
+    visualAsset,
+    markAsset,
+    fontAsset,
+    socialAsset,
+    swaggerCss,
+    swaggerBundle,
+    swaggerBootstrap,
+  ] = await Promise.all([
     stat(new URL("../../public/aittadb-boundary.jpg", import.meta.url)),
     stat(new URL("../../public/aittadb-mark.svg", import.meta.url)),
     stat(
@@ -141,11 +149,26 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       ),
     ),
     stat(new URL("../../public/og.png", import.meta.url)),
+    stat(
+      new URL("../../public/vendor/swagger-ui/swagger-ui.css", import.meta.url),
+    ),
+    stat(
+      new URL(
+        "../../public/vendor/swagger-ui/swagger-ui-bundle.js",
+        import.meta.url,
+      ),
+    ),
+    stat(
+      new URL("../../public/swagger-ui/aittadb-swagger.js", import.meta.url),
+    ),
   ]);
   assert.ok(visualAsset.size > 100_000);
   assert.ok(markAsset.size > 500);
   assert.ok(fontAsset.size > 40_000);
   assert.ok(socialAsset.size > 100_000);
+  assert.ok(swaggerCss.size > 100_000);
+  assert.ok(swaggerBundle.size > 1_000_000);
+  assert.ok(swaggerBootstrap.size > 200);
   const delegatedAsset = await app.fetch(
     new Request("https://aittadb.example.test/aittadb-boundary.jpg"),
   );
@@ -180,6 +203,39 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserHealthHtml, /<h1>Service health<\/h1>/);
   assert.match(browserHealthHtml, /Every service, accounted for/);
   assert.match(browserHealth!.headers.get("content-type") ?? "", /^text\/html/);
+
+  const browserDiscovery = await app.fetch(
+    new Request(
+      "https://aittadb.example.test/.well-known/openid-configuration",
+      { headers: { accept: "text/html" } },
+    ),
+  );
+  assert.match(
+    await browserDiscovery!.text(),
+    /<h1>OpenID configuration<\/h1>/,
+  );
+  const rawDiscovery = await app.fetch(
+    new Request(
+      "https://aittadb.example.test/.well-known/openid-configuration?format=json",
+      { headers: { accept: "text/html" } },
+    ),
+  );
+  assert.match(
+    rawDiscovery!.headers.get("content-type") ?? "",
+    /^application\/json/,
+  );
+
+  const docs = await app.fetch(
+    new Request("https://aittadb.example.test/docs", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  const docsHtml = await docs!.text();
+  assert.match(docsHtml, /id="swagger-ui"/);
+  assert.match(docsHtml, /src="\/vendor\/swagger-ui\/swagger-ui-bundle\.js"/);
+  assert.match(docsHtml, /src="\/swagger-ui\/aittadb-swagger\.js"/);
+  assert.match(docsHtml, /href="\/vendor\/swagger-ui\/swagger-ui\.css"/);
+  assert.doesNotMatch(docsHtml, /https:\/\/(unpkg|cdn\.jsdelivr|cdnjs)/);
 
   const apiMissing = await app.fetch(
     new Request("https://aittadb.example.test/missing", {
@@ -302,6 +358,285 @@ test("public home enters the real protected local AittaDB session", async () => 
   assert.equal(
     ((await anonymousApi?.json()) as { error: string }).error,
     "login_required",
+  );
+});
+
+test("browser protocol representations execute real device, token, UserInfo, introspection, and revocation operations", async () => {
+  const env = await testEnv({ DEVICE_POLL_INTERVAL_SECONDS: "1" });
+  const store = new MemoryAuthStore();
+  const app = createAittaDBWithStore(env, store);
+  const { client } = await createClientRegistration(
+    {
+      type: "public",
+      name: "Browser Device Client",
+      redirectUris: ["https://client.example.test/callback"],
+      scopes: ["openid", "email", "profile", "offline_access"],
+      origins: [],
+    },
+    store,
+    nowSeconds(),
+  );
+
+  const deviceForm = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/device_authorization", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  assert.equal(deviceForm?.status, 200);
+  const deviceFormHtml = await deviceForm!.text();
+  assert.match(deviceFormHtml, /<h1>Device authorization<\/h1>/);
+  assert.match(deviceFormHtml, /action="\/oauth\/device_authorization"/);
+  const deviceCsrf = cookieValue(deviceForm!, "aittadb_csrf");
+
+  const deviceResult = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/device_authorization", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${deviceCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        ui: "1",
+        csrf_token: deviceCsrf,
+        client_id: client.id,
+        scope: "openid email profile offline_access",
+      }),
+    }),
+  );
+  assert.equal(deviceResult?.status, 200);
+  const deviceResultHtml = await deviceResult!.text();
+  assert.match(deviceResultHtml, /<h1>Device grant created<\/h1>/);
+  const deviceCode = textAreaValue(deviceResultHtml, "device_code_result");
+  const userCode =
+    deviceResultHtml.match(
+      /<span>User code<\/span><strong>([^<]+)<\/strong>/,
+    )?.[1] ?? "";
+  assert.ok(deviceCode.length > 32);
+  assert.match(userCode, /^[A-Z2-9]{8}$/);
+
+  const entry = await app.fetch(
+    new Request(
+      `https://aittadb.example.test/device?user_code=${encodeURIComponent(userCode)}`,
+    ),
+  );
+  const entryCsrf = cookieValue(entry!, "aittadb_csrf");
+  const review = await app.fetch(
+    new Request("https://aittadb.example.test/device", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${entryCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({ csrf_token: entryCsrf, user_code: userCode }),
+    }),
+  );
+  const decisionCsrf = cookieValue(review!, "aittadb_csrf");
+  const decision = await app.fetch(
+    new Request("https://aittadb.example.test/device/decision", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${decisionCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        csrf_token: decisionCsrf,
+        user_code: userCode,
+        decision: "approve",
+      }),
+    }),
+  );
+  assert.equal(decision?.status, 200);
+
+  const tokenForm = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/token", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  const tokenCsrf = cookieValue(tokenForm!, "aittadb_csrf");
+  assert.match(await tokenForm!.text(), /<h1>Token exchange<\/h1>/);
+  const tokenResult = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/token", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${tokenCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        ui: "1",
+        csrf_token: tokenCsrf,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: deviceCode,
+        client_id: client.id,
+      }),
+    }),
+  );
+  assert.equal(tokenResult?.status, 200);
+  const tokenResultHtml = await tokenResult!.text();
+  assert.match(tokenResultHtml, /<h1>Credentials issued<\/h1>/);
+  assert.doesNotMatch(tokenResultHtml, /access_token=/);
+  const accessToken = textAreaValue(tokenResultHtml, "result_access_token");
+  const refreshToken = textAreaValue(tokenResultHtml, "result_refresh_token");
+  assert.match(accessToken, /^[^.]+\.[^.]+\.[^.]+$/);
+  assert.ok(refreshToken.length > 48);
+
+  const userInfoForm = await app.fetch(
+    new Request("https://aittadb.example.test/userinfo", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  const userInfoCsrf = cookieValue(userInfoForm!, "aittadb_csrf");
+  const userInfoResult = await app.fetch(
+    new Request("https://aittadb.example.test/userinfo", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${userInfoCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        ui: "1",
+        csrf_token: userInfoCsrf,
+        access_token: accessToken,
+      }),
+    }),
+  );
+  const userInfoHtml = await userInfoResult!.text();
+  assert.equal(userInfoResult?.status, 200);
+  assert.match(userInfoHtml, /<h1>UserInfo claims<\/h1>/);
+  assert.match(userInfoHtml, /user@example\.test/);
+
+  const { client: confidential, secret } = await createClientRegistration(
+    {
+      type: "confidential",
+      name: "Browser Introspection Client",
+      redirectUris: ["https://api.example.test/callback"],
+      scopes: ["openid"],
+      origins: [],
+    },
+    store,
+    nowSeconds(),
+  );
+  const introspectionForm = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/introspect", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  const introspectionCsrf = cookieValue(introspectionForm!, "aittadb_csrf");
+  const introspectionResult = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/introspect", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${introspectionCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        ui: "1",
+        csrf_token: introspectionCsrf,
+        token: accessToken,
+        client_id: confidential.id,
+        client_secret: secret || "",
+      }),
+    }),
+  );
+  const introspectionHtml = await introspectionResult!.text();
+  assert.equal(introspectionResult?.status, 200);
+  assert.match(introspectionHtml, /<h1>Introspection result<\/h1>/);
+  assert.match(introspectionHtml, /&quot;active&quot;: false/);
+
+  const revocationForm = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/revoke", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  const revocationCsrf = cookieValue(revocationForm!, "aittadb_csrf");
+  const revocationResult = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/revoke", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${revocationCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        ui: "1",
+        csrf_token: revocationCsrf,
+        token: refreshToken,
+        token_type_hint: "refresh_token",
+      }),
+    }),
+  );
+  assert.equal(revocationResult?.status, 200);
+  assert.match(await revocationResult!.text(), /<h1>Revocation accepted<\/h1>/);
+
+  const revokedRefresh = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+        client_id: client.id,
+      }),
+    }),
+  );
+  assert.equal(
+    ((await revokedRefresh?.json()) as { error: string }).error,
+    "invalid_grant",
+  );
+
+  const missingCsrf = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/token", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        origin: "https://aittadb.example.test",
+      },
+      body: form({ ui: "1", grant_type: "refresh_token" }),
+    }),
+  );
+  assert.equal(missingCsrf?.status, 403);
+  assert.match(await missingCsrf!.text(), /CSRF validation failed/);
+
+  const wrongOrigin = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/revoke", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${revocationCsrf}`,
+        origin: "https://malicious.example.test",
+      },
+      body: form({
+        ui: "1",
+        csrf_token: revocationCsrf,
+        token: "not-a-token",
+      }),
+    }),
+  );
+  assert.equal(wrongOrigin?.status, 403);
+  assert.match(await wrongOrigin!.text(), /Origin is not allowed/);
+
+  const apiGetToken = await app.fetch(
+    new Request("https://aittadb.example.test/oauth/token", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(apiGetToken?.status, 405);
+  assert.equal(apiGetToken?.headers.get("allow"), "POST");
+  assert.equal(
+    ((await apiGetToken?.json()) as { error: string }).error,
+    "invalid_request",
   );
 });
 
@@ -598,6 +933,25 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
   );
   assert.equal(bad?.status, 400);
 
+  const unsupported = await app.fetch(
+    new Request(
+      `https://aittadb.example.test/authorize?response_type=token&client_id=${client.id}&redirect_uri=${encodeURIComponent("https://client.example.test/callback")}&scope=openid&state=unsupported-state&code_challenge=${await sha256(verifier)}&code_challenge_method=S256`,
+    ),
+  );
+  assert.equal(unsupported?.status, 302);
+  const unsupportedLocation = new URL(
+    unsupported?.headers.get("location") ?? "",
+  );
+  assert.equal(unsupportedLocation.origin, "https://client.example.test");
+  assert.equal(
+    unsupportedLocation.searchParams.get("error"),
+    "unsupported_response_type",
+  );
+  assert.equal(
+    unsupportedLocation.searchParams.get("state"),
+    "unsupported-state",
+  );
+
   const authorize = await app.fetch(
     new Request(
       `https://aittadb.example.test/authorize?response_type=code&client_id=${client.id}&redirect_uri=${encodeURIComponent("https://client.example.test/callback")}&scope=openid%20email%20profile&state=s&nonce=n&code_challenge=${await sha256(verifier)}&code_challenge_method=S256`,
@@ -861,3 +1215,12 @@ test("AittaDB storage API stores D1 records and R2 files for the local user and 
   );
   assert.equal(missingFile?.status, 404);
 });
+
+function textAreaValue(html: string, id: string): string {
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const value = html.match(
+    new RegExp(`<textarea id="${escapedId}"[^>]*>([^<]*)</textarea>`),
+  )?.[1];
+  if (!value) throw new Error(`Missing textarea value for ${id}`);
+  return value;
+}

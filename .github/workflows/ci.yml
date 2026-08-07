@@ -15,11 +15,13 @@ jobs:
           node-version: "24"
           cache: "npm"
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run audit:high
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run test:integration
       - run: npm run openapi:check
+      - run: npm run swagger:check
       - run: npm run db:check
       - run: npm run build

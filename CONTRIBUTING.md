@@ -6,4 +6,10 @@ Use feature branches. Do not push directly to `main`, merge without review, depl
 
 Run `npm run validate` before requesting review.
 
+Dependencies are lockfile-pinned where runtime compatibility or vendored browser assets matter. Run `npm ci` for a clean install and do not suppress the explicit `npm run audit:high` result. Dependabot tracks routine npm updates; React, React Server Components, Vinext, Vite, Cloudflare, and Wrangler updates must be tested as a compatible group.
+
+The project uses handwritten, prepared D1 SQL rather than Drizzle ORM. Update `db/migrations/`, `db/schema.ts`, and `src/store/migrations.ts` together and prove consistency with `npm run db:check`. There is intentionally no `db:generate` command.
+
+Swagger UI is pinned in `package.json` and self-hosted from `public/vendor/swagger-ui/`. After changing `swagger-ui-dist`, run `npm run swagger:sync`; CI verifies the checked-in assets with `npm run swagger:check`.
+
 Clean-checkout validation uses `.openai/hosting.example.json` when the ignored checkout-local `.openai/hosting.json` does not exist. Create the local file with your own Sites project ID before running or deploying an actual Sites instance; the template is only a non-secret build fallback.

@@ -34,6 +34,19 @@ import {
   serviceHomePage,
 } from "./pages";
 import {
+  authorizationFormPage,
+  deviceAuthorizationFormPage,
+  deviceAuthorizationResultPage,
+  introspectionFormPage,
+  operationResultPage,
+  protocolErrorPage,
+  revocationFormPage,
+  structuredDataPage,
+  tokenFormPage,
+  tokenResultPage,
+  userInfoFormPage,
+} from "./protocol-pages";
+import {
   approveAuthorizationRequest,
   authenticateClient,
   createAuthorizeRequest,
@@ -281,13 +294,56 @@ async function route(
     url.pathname === "/.well-known/openid-configuration" &&
     request.method === "GET"
   ) {
-    return json(oidcConfiguration(config.issuerUrl));
+    const configuration = oidcConfiguration(config.issuerUrl);
+    return prefersRawJson(request, url)
+      ? json(configuration)
+      : html(
+          structuredDataPage({
+            title: "OpenID configuration",
+            eyebrow: "Issuer discovery",
+            summary:
+              "Published OpenID Provider metadata for this independent AittaDB issuer.",
+            payload: configuration,
+            rawHref: "/.well-known/openid-configuration?format=json",
+            visualHeading: "Every endpoint begins with one issuer.",
+          }),
+        );
   }
   if (url.pathname === "/.well-known/jwks.json" && request.method === "GET") {
-    return json({ keys: [publicJwk(config.jwtPrivateJwk, config.jwtKeyId)] });
+    const jwks = { keys: [publicJwk(config.jwtPrivateJwk, config.jwtKeyId)] };
+    return prefersRawJson(request, url)
+      ? json(jwks)
+      : html(
+          structuredDataPage({
+            title: "JSON Web Key Set",
+            eyebrow: "ES256 verification keys",
+            summary:
+              "Public P-256 key material for validating JWTs issued by this AittaDB deployment.",
+            payload: jwks,
+            rawHref: "/.well-known/jwks.json?format=json",
+            visualHeading: "Public verification without private key exposure.",
+          }),
+        );
   }
   if (url.pathname === "/openapi.json" && request.method === "GET") {
-    return json({ ...openApiSpec, servers: [{ url: config.issuerUrl }] });
+    const specification = {
+      ...openApiSpec,
+      servers: [{ url: config.issuerUrl }],
+    };
+    return prefersRawJson(request, url)
+      ? json(specification)
+      : html(
+          structuredDataPage({
+            title: "OpenAPI document",
+            eyebrow: "OpenAPI 3.1",
+            summary:
+              "Canonical machine-readable contract for the AittaDB HTTP service.",
+            payload: specification,
+            rawHref: "/openapi.json?format=json",
+            visualHeading:
+              "One canonical contract. Two useful representations.",
+          }),
+        );
   }
   if (url.pathname === "/docs" && request.method === "GET")
     return html(docsPage());
@@ -299,12 +355,29 @@ async function route(
     return localSessionEndpoint(request, env, store, config);
   }
   if (url.pathname === "/authorize" && request.method === "GET") {
+    if (acceptsHtml(request) && !url.searchParams.has("client_id")) {
+      return html(authorizationFormPage());
+    }
     return createAuthorizeRequest(url, config, store);
+  }
+  if (
+    url.pathname === "/oauth/device_authorization" &&
+    request.method === "GET"
+  ) {
+    return acceptsHtml(request)
+      ? browserFormPage(deviceAuthorizationFormPage)
+      : methodNotAllowed("POST");
   }
   if (
     url.pathname === "/oauth/device_authorization" &&
     request.method === "POST"
   ) {
+    const form = await readForm(request);
+    const browser = isBrowserUiForm(form);
+    if (browser) {
+      const rejected = rejectInvalidBrowserForm(request, form);
+      if (rejected) return rejected;
+    }
     if (
       !(await store.rateLimit(
         `device:${clientIp(request)}`,
@@ -315,24 +388,163 @@ async function route(
     ) {
       return oauthError("slow_down", "Rate limit exceeded", 429);
     }
-    return createDeviceAuthorization(
+    const response = await createDeviceAuthorization(
       request,
-      await readForm(request),
+      form,
       config,
       store,
     );
+    return browser
+      ? browserJsonResponse(
+          response,
+          deviceAuthorizationResultPage,
+          "/oauth/device_authorization",
+        )
+      : response;
+  }
+  if (url.pathname === "/oauth/token" && request.method === "GET") {
+    return acceptsHtml(request)
+      ? browserFormPage(tokenFormPage)
+      : methodNotAllowed("POST");
   }
   if (url.pathname === "/oauth/token" && request.method === "POST") {
-    return tokenEndpoint(request, config, store);
+    const form = await readForm(request);
+    const browser = isBrowserUiForm(form);
+    if (browser) {
+      const rejected = rejectInvalidBrowserForm(request, form);
+      if (rejected) return rejected;
+    }
+    const response = await tokenEndpoint(request, config, store, form);
+    return browser
+      ? browserJsonResponse(response, tokenResultPage, "/oauth/token")
+      : response;
+  }
+  if (url.pathname === "/oauth/revoke" && request.method === "GET") {
+    return acceptsHtml(request)
+      ? browserFormPage(revocationFormPage)
+      : methodNotAllowed("POST");
   }
   if (url.pathname === "/oauth/revoke" && request.method === "POST") {
-    return revokeEndpoint(request, store);
+    const form = await readForm(request);
+    const browser = isBrowserUiForm(form);
+    if (browser) {
+      const rejected = rejectInvalidBrowserForm(request, form);
+      if (rejected) return rejected;
+    }
+    const response = await revokeEndpoint(request, store, form);
+    return browser
+      ? browserJsonResponse(
+          response,
+          (payload) =>
+            operationResultPage({
+              title: "Revocation accepted",
+              eyebrow: "OAuth 2.0 revocation",
+              summary:
+                "The production revocation endpoint accepted the request without disclosing prior token state.",
+              payload,
+              tone: "success",
+              actions: [
+                { href: "/oauth/revoke", label: "Revoke another token" },
+                {
+                  href: "/oauth/introspect",
+                  label: "Open introspection",
+                  secondary: true,
+                },
+              ],
+            }),
+          "/oauth/revoke",
+        )
+      : response;
+  }
+  if (url.pathname === "/oauth/introspect" && request.method === "GET") {
+    return acceptsHtml(request)
+      ? browserFormPage(introspectionFormPage)
+      : methodNotAllowed("POST");
   }
   if (url.pathname === "/oauth/introspect" && request.method === "POST") {
-    return introspectEndpoint(request, config, store);
+    const form = await readForm(request);
+    const browser = isBrowserUiForm(form);
+    if (browser) {
+      const rejected = rejectInvalidBrowserForm(request, form);
+      if (rejected) return rejected;
+    }
+    const response = await introspectEndpoint(request, config, store, form);
+    return browser
+      ? browserJsonResponse(
+          response,
+          (payload) =>
+            operationResultPage({
+              title: "Introspection result",
+              eyebrow: "OAuth 2.0 introspection",
+              summary:
+                "The production introspection endpoint returned this client-bound token state.",
+              payload,
+              actions: [
+                { href: "/oauth/introspect", label: "Inspect another token" },
+                {
+                  href: "/oauth/revoke",
+                  label: "Open revocation",
+                  secondary: true,
+                },
+              ],
+            }),
+          "/oauth/introspect",
+        )
+      : response;
   }
   if (url.pathname === "/userinfo" && request.method === "GET") {
-    return userInfoEndpoint(request, config, store);
+    if (!bearerToken(request) && acceptsHtml(request)) {
+      return browserFormPage(userInfoFormPage);
+    }
+    const response = await userInfoEndpoint(request, config, store);
+    return acceptsHtml(request)
+      ? browserJsonResponse(
+          response,
+          (payload) =>
+            operationResultPage({
+              title: "UserInfo claims",
+              eyebrow: "OpenID Connect UserInfo",
+              summary:
+                "Claims returned by the production UserInfo service for the supplied AittaDB access token and local scopes.",
+              payload,
+              actions: [
+                { href: "/userinfo", label: "Inspect another token" },
+                { href: "/session", label: "My session", secondary: true },
+              ],
+            }),
+          "/userinfo",
+        )
+      : response;
+  }
+  if (url.pathname === "/userinfo" && request.method === "POST") {
+    const form = await readForm(request);
+    if (!isBrowserUiForm(form)) return methodNotAllowed("GET");
+    const rejected = rejectInvalidBrowserForm(request, form);
+    if (rejected) return rejected;
+    const headers = new Headers(request.headers);
+    headers.set("authorization", `Bearer ${form.get("access_token") || ""}`);
+    headers.delete("content-type");
+    const response = await userInfoEndpoint(
+      new Request(request.url, { method: "GET", headers }),
+      config,
+      store,
+    );
+    return browserJsonResponse(
+      response,
+      (payload) =>
+        operationResultPage({
+          title: "UserInfo claims",
+          eyebrow: "OpenID Connect UserInfo",
+          summary:
+            "Claims returned by the production UserInfo service for the supplied AittaDB access token and local scopes.",
+          payload,
+          actions: [
+            { href: "/userinfo", label: "Inspect another token" },
+            { href: "/session", label: "My session", secondary: true },
+          ],
+        }),
+      "/userinfo",
+    );
   }
   if (url.pathname.startsWith("/storage/")) {
     return storageEndpoint(request, url, env, store, config);
@@ -536,10 +748,82 @@ function statusText(status: number): string {
   return "The request failed.";
 }
 
+function prefersRawJson(request: Request, url: URL): boolean {
+  return url.searchParams.get("format") === "json" || !acceptsHtml(request);
+}
+
+function browserFormPage(renderer: (csrf: string) => string): Response {
+  const csrf = randomToken(24);
+  return html(renderer(csrf), {
+    headers: { "set-cookie": csrfCookie(csrf) },
+  });
+}
+
+function isBrowserUiForm(form: URLSearchParams): boolean {
+  return form.get("ui") === "1";
+}
+
+function rejectInvalidBrowserForm(
+  request: Request,
+  form: URLSearchParams,
+): Response | null {
+  if (!requireSameOrigin(request)) {
+    return html(
+      errorPage("Invalid request", "Same-origin form submission is required", {
+        status: 403,
+      }),
+      { status: 403 },
+    );
+  }
+  if (!validCsrf(request, form)) {
+    return html(
+      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
+      { status: 403 },
+    );
+  }
+  return null;
+}
+
+async function browserJsonResponse(
+  response: Response,
+  successPage: (payload: Record<string, unknown>) => string,
+  retryHref: string,
+): Promise<Response> {
+  if (
+    !(response.headers.get("content-type") ?? "").includes("application/json")
+  )
+    return response;
+  const payload = (await response
+    .clone()
+    .json()
+    .catch(() => null)) as Record<string, unknown> | null;
+  if (!payload) return response;
+  const page =
+    response.status >= 400
+      ? protocolErrorPage(payload, response.status, retryHref)
+      : successPage(payload);
+  return html(page, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+function methodNotAllowed(allowed: string): Response {
+  const response = oauthError(
+    "invalid_request",
+    `Method not allowed; use ${allowed}`,
+    405,
+  );
+  response.headers.set("allow", allowed);
+  return response;
+}
+
 async function tokenEndpoint(
   request: Request,
   config: ReturnType<typeof loadConfig>,
   store: AuthStore,
+  submittedForm?: URLSearchParams,
 ): Promise<Response> {
   if (
     !(await store.rateLimit(
@@ -551,7 +835,7 @@ async function tokenEndpoint(
   ) {
     return oauthError("slow_down", "Rate limit exceeded", 429);
   }
-  const form = await readForm(request);
+  const form = submittedForm ?? (await readForm(request));
   const grantType = form.get("grant_type");
   if (grantType === "urn:ietf:params:oauth:grant-type:device_code")
     return pollDeviceToken(form, config, store);
@@ -568,8 +852,9 @@ async function tokenEndpoint(
 async function revokeEndpoint(
   request: Request,
   store: AuthStore,
+  submittedForm?: URLSearchParams,
 ): Promise<Response> {
-  const form = await readForm(request);
+  const form = submittedForm ?? (await readForm(request));
   const token = form.get("token") || "";
   const hint = form.get("token_type_hint");
   const hash = await sha256(token);
@@ -582,8 +867,9 @@ async function introspectEndpoint(
   request: Request,
   config: ReturnType<typeof loadConfig>,
   store: AuthStore,
+  submittedForm?: URLSearchParams,
 ): Promise<Response> {
-  const form = await readForm(request);
+  const form = submittedForm ?? (await readForm(request));
   const client = await authenticateClient(request, form, store);
   if (client instanceof Response) return client;
   if (client.type !== "confidential")
