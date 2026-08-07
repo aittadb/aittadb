@@ -8,7 +8,7 @@ This style guide describes style-level alignment only. Do not copy ChatGPT produ
 
 Use one shared authentication-service shell for all normal HTML responses:
 
-- A visual brand rail or header that communicates the identity-to-token broker concept.
+- A full-bleed visual panel that communicates the identity-to-token broker concept.
 - One focused content panel for the current task.
 - A consistent footer or badge linking to `https://github.com/sendanor/sites-auth-broker`.
 - No broad site navigation, marketing sections, testimonials, pricing, blog content, dashboard, or user profile.
@@ -23,8 +23,8 @@ Prefer:
 - Off-white or lightly tinted page backgrounds with depth from panels, borders, and shadows.
 - Balanced contrast with one dark anchoring area and one light task area.
 - Teal, blue, green, and warm accent colors used sparingly.
-- Roundness around 12-18px for controls and 20-30px for the outer shell.
-- Subtle CSS-generated diagrams, product marks, or locally hosted images that explain the broker flow.
+- Restrained 6-8px corner radii for the outer shell, controls, and metadata surfaces.
+- Original locally hosted imagery that explains the broker flow, paired with page-specific visual copy.
 
 Avoid:
 
@@ -38,6 +38,8 @@ Avoid:
 
 Images are allowed only when they help communicate the broker boundary or improve trust in a mandatory auth page. Prefer local, checked-in assets generated or designed specifically for this project. CSS artwork is acceptable when it gives the same level of polish without adding asset-loading risk.
 
+The shared production asset is `public/broker-aperture.jpg`. Its glass apertures show one signal crossing a boundary and resolving into separate local credentials. It is decorative in HTML and must retain an empty `alt` attribute because the adjacent visual copy carries the meaning. Every page supplies a relevant visual eyebrow, heading, and explanation instead of reusing generic marketing copy.
+
 Any image asset must:
 
 - Be served from this origin.
@@ -50,7 +52,7 @@ Do not add image dependencies to token responses, JSON API responses, or machine
 
 ## Typography and Layout
 
-Use system fonts. Keep letter spacing at `0` for normal text and reserve small positive tracking for short uppercase eyebrows only. Do not scale font sizes directly with viewport width except through bounded `clamp()` values.
+Use system fonts and keep letter spacing at `0`. Use fixed responsive type steps at explicit breakpoints rather than scaling font size with viewport width.
 
 Every page should have:
 
@@ -81,8 +83,10 @@ HTML pages show available actions as buttons or links. JSON responses should exp
 Before completing browser UI work:
 
 - Check every HTML response uses the shared shell or a documented exception.
+- Check every page supplies content-aware visual copy appropriate to its operation or error state.
 - Check every page has the GitHub project affordance.
 - Check desktop and mobile layouts do not overlap.
 - Check CSP remains compatible with the stylesheet and assets.
 - Check no external fonts, images, or scripts were introduced.
+- Check `broker-aperture.jpg` remains local, decorative, and free of text, marks, secrets, PII, and deployment identifiers.
 - Check errors are content-aware and not default/plain server output.
