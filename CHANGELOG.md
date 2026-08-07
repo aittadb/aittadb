@@ -12,3 +12,4 @@
 - Hardened storage non-disclosure and cross-user/client isolation, made file downloads attachment-safe, isolated AittaDB shell styles from Swagger UI controls, and added focused regression coverage.
 - Removed request-time D1 schema work, packaged reviewed SQL migrations into Sites deployment artifacts, bypassed application startup for static assets, bounded cleanup scheduling, and parallelized client metadata hydration.
 - Corrected browser form origin validation for canonical custom domains and Sites same-origin dispatch behavior without allowing arbitrary cross-origin submissions.
+- Kept validated host-only CSRF session tokens stable across concurrently open browser forms while retaining malformed-token, mismatch, and same-origin rejection.
