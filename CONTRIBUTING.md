@@ -2,7 +2,7 @@
 
 Read `AGENTS.md` before changing code. Every implementation change must include the public contract, implementation, automated tests, documentation, validation evidence, and any necessary `AGENTS.md`, OpenAPI, schema, migration, or architecture updates in the same task.
 
-Use [PLAN.md](PLAN.md) for dependency-ordered implementation work and [ROADMAP.md](ROADMAP.md) for stable future product direction. Every roadmap checkbox is intentionally unchecked and describes planned, unavailable work; moving an item into implementation requires a complete PLAN task rather than marking the roadmap item complete.
+Use [PLAN.md](PLAN.md) for accepted, dependency-ordered implementation work, [ROADMAP.md](ROADMAP.md) for stable future product direction, and [BACKLOG.md](BACKLOG.md) for uncommitted ideas with no delivery commitment. Roadmap and backlog checkboxes describe unavailable work. Before implementing either, create a complete unchecked PLAN task; do not treat a checkbox in those files as authorization to begin.
 
 Use feature branches. Do not push directly to `main`, merge without review, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
 
