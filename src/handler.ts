@@ -71,33 +71,54 @@ export function createAuthBrokerWithStore(
       const corsHeaders = isCorsControlledRoute(url.pathname)
         ? cors(request, config.allowedCorsOrigins)
         : new Headers();
-      if (corsHeaders instanceof Response) return corsHeaders;
+      if (corsHeaders instanceof Response)
+        return finalizeResponse(request, corsHeaders, config);
       if (request.method === "OPTIONS")
         return new Response(null, { status: 204, headers: corsHeaders });
-      if (!isBrokerRoute(url.pathname)) return null;
+      if (!isBrokerRoute(url.pathname)) {
+        if (isAssetRoute(url.pathname)) return null;
+        return finalizeResponse(
+          request,
+          oauthError("not_found", "No broker route matches this request", 404),
+          config,
+          corsHeaders,
+        );
+      }
 
       try {
         if (!store && needsStore(url.pathname))
-          return json({ error: "database_unavailable" }, { status: 503 });
+          return finalizeResponse(
+            request,
+            oauthError("database_unavailable", "Database is unavailable", 503),
+            config,
+            corsHeaders,
+          );
 
         const routed = await route(request, url, env, store, config);
-        const headers = new Headers(routed.headers);
-        for (const [key, value] of corsHeaders.entries())
-          headers.set(key, value);
-        addSecurityHeaders(headers);
-        return new Response(routed.body, {
-          status: routed.status,
-          statusText: routed.statusText,
-          headers,
-        });
+        return finalizeResponse(request, routed, config, corsHeaders);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unexpected error";
         if (message === "unsupported_media_type")
-          return oauthError("invalid_request", "Unsupported content type", 415);
+          return finalizeResponse(
+            request,
+            oauthError("invalid_request", "Unsupported content type", 415),
+            config,
+            corsHeaders,
+          );
         if (message === "request_too_large")
-          return oauthError("invalid_request", "Request is too large", 413);
-        return json({ error: "server_error" }, { status: 500 });
+          return finalizeResponse(
+            request,
+            oauthError("invalid_request", "Request is too large", 413),
+            config,
+            corsHeaders,
+          );
+        return finalizeResponse(
+          request,
+          oauthError("server_error", "Unexpected server error", 500),
+          config,
+          corsHeaders,
+        );
       }
     },
   };
@@ -215,7 +236,8 @@ async function route(
   if (url.pathname === "/docs" && request.method === "GET")
     return html(docsPage());
 
-  if (!store) return json({ error: "database_unavailable" }, { status: 503 });
+  if (!store)
+    return oauthError("database_unavailable", "Database is unavailable", 503);
 
   if (url.pathname === "/authorize" && request.method === "GET") {
     return createAuthorizeRequest(url, config, store);
@@ -279,7 +301,93 @@ async function route(
   if (url.pathname === "/admin/clients" && request.method === "POST") {
     return adminClientsPost(request, env, config, store);
   }
-  return json({ error: "not_found" }, { status: 404 });
+  return oauthError("not_found", "No broker route matches this request", 404);
+}
+
+async function finalizeResponse(
+  request: Request,
+  response: Response,
+  config: ReturnType<typeof loadConfig>,
+  corsHeaders = new Headers(),
+): Promise<Response> {
+  const negotiated = await negotiateBrowserError(request, response);
+  const headers = new Headers(negotiated.headers);
+  for (const [key, value] of corsHeaders.entries()) headers.set(key, value);
+  addSecurityHeaders(headers);
+  return new Response(negotiated.body, {
+    status: negotiated.status,
+    statusText: negotiated.statusText,
+    headers,
+  });
+}
+
+async function negotiateBrowserError(
+  request: Request,
+  response: Response,
+): Promise<Response> {
+  const contentType = response.headers.get("content-type") ?? "";
+  if (
+    response.status < 400 ||
+    !acceptsHtml(request) ||
+    !contentType.includes("application/json")
+  ) {
+    return response;
+  }
+
+  const payload = await response
+    .clone()
+    .json()
+    .catch(() => null);
+  const error =
+    payload && typeof payload === "object" && "error" in payload
+      ? String((payload as { error: unknown }).error)
+      : "request_failed";
+  const description =
+    payload &&
+    typeof payload === "object" &&
+    "error_description" in payload &&
+    typeof (payload as { error_description: unknown }).error_description ===
+      "string"
+      ? (payload as { error_description: string }).error_description
+      : statusText(response.status);
+
+  return html(
+    errorPage(titleForError(error, response.status), description, {
+      status: response.status,
+      error,
+    }),
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    },
+  );
+}
+
+function titleForError(error: string, status: number): string {
+  if (status === 404 || error === "not_found") return "Not found";
+  if (status === 403) return "Forbidden";
+  if (status === 401 || error === "invalid_client")
+    return "Authentication failed";
+  if (error === "slow_down") return "Slow down";
+  if (error === "authorization_pending") return "Authorization pending";
+  if (error === "access_denied") return "Access denied";
+  if (error === "expired_token") return "Expired token";
+  if (status >= 500) return "Service unavailable";
+  return "Invalid request";
+}
+
+function statusText(status: number): string {
+  if (status === 400) return "The request could not be accepted.";
+  if (status === 401) return "Authentication is required.";
+  if (status === 403)
+    return "This account is not allowed to perform that action.";
+  if (status === 404) return "The requested resource was not found.";
+  if (status === 413) return "The request body is too large.";
+  if (status === 415) return "The content type is not supported.";
+  if (status === 429) return "Too many requests. Please wait and try again.";
+  if (status >= 500) return "The service could not complete the request.";
+  return "The request failed.";
 }
 
 async function tokenEndpoint(
@@ -380,14 +488,17 @@ async function deviceEntryPost(
 ): Promise<Response> {
   if (!requireSameOrigin(request))
     return html(
-      errorPage("Invalid request", "Same-origin form submission is required"),
+      errorPage("Invalid request", "Same-origin form submission is required", {
+        status: 403,
+      }),
       { status: 403 },
     );
   const form = await readForm(request);
   if (!validCsrf(request, form))
-    return html(errorPage("Invalid request", "CSRF validation failed"), {
-      status: 403,
-    });
+    return html(
+      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
+      { status: 403 },
+    );
   const grant = await store.getDeviceGrantByUserCodeHash(
     await sha256(normalizeUserCode(form.get("user_code") || "")),
   );
@@ -404,9 +515,10 @@ async function deviceEntryPost(
   if (identity instanceof Response) return identity;
   const client = await store.getClient(grant.clientId);
   if (!client)
-    return html(errorPage("Invalid request", "Client is unavailable"), {
-      status: 400,
-    });
+    return html(
+      errorPage("Invalid request", "Client is unavailable", { status: 400 }),
+      { status: 400 },
+    );
   const csrf = randomToken(24);
   return html(deviceConsentPage(grant, client, csrf), {
     headers: { "set-cookie": csrfCookie(csrf) },
@@ -420,14 +532,17 @@ async function deviceDecisionPost(
 ): Promise<Response> {
   if (!requireSameOrigin(request))
     return html(
-      errorPage("Invalid request", "Same-origin form submission is required"),
+      errorPage("Invalid request", "Same-origin form submission is required", {
+        status: 403,
+      }),
       { status: 403 },
     );
   const form = await readForm(request);
   if (!validCsrf(request, form))
-    return html(errorPage("Invalid request", "CSRF validation failed"), {
-      status: 403,
-    });
+    return html(
+      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
+      { status: 403 },
+    );
   const identity = requireSitesIdentity(request, env);
   if (identity instanceof Response) return identity;
   const grant = await store.getDeviceGrantByUserCodeHash(
@@ -435,7 +550,9 @@ async function deviceDecisionPost(
   );
   if (!grant || grant.status !== "pending" || grant.expiresAt <= nowSeconds()) {
     return html(
-      errorPage("Invalid request", "Device request is no longer pending"),
+      errorPage("Invalid request", "Device request is no longer pending", {
+        status: 400,
+      }),
       { status: 400 },
     );
   }
@@ -449,6 +566,7 @@ async function deviceDecisionPost(
       grant.status === "approved"
         ? "You may return to the CLI."
         : "The request was denied.",
+      { status: 200, error: grant.status },
     ),
   );
 }
@@ -463,14 +581,18 @@ async function consentGet(
   const requestId = new URL(request.url).searchParams.get("request_id") || "";
   const authRequest = await store.getAuthorizationRequest(requestId);
   if (!authRequest || authRequest.expiresAt <= nowSeconds())
-    return html(errorPage("Invalid request", "Authorization request expired"), {
-      status: 400,
-    });
+    return html(
+      errorPage("Invalid request", "Authorization request expired", {
+        status: 400,
+      }),
+      { status: 400 },
+    );
   const client = await store.getClient(authRequest.clientId);
   if (!client)
-    return html(errorPage("Invalid request", "Client is unavailable"), {
-      status: 400,
-    });
+    return html(
+      errorPage("Invalid request", "Client is unavailable", { status: 400 }),
+      { status: 400 },
+    );
   const user = await store.findOrCreateUser(identity, nowSeconds());
   if (await store.hasConsent(user.id, client.id, authRequest.scope)) {
     const code = await approveAuthorizationRequest(
@@ -494,23 +616,29 @@ async function consentPost(
 ): Promise<Response> {
   if (!requireSameOrigin(request))
     return html(
-      errorPage("Invalid request", "Same-origin form submission is required"),
+      errorPage("Invalid request", "Same-origin form submission is required", {
+        status: 403,
+      }),
       { status: 403 },
     );
   const form = await readForm(request);
   if (!validCsrf(request, form))
-    return html(errorPage("Invalid request", "CSRF validation failed"), {
-      status: 403,
-    });
+    return html(
+      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
+      { status: 403 },
+    );
   const identity = requireSitesIdentity(request, env);
   if (identity instanceof Response) return identity;
   const authRequest = await store.getAuthorizationRequest(
     form.get("request_id") || "",
   );
   if (!authRequest || authRequest.expiresAt <= nowSeconds())
-    return html(errorPage("Invalid request", "Authorization request expired"), {
-      status: 400,
-    });
+    return html(
+      errorPage("Invalid request", "Authorization request expired", {
+        status: 400,
+      }),
+      { status: 400 },
+    );
   if (form.get("decision") !== "approve") {
     return redirectWithError(
       authRequest.redirectUri,
@@ -553,14 +681,17 @@ async function adminClientsPost(
   if (admin instanceof Response) return admin;
   if (!requireSameOrigin(request))
     return html(
-      errorPage("Invalid request", "Same-origin form submission is required"),
+      errorPage("Invalid request", "Same-origin form submission is required", {
+        status: 403,
+      }),
       { status: 403 },
     );
   const form = await readForm(request);
   if (!validCsrf(request, form))
-    return html(errorPage("Invalid request", "CSRF validation failed"), {
-      status: 403,
-    });
+    return html(
+      errorPage("Invalid request", "CSRF validation failed", { status: 403 }),
+      { status: 403 },
+    );
   const action = form.get("action");
   if (action) {
     const clientId = form.get("client_id") || "";
@@ -614,6 +745,7 @@ async function requireAdmin(
       errorPage(
         "Forbidden",
         "Administrative access is not allowed for this account",
+        { status: 403, error: "forbidden" },
       ),
       { status: 403 },
     );
@@ -666,6 +798,14 @@ function isBrokerRoute(pathname: string): boolean {
     pathname === "/device/decision" ||
     pathname === "/consent" ||
     pathname.startsWith("/admin/")
+  );
+}
+
+function isAssetRoute(pathname: string): boolean {
+  return (
+    pathname.startsWith("/_") ||
+    pathname.startsWith("/cdn-cgi/") ||
+    /\.[a-z0-9]{2,8}$/i.test(pathname)
   );
 }
 

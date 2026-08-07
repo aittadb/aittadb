@@ -23,9 +23,71 @@ export function oauthError(
     {
       error,
       ...(description ? { error_description: description } : {}),
+      _links: defaultHypermediaLinks(),
+      actions: defaultHypermediaActions(),
     },
     { status },
   );
+}
+
+export function defaultHypermediaLinks(): Record<
+  string,
+  { href: string; type?: string }
+> {
+  return {
+    service: { href: "/", type: "text/html" },
+    health: { href: "/health", type: "application/json" },
+    docs: { href: "/docs", type: "text/html" },
+    openapi: { href: "/openapi.json", type: "application/json" },
+    oidcConfiguration: {
+      href: "/.well-known/openid-configuration",
+      type: "application/json",
+    },
+    jwks: { href: "/.well-known/jwks.json", type: "application/json" },
+  };
+}
+
+export function defaultHypermediaActions(): Record<string, unknown> {
+  return {
+    authorize: {
+      method: "GET",
+      href: "/authorize",
+      parameters: [
+        "response_type",
+        "client_id",
+        "redirect_uri",
+        "scope",
+        "state",
+        "nonce",
+        "code_challenge",
+        "code_challenge_method",
+      ],
+    },
+    deviceAuthorization: {
+      method: "POST",
+      href: "/oauth/device_authorization",
+      encoding: "application/x-www-form-urlencoded",
+      parameters: ["client_id", "scope"],
+    },
+    token: {
+      method: "POST",
+      href: "/oauth/token",
+      encoding: "application/x-www-form-urlencoded",
+      parameters: ["grant_type"],
+    },
+    revoke: {
+      method: "POST",
+      href: "/oauth/revoke",
+      encoding: "application/x-www-form-urlencoded",
+      parameters: ["token", "token_type_hint"],
+    },
+    introspect: {
+      method: "POST",
+      href: "/oauth/introspect",
+      encoding: "application/x-www-form-urlencoded",
+      parameters: ["token", "token_type_hint"],
+    },
+  };
 }
 
 export function html(body: string, init: ResponseInit = {}): Response {

@@ -149,10 +149,26 @@ export const openApiSpec = {
     schemas: {
       OAuthError: {
         type: "object",
-        required: ["error"],
+        required: ["error", "_links"],
         properties: {
           error: { type: "string" },
           error_description: { type: "string" },
+          _links: { $ref: "#/components/schemas/HypermediaLinks" },
+          actions: {
+            type: "object",
+            additionalProperties: true,
+          },
+        },
+      },
+      HypermediaLinks: {
+        type: "object",
+        additionalProperties: {
+          type: "object",
+          required: ["href"],
+          properties: {
+            href: { type: "string" },
+            type: { type: "string" },
+          },
         },
       },
     },
