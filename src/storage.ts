@@ -10,8 +10,8 @@ import type {
   StorageRecord,
 } from "./types";
 
-const MAX_RECORD_BYTES = 65_536;
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_RECORD_BYTES = 65_536;
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 type StorageScope = "storage.read" | "storage.write" | "storage.delete";
 

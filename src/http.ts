@@ -127,7 +127,8 @@ export async function readForm(
     throw new Error("unsupported_media_type");
   }
   const text = await request.text();
-  if (text.length > maxBytes) throw new Error("request_too_large");
+  if (new TextEncoder().encode(text).byteLength > maxBytes)
+    throw new Error("request_too_large");
   return new URLSearchParams(text);
 }
 
@@ -200,6 +201,14 @@ export function parseCookies(request: Request): Map<string, string> {
 
 export function csrfCookie(value: string): string {
   return `aittadb_csrf=${value}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=900`;
+}
+
+export function csrfTokenMatches(
+  request: Request,
+  submittedValue: string | null,
+): boolean {
+  const cookie = parseCookies(request).get("aittadb_csrf");
+  return Boolean(cookie && submittedValue && cookie === submittedValue);
 }
 
 export function acceptsHtml(request: Request): boolean {

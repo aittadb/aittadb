@@ -61,6 +61,8 @@ The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is
 
 Register a client that is allowed to request `storage.read`, `storage.write`, and `storage.delete`. After the user approves those local scopes, use the returned access token with the storage API.
 
+For a browser-operated check, open `/storage/records` or `/storage/files`. Those forms submit the bearer token in a CSRF-protected same-origin body and call the same operations as the curl examples. Record forms support list, read, write, and delete. File forms support list, download, upload, and delete. The token is not kept between responses, so enter it again for each deliberate operation.
+
 Store a JSON record in D1:
 
 ```sh
