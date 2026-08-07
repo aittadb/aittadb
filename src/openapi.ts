@@ -686,6 +686,7 @@ export const openApiSpec = {
         required: [
           "service",
           "description",
+          "hostingPlatform",
           "issuer",
           "officialOpenAIProduct",
           "upstreamSignIn",
@@ -701,6 +702,12 @@ export const openApiSpec = {
             type: "string",
             description:
               "Current AittaDB product scope for human and machine clients.",
+          },
+          hostingPlatform: {
+            type: "string",
+            const: "OpenAI-hosted ChatGPT Sites",
+            description:
+              "Hosted platform on which this AittaDB deployment runs; AittaDB itself remains independent.",
           },
           issuer: { type: "string", format: "uri" },
           docs: { type: "string", format: "uri" },

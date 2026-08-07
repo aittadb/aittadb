@@ -170,6 +170,7 @@ async function route(
       service: "AittaDB",
       description:
         "A hosted application backend for third-party apps, with ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage.",
+      hostingPlatform: "OpenAI-hosted ChatGPT Sites",
       issuer: config.issuerUrl,
       docs: `${config.issuerUrl}/docs`,
       openapi: `${config.issuerUrl}/openapi.json`,

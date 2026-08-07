@@ -21,9 +21,13 @@ The public service home is an operation map, not a simulated demo. Its links mus
 
 Lead with **hosted application backend for third-party apps**. Follow with the concrete capabilities available now: ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage. Treat persistent events as planned until implemented. Do not lead with OAuth/OIDC terminology or describe AittaDB as only an authentication broker.
 
+Describe AittaDB as deployed on OpenAI-hosted ChatGPT Sites. Distinguish the platform relationship from AittaDB itself, which remains independent.
+
 The first user-facing reference to the upstream authentication must say "ChatGPT sign-in inside ChatGPT Sites." Later references on the same page may say "ChatGPT sign-in." Do not present the standalone phrase "Sites identity" to users.
 
 Always pair the upstream description with the boundary: AittaDB creates a separate user with an immutable UUID, issues its own tokens, and stores application data only inside AittaDB. Those tokens are not OpenAI or ChatGPT tokens, and AittaDB never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
+
+State that AittaDB is independent and not affiliated with, endorsed by, or an official product of OpenAI in natural prose. Keep the boolean `officialOpenAIProduct` flag for JSON clients, but do not render "Official OpenAI product: no" as a browser metadata row.
 
 Label the downstream credential source as **Session issuer**, never **Token authority**. The latter can be mistaken for AI-model token accounting. Supporting copy may name OAuth, OIDC, and JWT credentials explicitly.
 

@@ -25,6 +25,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   const apiRootJson = (await apiRoot?.json()) as {
     service: string;
     description: string;
+    hostingPlatform: string;
     upstreamSignIn: {
       source: string;
       identitySignal: string;
@@ -32,6 +33,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       credentialsForwarded: boolean;
     };
     sessionIssuer: string;
+    officialOpenAIProduct: boolean;
     capabilities: string[];
     plannedCapabilities: string[];
     _links: {
@@ -49,6 +51,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     apiRootJson.description,
     /hosted application backend for third-party apps/i,
   );
+  assert.equal(apiRootJson.hostingPlatform, "OpenAI-hosted ChatGPT Sites");
   assert.equal(
     apiRootJson.upstreamSignIn.source,
     "ChatGPT sign-in inside ChatGPT Sites",
@@ -60,6 +63,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiRootJson.upstreamSignIn.stableSubjectSupplied, false);
   assert.equal(apiRootJson.upstreamSignIn.credentialsForwarded, false);
   assert.equal(apiRootJson.sessionIssuer, "AittaDB");
+  assert.equal(apiRootJson.officialOpenAIProduct, false);
   assert.deepEqual(apiRootJson.capabilities, [
     "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
     "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
@@ -124,6 +128,11 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     /credentials and stored data are not OpenAI or ChatGPT credentials or data/,
   );
   assert.match(browserRootHtml, /Session issuer/);
+  assert.match(browserRootHtml, /Hosting platform/);
+  assert.match(browserRootHtml, /OpenAI-hosted ChatGPT Sites/);
+  assert.match(browserRootHtml, /Persistent storage/);
+  assert.match(browserRootHtml, /itself is independent and is not affiliated/);
+  assert.doesNotMatch(browserRootHtml, /Official OpenAI product/);
   assert.match(browserRootHtml, /href="\/session"/);
   assert.match(browserRootHtml, /href="\/storage\/records"/);
   assert.match(browserRootHtml, /href="\/storage\/files"/);
