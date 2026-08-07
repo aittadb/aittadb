@@ -182,7 +182,6 @@ export interface StorageFileMetadata {
 }
 
 export interface AuthStore {
-  migrate(): Promise<void>;
   cleanup(now: number): Promise<void>;
   rateLimit(
     key: string,

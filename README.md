@@ -54,7 +54,7 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 - Opaque hashed refresh tokens with rotation and reuse detection.
 - D1-backed durable state with checked-in migrations.
 - Per-user, per-client application storage: JSON records in D1 and file bytes in R2.
-- Minimal ChatGPT-sign-in-protected browser forms inside ChatGPT Sites for device approval, consent, and admin client bootstrap.
+- ChatGPT-sign-in-protected browser operations for current-session UserInfo, personal record/file storage, device approval, consent, and admin client bootstrap.
 
 ## Local Setup
 
@@ -67,7 +67,7 @@ npm run validate
 
 `make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material.
 
-`npm run validate` includes a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, tests, and the production build. D1 migrations are maintained as reviewed SQL; the project intentionally has no incomplete ORM generation command.
+`npm run validate` includes a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, tests, and the production build. D1 migrations are maintained as reviewed SQL and packaged into the Sites deployment artifact during the build; request handlers never run schema DDL. The project intentionally has no incomplete ORM generation command.
 
 ## Required Configuration
 
@@ -101,13 +101,13 @@ npm run validate
 - `GET /openapi.json`
 - `GET /docs`
 
-The public service root does not require authentication because issuer discovery and OAuth initiation must work before sign-in. Its browser operation map links to the real production routes, not a separate demo. `/session` starts Sites-owned ChatGPT sign-in when needed and then shows the immutable local AittaDB subject created for the signed-in user; sign-in alone does not grant a client any storage scope.
+The public service root does not require authentication because issuer discovery and OAuth initiation must work before sign-in. Its browser operation map links to the real production routes, not a separate demo. `/session` starts Sites-owned ChatGPT sign-in when needed and then shows the immutable local AittaDB subject created for the signed-in user. That session can use its own browser-storage namespace, but it does not grant any third-party OAuth client a scope or access to that namespace.
 
 Browser-facing routes and errors use content negotiation. Browsers that prefer `text/html` receive consistent authentication-service HTML views, while API clients that request JSON, or send generic CLI-style `Accept: */*`, receive canonical machine responses. Browser forms invoke the same identity, OAuth/OIDC, D1, and R2 services as API clients and do not use mock users, fake tokens, or browser-only storage. JSON metadata and JSON errors are hypermedia-oriented and advertise `_links` and `actions` so clients can discover available operations instead of hard-coding every route. OAuth token success responses remain protocol-standard for API clients.
 
 `/docs` is a self-hosted Swagger UI backed directly by the canonical `/openapi.json`. Its assets are pinned and served from AittaDB without a CDN. Browser forms are also available directly on the authorization, device authorization, token, revocation, introspection, and UserInfo routes; state-changing browser submissions are same-origin and CSRF protected, and credential values are never placed in URLs.
 
-The `/storage/records` and `/storage/files` browser views perform the real scoped D1 and R2 operations. They accept an AittaDB bearer token only in a protected form body, do not retain or echo it, and forward each list, read/download, write/upload, or delete action through the same storage service used by REST clients.
+The `/userinfo`, `/storage/records`, and `/storage/files` browser views default to the current signed-in session when one exists. They create only a minimal short-lived internal access token, pass it directly to the canonical UserInfo or storage validator, and never expose or retain it. An explicit AittaDB bearer-token mode remains available for testing a registered application's client-scoped data. Each list, read/download, write/upload, or delete action goes through the same D1/R2 service used by REST clients.
 
 The browser UI uses a shared responsive AittaDB shell with page-aware trust-boundary copy, the same-origin `aittadb-boundary.jpg` artwork, the supplied `aittadb-mark.svg` storehouse mark, and an AittaDB-specific `og.png` social card. Inter is self-hosted from `/fonts/inter-latin-wght-normal.woff2`, with `system-ui`, `Segoe UI`, and `sans-serif` fallbacks. Styles come from `/auth-ui.css`; the UI loads no third-party runtime fonts, images, tracking code, or client scripts.
 
@@ -116,6 +116,8 @@ The browser UI uses a shared responsive AittaDB shell with page-aware trust-boun
 Client applications may request `storage.read`, `storage.write`, and `storage.delete` AittaDB scopes. These scopes authorize storage only inside AittaDB. They do not grant access to ChatGPT, OpenAI, conversations, files, Projects, connectors, subscriptions, billing, or API quota.
 
 Storage is isolated by the immutable AittaDB user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2 at `/storage/files/{key}`. Caller-provided keys are logical metadata; AittaDB generates physical R2 object keys.
+
+The signed-in browser uses a reserved, hidden AittaDB client ID, so personal browser-session data remains separate even from an OAuth client belonging to the same local user. That reserved client cannot be selected by device authorization, Authorization Code, token exchange, or administrator operations. AittaDB exposes no generic SQL, internal-table, physical R2-key, environment, binding, or deployment-secret API.
 
 ## ChatGPT Sites Sign-In Boundary
 

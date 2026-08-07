@@ -22,6 +22,11 @@ import { oidcConfiguration, openApiSpec } from "./openapi";
 import { storageEndpoint } from "./storage";
 import { storageBrowserEndpoint } from "./storage-browser";
 import {
+  hasBrowserSession,
+  issueBrowserSessionAccessToken,
+} from "./browser-session";
+import { isBrowserSessionClientId } from "./system-client";
+import {
   adminClientsPage,
   authUiCss,
   consentPage,
@@ -65,6 +70,9 @@ export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
 }
 
+const CLEANUP_INTERVAL_SECONDS = 300;
+let nextCleanupAt = 0;
+
 export async function createAittaDB(
   env: RuntimeEnv,
   ctx?: { waitUntil(promise: Promise<unknown>): void },
@@ -72,17 +80,14 @@ export async function createAittaDB(
   const fallbackUrl = env.ISSUER_URL ?? "https://aittadb.local";
   const config = loadConfig(env, fallbackUrl);
   const store = env.DB ? new D1AuthStore(env.DB) : null;
-  if (store) {
-    await store.migrate();
-    ctx?.waitUntil(store.cleanup(nowSeconds()));
-  }
-  return createAittaDBWithStore(env, store, config);
+  return createAittaDBWithStore(env, store, config, ctx);
 }
 
 export function createAittaDBWithStore(
   env: RuntimeEnv,
   store: AuthStore | null,
   config = loadConfig(env, env.ISSUER_URL ?? "https://aittadb.local"),
+  ctx?: { waitUntil(promise: Promise<unknown>): void },
 ): AittaDBApp {
   return {
     async fetch(request: Request): Promise<Response | null> {
@@ -114,7 +119,16 @@ export function createAittaDBWithStore(
           );
 
         const routed = await route(request, url, env, store, config);
-        return finalizeResponse(request, routed, config, corsHeaders);
+        const finalized = await finalizeResponse(
+          request,
+          routed,
+          config,
+          corsHeaders,
+        );
+        if (store && needsStore(url.pathname)) {
+          scheduleCleanup(store, ctx, nowSeconds());
+        }
+        return finalized;
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unexpected error";
@@ -194,9 +208,11 @@ async function route(
         },
         storageRecords: {
           href: `${config.issuerUrl}/storage/records`,
+          representations: ["application/json", "text/html"],
         },
         storageFiles: {
           href: `${config.issuerUrl}/storage/files`,
+          representations: ["application/json", "text/html"],
         },
       },
       actions: {
@@ -263,6 +279,12 @@ async function route(
           method: "PUT",
           href: `${config.issuerUrl}/storage/files/{key}`,
           authorization: "Bearer access token with storage.write",
+        },
+        useCurrentSessionStorage: {
+          method: "GET",
+          href: `${config.issuerUrl}/storage/records`,
+          representation: "text/html",
+          authentication: "ChatGPT sign-in inside ChatGPT Sites",
         },
       },
     };
@@ -495,7 +517,9 @@ async function route(
   }
   if (url.pathname === "/userinfo" && request.method === "GET") {
     if (!bearerToken(request) && acceptsHtml(request)) {
-      return browserFormPage(userInfoFormPage);
+      return browserFormPage((csrf) =>
+        userInfoFormPage(csrf, hasBrowserSession(request, env)),
+      );
     }
     const response = await userInfoEndpoint(request, config, store);
     return acceptsHtml(request)
@@ -522,8 +546,19 @@ async function route(
     if (!isBrowserUiForm(form)) return methodNotAllowed("GET");
     const rejected = rejectInvalidBrowserForm(request, form);
     if (rejected) return rejected;
+    const submittedToken = form.get("access_token") || "";
+    const useSession =
+      form.get("auth_mode") === "session" ||
+      (!form.has("auth_mode") && !submittedToken);
+    const accessToken = useSession
+      ? await issueBrowserSessionAccessToken(request, env, store, config, [
+          "email",
+          "profile",
+        ])
+      : submittedToken;
+    if (accessToken instanceof Response) return accessToken;
     const headers = new Headers(request.headers);
-    headers.set("authorization", `Bearer ${form.get("access_token") || ""}`);
+    headers.set("authorization", `Bearer ${accessToken}`);
     headers.delete("content-type");
     const response = await userInfoEndpoint(
       new Request(request.url, { method: "GET", headers }),
@@ -662,6 +697,38 @@ async function localSessionEndpoint(
       },
     },
     actions: {
+      approveDeviceWithCurrentSession: {
+        method: "GET",
+        href: `${config.issuerUrl}/device`,
+        representation: "text/html",
+      },
+      authorizeWithCurrentSession: {
+        method: "GET",
+        href: `${config.issuerUrl}/authorize`,
+        representation: "text/html",
+        note: "Registered client, exact redirect URI, and PKCE remain required",
+      },
+      readCurrentSessionUserInfo: {
+        method: "GET",
+        href: `${config.issuerUrl}/userinfo`,
+        representation: "text/html",
+      },
+      manageCurrentSessionRecords: {
+        method: "GET",
+        href: `${config.issuerUrl}/storage/records`,
+        representation: "text/html",
+      },
+      manageCurrentSessionFiles: {
+        method: "GET",
+        href: `${config.issuerUrl}/storage/files`,
+        representation: "text/html",
+      },
+      administerClientsWithCurrentSession: {
+        method: "GET",
+        href: `${config.issuerUrl}/admin/clients`,
+        representation: "text/html",
+        authorization: "ADMIN_EMAILS allowlist",
+      },
       signOut: {
         method: "GET",
         href: `${config.issuerUrl}/signout-with-chatgpt?return_to=%2F`,
@@ -847,7 +914,7 @@ async function tokenEndpoint(
   const form = submittedForm ?? (await readForm(request));
   const grantType = form.get("grant_type");
   if (grantType === "urn:ietf:params:oauth:grant-type:device_code")
-    return pollDeviceToken(form, config, store);
+    return pollDeviceToken(request, form, config, store);
 
   const client = await authenticateClient(request, form, store);
   if (client instanceof Response) return client;
@@ -955,7 +1022,7 @@ async function deviceEntryPost(
   const identity = requireSitesIdentity(request, env);
   if (identity instanceof Response) return identity;
   const client = await store.getClient(grant.clientId);
-  if (!client)
+  if (!client || isBrowserSessionClientId(client.id))
     return html(
       errorPage("Invalid request", "Client is unavailable", { status: 400 }),
       { status: 400 },
@@ -989,7 +1056,12 @@ async function deviceDecisionPost(
   const grant = await store.getDeviceGrantByUserCodeHash(
     await sha256(normalizeUserCode(form.get("user_code") || "")),
   );
-  if (!grant || grant.status !== "pending" || grant.expiresAt <= nowSeconds()) {
+  if (
+    !grant ||
+    isBrowserSessionClientId(grant.clientId) ||
+    grant.status !== "pending" ||
+    grant.expiresAt <= nowSeconds()
+  ) {
     return html(
       errorPage("Invalid request", "Device request is no longer pending", {
         status: 400,
@@ -1021,7 +1093,7 @@ async function consentGet(
       { status: 400 },
     );
   const client = await store.getClient(authRequest.clientId);
-  if (!client)
+  if (!client || isBrowserSessionClientId(client.id))
     return html(
       errorPage("Invalid request", "Client is unavailable", { status: 400 }),
       { status: 400 },
@@ -1065,7 +1137,11 @@ async function consentPost(
   const authRequest = await store.getAuthorizationRequest(
     form.get("request_id") || "",
   );
-  if (!authRequest || authRequest.expiresAt <= nowSeconds())
+  if (
+    !authRequest ||
+    isBrowserSessionClientId(authRequest.clientId) ||
+    authRequest.expiresAt <= nowSeconds()
+  )
     return html(
       errorPage("Invalid request", "Authorization request expired", {
         status: 400,
@@ -1128,6 +1204,15 @@ async function adminClientsPost(
   const action = form.get("action");
   if (action) {
     const clientId = form.get("client_id") || "";
+    if (isBrowserSessionClientId(clientId)) {
+      return html(
+        errorPage("Not found", "Client is unavailable", {
+          status: 404,
+          error: "not_found",
+        }),
+        { status: 404 },
+      );
+    }
     if (action === "disable")
       await store.setClientDisabled(clientId, nowSeconds());
     if (action === "enable") await store.setClientDisabled(clientId, null);
@@ -1217,7 +1302,7 @@ function redirectWithError(
   return redirect(url.toString());
 }
 
-function isAittaDBRoute(pathname: string): boolean {
+export function isAittaDBRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
@@ -1238,12 +1323,22 @@ function isAittaDBRoute(pathname: string): boolean {
   );
 }
 
-function isAssetRoute(pathname: string): boolean {
+export function isAssetRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/_") ||
     pathname.startsWith("/cdn-cgi/") ||
     /\.[a-z0-9]{2,8}$/i.test(pathname)
   );
+}
+
+function scheduleCleanup(
+  store: AuthStore,
+  ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
+  now: number,
+): void {
+  if (!ctx || now < nextCleanupAt) return;
+  nextCleanupAt = now + CLEANUP_INTERVAL_SECONDS;
+  ctx.waitUntil(store.cleanup(now));
 }
 
 function isCorsControlledRoute(pathname: string): boolean {

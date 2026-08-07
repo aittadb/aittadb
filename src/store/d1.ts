@@ -1,5 +1,8 @@
-import { migrations } from "./migrations";
 import { uuid } from "../crypto";
+import {
+  BROWSER_SESSION_CLIENT_ID,
+  isBrowserSessionClientId,
+} from "../system-client";
 import type {
   AuthStore,
   AuthorizationCode,
@@ -19,12 +22,6 @@ type Row = Record<string, unknown>;
 
 export class D1AuthStore implements AuthStore {
   constructor(private readonly db: D1Database) {}
-
-  async migrate(): Promise<void> {
-    for (const statement of migrations) {
-      await this.db.prepare(statement).run();
-    }
-  }
 
   async cleanup(now: number): Promise<void> {
     await this.db
@@ -176,7 +173,10 @@ export class D1AuthStore implements AuthStore {
 
   async listClients(): Promise<ClientView[]> {
     const rows = await this.db
-      .prepare("SELECT * FROM oauth_clients ORDER BY created_at DESC")
+      .prepare(
+        "SELECT * FROM oauth_clients WHERE id <> ? ORDER BY created_at DESC",
+      )
+      .bind(BROWSER_SESSION_CLIENT_ID)
       .all<Row>();
     return Promise.all(
       (rows.results ?? []).map((row) => this.hydrateClient(row)),
@@ -203,6 +203,7 @@ export class D1AuthStore implements AuthStore {
     id: string,
     disabledAt: number | null,
   ): Promise<void> {
+    if (isBrowserSessionClientId(id)) return;
     await this.db
       .prepare("UPDATE oauth_clients SET disabled_at = ? WHERE id = ?")
       .bind(disabledAt, id)
@@ -210,6 +211,7 @@ export class D1AuthStore implements AuthStore {
   }
 
   async rotateClientSecret(id: string, secretHash: string): Promise<void> {
+    if (isBrowserSessionClientId(id)) return;
     await this.db
       .prepare("UPDATE oauth_clients SET secret_hash = ? WHERE id = ?")
       .bind(secretHash, id)
@@ -217,6 +219,7 @@ export class D1AuthStore implements AuthStore {
   }
 
   async revokeClientGrants(clientId: string, now: number): Promise<void> {
+    if (isBrowserSessionClientId(clientId)) return;
     await this.db
       .prepare(
         "UPDATE refresh_token_families SET status = 'revoked' WHERE client_id = ?",
@@ -613,21 +616,23 @@ export class D1AuthStore implements AuthStore {
   }
 
   private async hydrateClient(row: Row): Promise<ClientView> {
-    const redirectUris = await listColumn(
-      this.db,
-      "SELECT redirect_uri FROM client_redirect_uris WHERE client_id = ?",
-      row.id,
-    );
-    const scopes = await listColumn(
-      this.db,
-      "SELECT scope FROM client_scopes WHERE client_id = ?",
-      row.id,
-    );
-    const origins = await listColumn(
-      this.db,
-      "SELECT origin FROM client_origins WHERE client_id = ?",
-      row.id,
-    );
+    const [redirectUris, scopes, origins] = await Promise.all([
+      listColumn(
+        this.db,
+        "SELECT redirect_uri FROM client_redirect_uris WHERE client_id = ?",
+        row.id,
+      ),
+      listColumn(
+        this.db,
+        "SELECT scope FROM client_scopes WHERE client_id = ?",
+        row.id,
+      ),
+      listColumn(
+        this.db,
+        "SELECT origin FROM client_origins WHERE client_id = ?",
+        row.id,
+      ),
+    ]);
     return {
       id: String(row.id),
       type: row.type === "confidential" ? "confidential" : "public",

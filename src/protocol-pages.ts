@@ -37,7 +37,7 @@ export function authorizationFormPage(): string {
     visualHeading: "A registered client. An exact return path.",
     visualSummary:
       "AittaDB validates the client, redirect URI, scopes, state, nonce, and PKCE challenge before consent.",
-    body: `<form method="get" action="/authorize" class="stacked-form"><input type="hidden" name="response_type" value="code"><input type="hidden" name="code_challenge_method" value="S256"><label for="authorize_client_id">Client ID</label><input id="authorize_client_id" name="client_id" autocomplete="off" required><label for="authorize_redirect_uri">Exact redirect URI</label><input id="authorize_redirect_uri" name="redirect_uri" type="url" autocomplete="off" required><label for="authorize_scope">Local scopes</label><input id="authorize_scope" name="scope" value="openid email profile" autocomplete="off"><label for="authorize_state">State</label><input id="authorize_state" name="state" autocomplete="off"><label for="authorize_nonce">OIDC nonce</label><input id="authorize_nonce" name="nonce" autocomplete="off"><label for="authorize_code_challenge">S256 code challenge</label><textarea id="authorize_code_challenge" name="code_challenge" class="credential-input" autocomplete="off" spellcheck="false" required></textarea><div class="actions"><button type="submit">Continue to consent</button></div></form><p class="note">This form invokes <code>GET /authorize</code> directly. Consent and token exchange use the same production grant records as API clients.</p>`,
+    body: `<form method="get" action="/authorize" class="stacked-form"><input type="hidden" name="response_type" value="code"><input type="hidden" name="code_challenge_method" value="S256"><label for="authorize_client_id">Client ID</label><input id="authorize_client_id" name="client_id" autocomplete="off" required><label for="authorize_redirect_uri">Exact redirect URI</label><input id="authorize_redirect_uri" name="redirect_uri" type="url" autocomplete="off" required><label for="authorize_scope">Local scopes</label><input id="authorize_scope" name="scope" value="openid email profile" autocomplete="off"><label for="authorize_state">State</label><input id="authorize_state" name="state" autocomplete="off"><label for="authorize_nonce">OIDC nonce</label><input id="authorize_nonce" name="nonce" autocomplete="off"><label for="authorize_code_challenge">S256 code challenge</label><textarea id="authorize_code_challenge" name="code_challenge" class="credential-input" autocomplete="off" spellcheck="false" required></textarea><div class="actions"><button type="submit">Continue with current session</button></div></form><p class="note">This form invokes <code>GET /authorize</code> directly. Your current ChatGPT-signed-in AittaDB identity is used only at the consent step; it never replaces the registered client, exact redirect URI, PKCE, state, nonce, or token exchange.</p>`,
     actions: [
       { href: "/session", label: "My session", secondary: true },
       { href: "/docs", label: "API docs", secondary: true },
@@ -51,7 +51,7 @@ export function deviceAuthorizationFormPage(csrf: string): string {
     eyebrow: "OAuth 2.0 device grant",
     heading: "Device authorization",
     summary:
-      "Create a real device grant for a registered client, then approve its user code through ChatGPT sign-in.",
+      "Create a real device grant for a registered client, then approve its user code with the current signed-in session.",
     visualEyebrow: "Device handoff",
     visualHeading: "Begin on one device. Approve in this browser.",
     visualSummary:
@@ -83,7 +83,7 @@ export function deviceAuthorizationResultPage(
     body: `<section class="info-grid" aria-label="Device authorization response"><div><span>User code</span><strong>${escapeHtml(stringValue(payload.user_code))}</strong></div><div><span>Expires in</span><strong>${escapeHtml(stringValue(payload.expires_in))} seconds</strong></div><div><span>Polling interval</span><strong>${escapeHtml(stringValue(payload.interval))} seconds</strong></div><div><span>Verification URI</span><code>${escapeHtml(verificationUri)}</code></div></section><label for="device_code_result">Device code</label><textarea id="device_code_result" class="credential-output" readonly spellcheck="false">${escapeHtml(stringValue(payload.device_code))}</textarea><p class="notice"><strong>Keep the device code private.</strong> It is a bearer-equivalent one-time credential returned by the production endpoint and is shown only in this response.</p>`,
     actions: [
       ...(completeUri
-        ? [{ href: completeUri, label: "Approve user code" }]
+        ? [{ href: completeUri, label: "Approve with current session" }]
         : []),
       { href: "/oauth/token", label: "Poll token endpoint", secondary: true },
       {
@@ -179,15 +179,16 @@ export function introspectionFormPage(csrf: string): string {
   });
 }
 
-export function userInfoFormPage(csrf: string): string {
+export function userInfoFormPage(csrf: string, signedIn = false): string {
   return credentialOperationForm({
     title: "UserInfo",
     eyebrow: "OpenID Connect claims",
-    summary:
-      "Submit an AittaDB bearer access token to the production UserInfo service without placing it in the URL.",
+    summary: signedIn
+      ? "Read UserInfo for your current signed-in session or inspect an explicit AittaDB bearer access token."
+      : "Sign in to read your own claims or submit an AittaDB bearer access token without placing it in the URL.",
     action: "/userinfo",
     csrf,
-    fields: `<label for="userinfo_token">Access token</label><textarea id="userinfo_token" name="access_token" class="credential-input" autocomplete="off" spellcheck="false" required></textarea>`,
+    fields: `<label for="userinfo_auth_mode">Authentication</label><select id="userinfo_auth_mode" name="auth_mode" required><option value="session"${signedIn ? " selected" : ""}>Current signed-in session${signedIn ? "" : " (sign-in required)"}</option><option value="token"${signedIn ? "" : " selected"}>AittaDB access token</option></select><label for="userinfo_token">Access token <span class="optional">only for access-token mode</span></label><textarea id="userinfo_token" name="access_token" class="credential-input" autocomplete="off" spellcheck="false"></textarea><p class="note">Current-session mode creates a short-lived internal credential, invokes the canonical UserInfo validator, and never exposes that credential to the page. Access-token mode preserves normal OIDC bearer semantics.</p>`,
     submitLabel: "Read UserInfo",
     visualHeading: "Claims follow the granted local scopes.",
   });

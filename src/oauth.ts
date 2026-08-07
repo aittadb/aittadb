@@ -11,6 +11,7 @@ import {
   verifyPkceS256,
 } from "./crypto";
 import { oauthError, parseBasicAuth } from "./http";
+import { isBrowserSessionClientId } from "./system-client";
 import type {
   AppConfig,
   AuthStore,
@@ -54,7 +55,7 @@ export async function authenticateClient(
     return oauthError("invalid_client", "Client authentication failed", 401);
 
   const client = await store.getClient(clientId);
-  if (!client || client.disabledAt)
+  if (!client || client.disabledAt || isBrowserSessionClientId(client.id))
     return oauthError("invalid_client", "Client authentication failed", 401);
   if (client.type === "confidential") {
     const storedHash = await store.getClientSecretHash(client.id);
@@ -239,16 +240,21 @@ export async function createDeviceAuthorization(
 }
 
 export async function pollDeviceToken(
+  request: Request,
   form: URLSearchParams,
   config: AppConfig,
   store: AuthStore,
 ): Promise<Response> {
   const now = nowSeconds();
+  const authenticatedClient = await authenticateClient(request, form, store);
+  if (authenticatedClient instanceof Response) return authenticatedClient;
   const deviceCode = form.get("device_code") || "";
   const grant = await store.getDeviceGrantByDeviceHash(
     await sha256(deviceCode),
   );
   if (!grant) return oauthError("invalid_grant", "Invalid device code");
+  if (grant.clientId !== authenticatedClient.id)
+    return oauthError("invalid_grant", "Invalid device code");
   if (grant.expiresAt <= now)
     return oauthError("expired_token", "Device code expired", 400);
   if (
@@ -268,10 +274,8 @@ export async function pollDeviceToken(
     return oauthError("access_denied", "The user denied the request", 400);
   if (grant.status !== "approved" || !grant.userId)
     return oauthError("invalid_grant", "Device grant unavailable");
-  const client = await store.getClient(grant.clientId);
   const user = await store.getUser(grant.userId);
-  if (!client || !user)
-    return oauthError("invalid_grant", "Device grant unavailable");
+  if (!user) return oauthError("invalid_grant", "Device grant unavailable");
   grant.status = "used";
   await store.updateDeviceGrant(grant);
   return jsonToken(
@@ -279,7 +283,7 @@ export async function pollDeviceToken(
       config,
       store,
       user,
-      client,
+      client: authenticatedClient,
       scope: grant.scope,
       includeRefresh: parseScopes(grant.scope).includes("offline_access"),
       now,
@@ -295,7 +299,7 @@ export async function createAuthorizeRequest(
   const now = nowSeconds();
   const clientId = url.searchParams.get("client_id") || "";
   const client = await store.getClient(clientId);
-  if (!client || client.disabledAt)
+  if (!client || client.disabledAt || isBrowserSessionClientId(client.id))
     return oauthError("invalid_client", "Unknown client", 400);
   const redirectUri = url.searchParams.get("redirect_uri") || "";
   if (!client.redirectUris.includes(redirectUri)) {

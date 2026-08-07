@@ -92,7 +92,7 @@ export function sessionPage(user: LocalUser): string {
     visualHeading: "Signed in upstream. Independent here.",
     visualSummary:
       "Your ChatGPT credential stays inside the Sites boundary. AittaDB stores a separate immutable subject for its own sessions and application data.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Being signed in does not itself grant application storage access; OAuth clients still need your explicit consent and the required local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/oauth/device_authorization"><strong>Device authorization</strong><span>Create a real device and user code for a registered client.</span></a><a href="/authorize"><strong>Authorization code</strong><span>Run the real PKCE authorization flow for a registered client.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Work with token-scoped D1 application records.</span></a><a href="/storage/files"><strong>File objects</strong><span>Work with token-scoped R2 application files.</span></a><a href="/userinfo"><strong>UserInfo</strong><span>Inspect claims returned for an AittaDB access token.</span></a><a href="/admin/clients"><strong>OAuth clients</strong><span>Open the allowlist-protected client administration route.</span></a></div></section>`,
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current session can access its own browser-storage namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/oauth/device_authorization"><strong>Device authorization</strong><span>Create a real client grant, then approve its code with this signed-in identity.</span></a><a href="/authorize"><strong>Authorization code</strong><span>Use this identity at consent while preserving client, redirect, and PKCE checks.</span></a><a href="/storage/records"><strong>JSON records</strong><span>Use this session's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/files"><strong>File objects</strong><span>Use this session's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>UserInfo</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a><a href="/admin/clients"><strong>OAuth clients</strong><span>Manage clients with this session only when its email is allowlisted.</span></a></div></section>`,
     actions: [
       { href: "/device", label: "Enter device code" },
       {
@@ -191,7 +191,7 @@ export function deviceConsentPage(
     visualHeading: "Match the request before the exchange.",
     visualSummary:
       "Approval creates AittaDB credentials for this client only. The upstream ChatGPT credential never leaves the Sites boundary.",
-    body: `<section class="info-grid" aria-label="Device request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>User code</span><strong>${escapeHtml(grant.userCodeDisplay)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(grant.scope)}</code></div></section><form method="post" action="/device/decision"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="user_code" value="${escapeHtml(grant.userCodeDisplay)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
+    body: `<section class="info-grid" aria-label="Device request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>User code</span><strong>${escapeHtml(grant.userCodeDisplay)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(grant.scope)}</code></div></section><form method="post" action="/device/decision"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="user_code" value="${escapeHtml(grant.userCodeDisplay)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve with current session</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
   });
 }
 
@@ -352,7 +352,7 @@ function alertMessage(message: string): string {
 export function authUiCss(): string {
   return `@font-face{font-family:Inter;font-style:normal;font-display:swap;font-weight:100 900;src:url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations')}
   html{color-scheme:light}
-  *{box-sizing:border-box;letter-spacing:0}
+  *{box-sizing:border-box}
   body.aittadb-page{--navy:#0b234a;--orange:#f04a32;--teal:#159ca6;--accent:#159ca6;--accent-strong:#0b6f77;--accent-soft:#e7f6f7;margin:0;min-height:100vh;padding:24px;background:#edf2f4;color:#15243d;font-family:Inter,system-ui,"Segoe UI",sans-serif;line-height:1.5;text-rendering:optimizeLegibility}
   .aittadb-page:before{content:"";position:fixed;inset:0;z-index:-1;background:repeating-linear-gradient(90deg,rgba(11,35,74,.035) 0 1px,transparent 1px 80px),#edf2f4}
   .aittadb-shell{width:min(100%,1240px);min-height:min(820px,calc(100vh - 48px));margin:0 auto;display:grid;grid-template-columns:minmax(390px,.92fr) minmax(0,1.08fr);background:#fff;border:1px solid #c9d4df;border-radius:8px;box-shadow:0 28px 72px rgba(11,35,74,.17);overflow:hidden}
@@ -385,8 +385,8 @@ export function authUiCss(): string {
   .layout-docs .visual-copy h2{font-size:2.55rem}.layout-docs .visual-legend{grid-template-columns:1fr}.layout-docs .visual-legend div{padding:8px 0;border-left:0;border-top:1px solid rgba(255,255,255,.2)}.layout-docs .visual-legend div:first-child{border-top:0}
   .layout-docs .content-frame{width:100%;max-width:none;align-self:start;padding:36px 0}.layout-docs #swagger-ui{min-height:540px;margin-top:24px;border:1px solid #dbe3eb;border-radius:6px;overflow:hidden;background:#f7f9fb}.layout-docs #swagger-ui>p{padding:24px}
   .eyebrow{color:var(--accent)}
-  h1{margin:0;color:#0b234a;font-size:3.35rem;line-height:1.01;font-weight:790;letter-spacing:0;text-wrap:balance}.brand-heading .brand-wordmark{font-size:inherit;font-weight:750}
-  h2{margin:32px 0 14px;color:#13284b;font-size:1.18rem;letter-spacing:0}
+  .content-frame>h1{margin:0;color:#0b234a;font-size:3.35rem;line-height:1.01;font-weight:790;letter-spacing:0;text-wrap:balance}.brand-heading .brand-wordmark{font-size:inherit;font-weight:750}
+  .content-frame>h2,.content-frame>section>h2,.table-wrap>h2{margin:32px 0 14px;color:#13284b;font-size:1.18rem;letter-spacing:0}
   .summary{max-width:60ch;margin:17px 0 28px;color:#53637a;font-size:1.08rem}
   .note,.notice{border:1px solid #bce1e4;border-left:4px solid var(--accent);background:var(--accent-soft);padding:14px 16px;border-radius:6px;color:#173d52}
   .tone-warning .notice,.tone-warning .note{border-color:#ead5ac;color:#5f451c}.tone-danger .notice,.tone-danger .note{border-color:#efc6bf;color:#702f26}.tone-success .notice,.tone-success .note{border-color:#bfdccb;color:#244c37}
@@ -397,33 +397,33 @@ export function authUiCss(): string {
   .operation-grid>a{min-width:0;display:grid;gap:6px;padding:15px;border:1px solid #dbe3eb;border-radius:6px;background:#fff;color:#0b234a;text-decoration:none;box-shadow:0 9px 22px rgba(11,35,74,.055);transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease}
   .operation-grid>a:hover{border-color:#159ca6;box-shadow:0 13px 28px rgba(21,156,166,.14);transform:translateY(-1px)}
   .operation-grid strong{font-size:.94rem}.operation-grid span{color:#647287;font-size:.82rem;line-height:1.42}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
-  label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
+  .content-frame>code,.content-frame>p code,.content-frame>section code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
+  .content-frame>label,.content-frame>form label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
   .optional{color:#6c788a;font-size:.78rem;font-weight:560}
-  input,textarea,select{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
-  input:hover,textarea:hover,select:hover{border-color:#71839a}
-  input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
-  textarea{min-height:104px;resize:vertical}
+  .content-frame>form input,.content-frame>form textarea,.content-frame>form select,.content-frame>textarea{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
+  .content-frame>form input:hover,.content-frame>form textarea:hover,.content-frame>form select:hover,.content-frame>textarea:hover{border-color:#71839a}
+  .content-frame>form input:focus,.content-frame>form textarea:focus,.content-frame>form select:focus,.content-frame>textarea:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
+  .content-frame>form textarea,.content-frame>textarea{min-height:104px;resize:vertical}
   textarea.credential-input,textarea.credential-output{min-height:88px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8rem;overflow-wrap:anywhere}.credential-output{background:#f4f7fa;color:#243954}
-  a{color:var(--accent-strong)}
-  a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #f04a32;outline-offset:3px}
-  .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
-  button,.button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid #0b234a;border-radius:6px;background:#0b234a;color:#fff;font:inherit;font-weight:780;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 10px 24px rgba(11,35,74,.2);transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease}
-  button:hover,.button:hover{transform:translateY(-1px);background:#159ca6;border-color:#0b6f77;box-shadow:0 14px 30px rgba(21,156,166,.24)}
-  button.secondary,.button.secondary{background:#fff;color:var(--accent-strong);border-color:#b9c5bf;box-shadow:0 7px 18px rgba(25,46,40,.07)}
-  button.compact{min-height:34px;padding:5px 10px;font-size:.88rem;box-shadow:none}
-  pre{white-space:pre-wrap;border:1px solid #183764;background:#0b234a;color:#edf7f8;border-radius:6px;padding:18px;overflow:auto;box-shadow:0 18px 38px rgba(11,35,74,.16)}
+  .content-frame>p>a,.content-frame>section a,.content-frame>.actions>a,.page-footer a{color:var(--accent-strong)}
+  .brand-lockup:focus-visible,.content-frame>p>a:focus-visible,.content-frame>section a:focus-visible,.content-frame>.actions>a:focus-visible,.page-footer a:focus-visible,.content-frame>form button:focus-visible,.content-frame>form input:focus-visible,.content-frame>form textarea:focus-visible,.content-frame>form select:focus-visible,.content-frame>textarea:focus-visible,.table-actions button:focus-visible{outline:3px solid #f04a32;outline-offset:3px}
+  .content-frame>.actions,.content-frame>form .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  .content-frame>form button,.content-frame>.actions>.button,.table-actions button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid #0b234a;border-radius:6px;background:#0b234a;color:#fff;font:inherit;font-weight:780;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 10px 24px rgba(11,35,74,.2);transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease}
+  .content-frame>form button:hover,.content-frame>.actions>.button:hover,.table-actions button:hover{transform:translateY(-1px);background:#159ca6;border-color:#0b6f77;box-shadow:0 14px 30px rgba(21,156,166,.24)}
+  .content-frame>form button.secondary,.content-frame>.actions>.button.secondary,.table-actions button.secondary{background:#fff;color:var(--accent-strong);border-color:#b9c5bf;box-shadow:0 7px 18px rgba(25,46,40,.07)}
+  .table-actions button.compact{min-height:34px;padding:5px 10px;font-size:.88rem;box-shadow:none}
+  pre.json-output{white-space:pre-wrap;border:1px solid #183764;background:#0b234a;color:#edf7f8;border-radius:6px;padding:18px;overflow:auto;box-shadow:0 18px 38px rgba(11,35,74,.16)}
   .table-wrap{margin-top:30px;overflow-x:auto;border:1px solid #d9e1ea;border-radius:6px;background:#fff;box-shadow:0 14px 34px rgba(11,35,74,.07)}
-  table{width:100%;border-collapse:collapse;font-size:.91rem}
-  th,td{padding:12px;border-bottom:1px solid #e5e9e5;text-align:left;vertical-align:top}
-  tbody tr:last-child td{border-bottom:0}
-  th{color:#5e6c80;font-size:.72rem;text-transform:uppercase;letter-spacing:0;background:#f4f7fa}
+  .table-wrap table{width:100%;border-collapse:collapse;font-size:.91rem}
+  .table-wrap th,.table-wrap td{padding:12px;border-bottom:1px solid #e5e9e5;text-align:left;vertical-align:top}
+  .table-wrap tbody tr:last-child td{border-bottom:0}
+  .table-wrap th{color:#5e6c80;font-size:.72rem;text-transform:uppercase;letter-spacing:0;background:#f4f7fa}
   .table-actions{display:flex;flex-wrap:wrap;gap:8px}.table-actions form{margin:0}
   .page-footer{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding-top:20px;border-top:1px solid #e2e7ed;color:#667488;font-size:.82rem}
   .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}
   .repo-link{flex:none;font-weight:760;text-decoration-thickness:1px;text-underline-offset:3px}
-  @media (max-width:860px){body.aittadb-page{padding:14px}.aittadb-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}h1{font-size:2.75rem}}
-  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
+  @media (max-width:860px){body.aittadb-page{padding:14px}.aittadb-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}.content-frame>h1{font-size:2.75rem}}
+  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}.content-frame>h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.content-frame>.actions,.content-frame>form .actions{display:grid}.content-frame>.actions>.button,.content-frame>form button,.table-actions button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
   `;
 }
 

@@ -367,6 +367,8 @@ export const openApiSpec = {
     "/userinfo": {
       get: {
         summary: "OpenID Connect UserInfo",
+        description:
+          "API clients send an AittaDB bearer access token. A browser requesting HTML without a bearer token receives a same-origin form that can use either the current ChatGPT-signed-in AittaDB session or an explicit access token.",
         security: [{ bearer: [] }],
         responses: {
           "200": { description: "Local user claims" },
@@ -376,18 +378,27 @@ export const openApiSpec = {
       post: {
         summary: "Browser-only UserInfo form submission",
         description:
-          "Accepts a bearer token in a CSRF-protected same-origin form body, then invokes the same UserInfo validation as GET. Non-browser clients should use GET with Authorization: Bearer.",
+          "Uses either the current signed-in browser session or an explicit bearer token from a CSRF-protected same-origin form, then invokes the same UserInfo validation as GET. The current-session credential is short-lived, internal, and never returned to the page. Non-browser clients should use GET with Authorization: Bearer.",
         requestBody: {
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
               schema: {
                 type: "object",
-                required: ["ui", "csrf_token", "access_token"],
+                required: ["ui", "csrf_token", "auth_mode"],
                 properties: {
                   ui: { type: "string", const: "1" },
                   csrf_token: { type: "string" },
-                  access_token: { type: "string" },
+                  auth_mode: {
+                    type: "string",
+                    enum: ["session", "token"],
+                    description:
+                      "Current ChatGPT-signed-in AittaDB session or an explicitly supplied AittaDB access token.",
+                  },
+                  access_token: {
+                    type: "string",
+                    description: "Required only when auth_mode is token.",
+                  },
                 },
               },
             },
@@ -399,6 +410,10 @@ export const openApiSpec = {
             content: { "text/html": { schema: { type: "string" } } },
           },
           "401": { description: "Invalid AittaDB access token" },
+          "302": {
+            description:
+              "Redirect to the Sites-owned ChatGPT sign-in route when session mode is selected anonymously",
+          },
           "403": { description: "CSRF or same-origin rejection" },
           "405": { description: "Browser representation marker missing" },
         },
@@ -427,14 +442,14 @@ export const openApiSpec = {
       post: {
         summary: "Browser-only JSON record operation",
         description:
-          "CSRF-protected same-origin adapter for list, read, write, and delete. It places the submitted token in a synthetic Authorization header and invokes the same production storage operation as a REST client.",
+          "CSRF-protected same-origin adapter for list, read, write, and delete. Current-session mode creates a minimal short-lived internal access token for the signed-in local UUID and reserved browser client. Token mode uses the submitted access token. Both modes invoke the same production storage operation as a REST client, and neither credential is returned to HTML.",
         requestBody: {
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
               schema: {
                 type: "object",
-                required: ["ui", "csrf_token", "operation", "access_token"],
+                required: ["ui", "csrf_token", "operation", "auth_mode"],
                 properties: {
                   ui: { type: "string", const: "1" },
                   csrf_token: { type: "string" },
@@ -442,7 +457,14 @@ export const openApiSpec = {
                     type: "string",
                     enum: ["list", "read", "write", "delete"],
                   },
-                  access_token: { type: "string" },
+                  auth_mode: {
+                    type: "string",
+                    enum: ["session", "token"],
+                  },
+                  access_token: {
+                    type: "string",
+                    description: "Required only when auth_mode is token.",
+                  },
                   key: { type: "string", minLength: 1, maxLength: 240 },
                   value: {
                     type: "string",
@@ -457,6 +479,10 @@ export const openApiSpec = {
           "200": {
             description: "Readable result from the production storage route",
             content: { "text/html": { schema: { type: "string" } } },
+          },
+          "302": {
+            description:
+              "Redirect to the Sites-owned ChatGPT sign-in route when session mode is selected anonymously",
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
           "405": { description: "Browser representation marker missing" },
@@ -528,14 +554,14 @@ export const openApiSpec = {
       post: {
         summary: "Browser-only file storage operation",
         description:
-          "Bounded CSRF-protected same-origin multipart adapter for list, download, upload, and delete. It invokes the same D1 metadata and R2 byte operations as REST clients.",
+          "Bounded CSRF-protected same-origin multipart adapter for list, download, upload, and delete. Current-session mode creates a minimal short-lived internal access token for the signed-in local UUID and reserved browser client. Token mode uses the submitted access token. Both invoke the same D1 metadata and R2 byte operations as REST clients.",
         requestBody: {
           required: true,
           content: {
             "multipart/form-data": {
               schema: {
                 type: "object",
-                required: ["ui", "csrf_token", "operation", "access_token"],
+                required: ["ui", "csrf_token", "operation", "auth_mode"],
                 properties: {
                   ui: { type: "string", const: "1" },
                   csrf_token: { type: "string" },
@@ -543,7 +569,14 @@ export const openApiSpec = {
                     type: "string",
                     enum: ["list", "download", "upload", "delete"],
                   },
-                  access_token: { type: "string" },
+                  auth_mode: {
+                    type: "string",
+                    enum: ["session", "token"],
+                  },
+                  access_token: {
+                    type: "string",
+                    description: "Required only when auth_mode is token.",
+                  },
                   key: { type: "string", minLength: 1, maxLength: 240 },
                   file: { type: "string", format: "binary" },
                 },
@@ -555,6 +588,10 @@ export const openApiSpec = {
           "200": {
             description:
               "Readable operation result or original file bytes as an attachment for download",
+          },
+          "302": {
+            description:
+              "Redirect to the Sites-owned ChatGPT sign-in route when session mode is selected anonymously",
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
           "405": { description: "Browser representation marker missing" },
@@ -572,6 +609,11 @@ export const openApiSpec = {
             description:
               "File bytes for bearer clients or a browser operation form when no Authorization header is present",
             headers: {
+              "content-disposition": {
+                description:
+                  "Attachment disposition with a sanitized fallback filename and RFC 5987 encoded logical-key filename.",
+                schema: { type: "string" },
+              },
               "x-aittadb-storage-key": {
                 description: "Percent-encoded logical application key.",
                 schema: { type: "string" },

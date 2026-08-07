@@ -163,6 +163,7 @@ export async function storageEndpoint(
       return new Response(await object.arrayBuffer(), {
         headers: {
           "content-type": file.contentType,
+          "content-disposition": storageAttachmentDisposition(file.key),
           "cache-control": "no-store",
           "x-aittadb-storage-key": encodeURIComponent(file.key),
         },
@@ -414,6 +415,15 @@ function storageActions(
 
 function encodeStorageKey(key: string): string {
   return key.split("/").map(encodeURIComponent).join("/");
+}
+
+export function storageAttachmentDisposition(key: string): string {
+  const fileName = key.split("/").filter(Boolean).at(-1) || "aittadb-download";
+  const encoded = encodeURIComponent(fileName).replace(
+    /['()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="aittadb-download"; filename*=UTF-8''${encoded}`;
 }
 
 function parseJwtAudience(token: string): string | null {

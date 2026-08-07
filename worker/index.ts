@@ -4,7 +4,7 @@ import {
   handleImageOptimization,
 } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { createAittaDB } from "../src/handler";
+import { createAittaDB, isAittaDBRoute, isAssetRoute } from "../src/handler";
 
 export interface Env {
   ASSETS: Fetcher;
@@ -69,6 +69,10 @@ const worker = {
         },
         allowedWidths,
       );
+    }
+
+    if (!isAittaDBRoute(url.pathname) && isAssetRoute(url.pathname)) {
+      return handler.fetch(request, env, ctx);
     }
 
     const aittaDB = await createAittaDB(env, ctx);

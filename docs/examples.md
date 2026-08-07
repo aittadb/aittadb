@@ -4,7 +4,7 @@
 
 Open `/docs` for the self-hosted Swagger UI or follow the operation links from the public service root. The direct HTML forms at `/authorize`, `/oauth/device_authorization`, `/oauth/token`, `/oauth/revoke`, `/oauth/introspect`, and `/userinfo` invoke the same production operations shown below. They do not create mock users, grants, tokens, or storage.
 
-Credential-bearing browser forms send values in a same-origin request body and do not persist them in browser storage. A successful browser token exchange deliberately displays newly issued credentials once in a `Cache-Control: no-store` response. Do not put access tokens, refresh tokens, device codes, authorization codes, client secrets, or PKCE verifiers in query strings.
+Credential-bearing browser forms send values in a same-origin request body and do not persist them in browser storage. UserInfo and storage forms can instead use the current signed-in session; AittaDB creates a minimal short-lived internal access token, calls the canonical endpoint, and never displays or persists that token. A successful browser token exchange deliberately displays newly issued credentials once in a `Cache-Control: no-store` response. Do not put access tokens, refresh tokens, device codes, authorization codes, client secrets, or PKCE verifiers in query strings.
 
 ## Device Authorization CLI
 
@@ -61,7 +61,9 @@ The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is
 
 Register a client that is allowed to request `storage.read`, `storage.write`, and `storage.delete`. After the user approves those local scopes, use the returned access token with the storage API.
 
-For a browser-operated check, open `/storage/records` or `/storage/files`. Those forms submit the bearer token in a CSRF-protected same-origin body and call the same operations as the curl examples. Record forms support list, read, write, and delete. File forms support list, download, upload, and delete. The token is not kept between responses, so enter it again for each deliberate operation.
+For a browser-operated check, sign in and open `/storage/records` or `/storage/files`. Current-session mode works immediately and stores data under the local user's reserved browser-client namespace. Access-token mode submits a token in a CSRF-protected same-origin body and operates on that token's separate OAuth-client namespace. Both call the same operations as the curl examples. Record forms support list, read, write, and delete. File forms support list, download, upload, and delete. Explicit tokens are not kept between responses, so enter one again for each deliberate token-mode operation.
+
+Open `/userinfo` to read the current signed-in session's local claims through the production UserInfo validator, or choose access-token mode to inspect a third-party application's granted claims. Device approval, Authorization Code consent, and allowlisted client administration also use the current signed-in identity, but sign-in never substitutes for registered client details, PKCE, client authentication, grants, or scopes.
 
 Store a JSON record in D1:
 
