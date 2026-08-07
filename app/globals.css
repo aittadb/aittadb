@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: #172033;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  line-height: 1.5;
+}
+
+a {
+  color: #0f5fa8;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+.page,
+.auth-page {
+  width: min(100% - 32px, 720px);
+  margin: 48px auto;
+}
+
+.auth-panel {
+  background: #ffffff;
+  border: 1px solid #d7dde8;
+  border-radius: 8px;
+  padding: 24px;
+}
+
+label {
+  display: block;
+  margin: 16px 0 6px;
+  font-weight: 650;
+}
+
+input,
+textarea,
+select {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #9aa8bd;
+  border-radius: 6px;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  border: 1px solid #0f5fa8;
+  border-radius: 6px;
+  background: #0f5fa8;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 14px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button.secondary,
+.button.secondary {
+  background: #ffffff;
+  color: #0f5fa8;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.error {
+  border-left: 4px solid #b42318;
+  background: #fff4f2;
+  padding: 12px;
+}
