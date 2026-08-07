@@ -15,6 +15,15 @@ const representationFormatParameter = {
     "Force canonical JSON when a browser Accept header would otherwise select HTML.",
 } as const;
 
+const storageBrowserKeyParameter = {
+  name: "key",
+  in: "query",
+  required: false,
+  schema: { type: "string", minLength: 1, maxLength: 240 },
+  description:
+    "No-JavaScript browser navigation fallback. An HTML request without a bearer token is redirected to the canonical encoded item URL; API collection reads ignore this parameter.",
+} as const;
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -424,7 +433,8 @@ export const openApiSpec = {
         summary:
           "List JSON records for the access token's local user and OAuth client",
         description:
-          "Requires an AittaDB access token with storage.read. Records are AittaDB application storage; they do not expose ChatGPT or OpenAI data.",
+          "Requires an AittaDB access token with storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. Records are AittaDB application storage; they do not expose ChatGPT or OpenAI data.",
+        parameters: [storageBrowserKeyParameter],
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -440,23 +450,20 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: "Browser-only JSON record operation",
+        summary: "Browser-only JSON record collection read",
         description:
-          "CSRF-protected same-origin adapter for list, read, write, and delete. Current-session mode creates a minimal short-lived internal access token for the signed-in local UUID and reserved browser client. Token mode uses the submitted access token. Both modes invoke the same production storage operation as a REST client, and neither credential is returned to HTML.",
+          "CSRF-protected same-origin form action for this exact collection URL. The fixed _method=GET override invokes the canonical collection GET. Item reads, writes, and deletes post only to /storage/records/{key}. Current-session mode creates a minimal short-lived internal access token for the signed-in local UUID and reserved browser client; token mode uses the submitted AittaDB access token. Neither credential is returned to HTML.",
         requestBody: {
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
               schema: {
                 type: "object",
-                required: ["ui", "csrf_token", "operation", "auth_mode"],
+                required: ["ui", "csrf_token", "_method", "auth_mode"],
                 properties: {
                   ui: { type: "string", const: "1" },
                   csrf_token: { type: "string" },
-                  operation: {
-                    type: "string",
-                    enum: ["list", "read", "write", "delete"],
-                  },
+                  _method: { type: "string", const: "GET" },
                   auth_mode: {
                     type: "string",
                     enum: ["session", "token"],
@@ -464,11 +471,6 @@ export const openApiSpec = {
                   access_token: {
                     type: "string",
                     description: "Required only when auth_mode is token.",
-                  },
-                  key: { type: "string", minLength: 1, maxLength: 240 },
-                  value: {
-                    type: "string",
-                    description: "JSON text for the write operation.",
                   },
                 },
               },
@@ -493,6 +495,8 @@ export const openApiSpec = {
     "/storage/records/{key}": {
       get: {
         summary: "Read one JSON record",
+        description:
+          "A bearer request performs the canonical read. An HTML request without a bearer token renders read, replace, and delete forms for only the key in this exact resource URL.",
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
@@ -507,6 +511,55 @@ export const openApiSpec = {
             },
           },
           "404": { description: "Record not found" },
+        },
+      },
+      post: {
+        summary: "Browser-only action on one JSON record",
+        description:
+          "CSRF-protected same-origin adapter on this exact item URL. _method selects the canonical GET, PUT, or DELETE operation; the logical key comes only from the URL and cannot be overridden by a form field. Current-session and explicit AittaDB access-token modes preserve the canonical storage scope and ownership checks.",
+        parameters: [storageKeyParameter],
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["ui", "csrf_token", "_method", "auth_mode"],
+                properties: {
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                  _method: {
+                    type: "string",
+                    enum: ["GET", "PUT", "DELETE"],
+                  },
+                  auth_mode: {
+                    type: "string",
+                    enum: ["session", "token"],
+                  },
+                  access_token: {
+                    type: "string",
+                    description: "Required only when auth_mode is token.",
+                  },
+                  value: {
+                    type: "string",
+                    description: "Required JSON text only when _method is PUT.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Readable result from the canonical item operation",
+            content: { "text/html": { schema: { type: "string" } } },
+          },
+          "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
+          "400": {
+            description: "Method override does not match this resource",
+          },
+          "403": { description: "Scope, CSRF, or same-origin rejection" },
+          "413": { description: "Form or JSON record exceeds the limit" },
         },
       },
       put: {
@@ -536,7 +589,8 @@ export const openApiSpec = {
         summary:
           "List file metadata for the access token's local user and OAuth client",
         description:
-          "Requires storage.read. File bytes are stored in R2 and searchable metadata is stored in D1.",
+          "Requires storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. File bytes are stored in R2 and searchable metadata is stored in D1.",
+        parameters: [storageBrowserKeyParameter],
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -552,23 +606,20 @@ export const openApiSpec = {
         },
       },
       post: {
-        summary: "Browser-only file storage operation",
+        summary: "Browser-only file collection read",
         description:
-          "Bounded CSRF-protected same-origin multipart adapter for list, download, upload, and delete. Current-session mode creates a minimal short-lived internal access token for the signed-in local UUID and reserved browser client. Token mode uses the submitted access token. Both invoke the same D1 metadata and R2 byte operations as REST clients.",
+          "CSRF-protected same-origin form action for this exact collection URL. The fixed _method=GET override invokes the canonical metadata collection GET. Item downloads, uploads, and deletes post only to /storage/files/{key}. Current-session mode uses a minimal short-lived internal credential; token mode uses the submitted AittaDB access token.",
         requestBody: {
           required: true,
           content: {
-            "multipart/form-data": {
+            "application/x-www-form-urlencoded": {
               schema: {
                 type: "object",
-                required: ["ui", "csrf_token", "operation", "auth_mode"],
+                required: ["ui", "csrf_token", "_method", "auth_mode"],
                 properties: {
                   ui: { type: "string", const: "1" },
                   csrf_token: { type: "string" },
-                  operation: {
-                    type: "string",
-                    enum: ["list", "download", "upload", "delete"],
-                  },
+                  _method: { type: "string", const: "GET" },
                   auth_mode: {
                     type: "string",
                     enum: ["session", "token"],
@@ -577,8 +628,6 @@ export const openApiSpec = {
                     type: "string",
                     description: "Required only when auth_mode is token.",
                   },
-                  key: { type: "string", minLength: 1, maxLength: 240 },
-                  file: { type: "string", format: "binary" },
                 },
               },
             },
@@ -602,6 +651,8 @@ export const openApiSpec = {
     "/storage/files/{key}": {
       get: {
         summary: "Read one file from R2",
+        description:
+          "A bearer request returns the canonical file bytes. An HTML request without a bearer token renders download, upload-or-replace, and delete forms for only the key in this exact resource URL.",
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {
@@ -621,6 +672,69 @@ export const openApiSpec = {
             },
           },
           "404": { description: "File not found" },
+        },
+      },
+      post: {
+        summary: "Browser-only action on one stored file",
+        description:
+          "CSRF-protected same-origin adapter on this exact item URL. URL-encoded _method=GET or DELETE invokes the canonical download or deletion. Multipart _method=PUT uploads bytes through the canonical file PUT. The logical key comes only from the URL and cannot be overridden by a form field.",
+        parameters: [storageKeyParameter],
+        requestBody: {
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                type: "object",
+                required: ["ui", "csrf_token", "_method", "auth_mode"],
+                properties: {
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                  _method: { type: "string", enum: ["GET", "DELETE"] },
+                  auth_mode: {
+                    type: "string",
+                    enum: ["session", "token"],
+                  },
+                  access_token: {
+                    type: "string",
+                    description: "Required only when auth_mode is token.",
+                  },
+                },
+              },
+            },
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["ui", "csrf_token", "_method", "auth_mode", "file"],
+                properties: {
+                  ui: { type: "string", const: "1" },
+                  csrf_token: { type: "string" },
+                  _method: { type: "string", const: "PUT" },
+                  auth_mode: {
+                    type: "string",
+                    enum: ["session", "token"],
+                  },
+                  access_token: {
+                    type: "string",
+                    description: "Required only when auth_mode is token.",
+                  },
+                  file: { type: "string", format: "binary" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "Readable metadata/deletion result or original attachment bytes for download",
+          },
+          "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
+          "400": {
+            description: "Method override does not match this resource",
+          },
+          "403": { description: "Scope, CSRF, or same-origin rejection" },
+          "413": { description: "Multipart form or file exceeds the limit" },
+          "415": { description: "Upload was not submitted as multipart data" },
         },
       },
       put: {

@@ -153,6 +153,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     browserRoot!.headers.get("content-security-policy") ?? "";
   assert.match(contentSecurityPolicy, /font-src 'self'/);
   assert.match(contentSecurityPolicy, /img-src 'self'/);
+  assert.match(contentSecurityPolicy, /script-src 'self'/);
 
   const browserCss = await app.fetch(
     new Request("https://aittadb.example.test/auth-ui.css", {
@@ -170,13 +171,24 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserCssText, /#159ca6/);
   assert.match(browserCssText, /\.visual-image/);
   assert.match(browserCssText, /\.repo-link/);
-  assert.match(browserCssText, /\.content-frame>form button/);
+  assert.match(browserCssText, /\.stacked-form button/);
   assert.match(browserCssText, /pre\.json-output/);
   assert.match(browserCssText, /\.table-wrap table/);
   assert.doesNotMatch(browserCssText, /(?:^|\})\s*button,/);
   assert.doesNotMatch(browserCssText, /(?:^|\})\s*input,/);
   assert.doesNotMatch(browserCssText, /(?:^|\})\s*pre\{/);
   assert.doesNotMatch(browserCssText, /(?:^|\})\s*table\{/);
+
+  const browserScript = await app.fetch(
+    new Request("https://aittadb.example.test/auth-ui.js", {
+      headers: { accept: "text/javascript,*/*;q=0.1" },
+    }),
+  );
+  assert.match(
+    browserScript!.headers.get("content-type") ?? "",
+    /^text\/javascript/,
+  );
+  assert.match(await browserScript!.text(), /data-key-action-template/);
 
   const [
     visualAsset,
@@ -509,7 +521,12 @@ test("browser protocol representations execute real device, token, UserInfo, int
     }),
   );
   const tokenCsrf = cookieValue(tokenForm!, "aittadb_csrf");
-  assert.match(await tokenForm!.text(), /<h1>Token exchange<\/h1>/);
+  const tokenFormHtml = await tokenForm!.text();
+  assert.match(tokenFormHtml, /<h1>Token exchange<\/h1>/);
+  assert.match(tokenFormHtml, /data-conditional-form/);
+  assert.match(tokenFormHtml, /data-show-when="grant_type:authorization_code"/);
+  assert.match(tokenFormHtml, /data-show-when="grant_type:refresh_token"/);
+  assert.match(tokenFormHtml, /src="\/auth-ui\.js" defer/);
   const tokenResult = await app.fetch(
     new Request("https://aittadb.example.test/oauth/token", {
       method: "POST",
@@ -1599,25 +1616,45 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   assert.match(recordFormHtml, /<h1>JSON record storage<\/h1>/);
   assert.match(recordFormHtml, /action="\/storage\/records"/);
   assert.doesNotMatch(recordFormHtml, /value="Bearer/);
+  assert.doesNotMatch(recordFormHtml, /name="operation"/);
+  assert.match(
+    recordFormHtml,
+    /data-key-action-template="\/storage\/records\/{key}"/,
+  );
+
+  const noScriptNavigation = await app.fetch(
+    new Request(
+      "https://aittadb.example.test/storage/records?key=browser%2Fsettings",
+      { headers: { accept: "text/html" } },
+    ),
+  );
+  assert.equal(noScriptNavigation?.status, 303);
+  assert.equal(
+    noScriptNavigation?.headers.get("location"),
+    "/storage/records/browser/settings",
+  );
 
   const writeRecord = await app.fetch(
-    new Request("https://aittadb.example.test/storage/records", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_csrf=${recordCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/records/browser/settings",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${recordCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          ui: "1",
+          csrf_token: recordCsrf,
+          _method: "PUT",
+          auth_mode: "token",
+          access_token: accessToken,
+          value: JSON.stringify({ theme: "teal", count: 2 }),
+        }),
       },
-      body: form({
-        ui: "1",
-        csrf_token: recordCsrf,
-        operation: "write",
-        access_token: accessToken,
-        key: "browser/settings",
-        value: JSON.stringify({ theme: "teal", count: 2 }),
-      }),
-    }),
+    ),
   );
   const writeRecordHtml = await writeRecord!.text();
   assert.equal(writeRecord?.status, 200);
@@ -1629,22 +1666,25 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   );
 
   const readRecord = await app.fetch(
-    new Request("https://aittadb.example.test/storage/records", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_csrf=${recordCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/records/browser/settings",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${recordCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          ui: "1",
+          csrf_token: recordCsrf,
+          _method: "GET",
+          auth_mode: "token",
+          access_token: accessToken,
+        }),
       },
-      body: form({
-        ui: "1",
-        csrf_token: recordCsrf,
-        operation: "read",
-        access_token: accessToken,
-        key: "browser/settings",
-      }),
-    }),
+    ),
   );
   assert.match(await readRecord!.text(), /&quot;theme&quot;: &quot;teal&quot;/);
 
@@ -1660,12 +1700,37 @@ test("browser storage representations execute real scoped D1 and R2 operations",
       body: form({
         ui: "1",
         csrf_token: recordCsrf,
-        operation: "list",
+        _method: "GET",
+        auth_mode: "token",
         access_token: accessToken,
       }),
     }),
   );
   assert.match(await listRecords!.text(), /browser\/settings/);
+
+  const invalidCollectionAction = await app.fetch(
+    new Request("https://aittadb.example.test/storage/records", {
+      method: "POST",
+      headers: {
+        accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `aittadb_csrf=${recordCsrf}`,
+        origin: "https://aittadb.example.test",
+      },
+      body: form({
+        ui: "1",
+        csrf_token: recordCsrf,
+        _method: "DELETE",
+        auth_mode: "token",
+        access_token: accessToken,
+      }),
+    }),
+  );
+  assert.equal(invalidCollectionAction?.status, 400);
+  assert.match(
+    await invalidCollectionAction!.text(),
+    /does not match the JSON storage resource URL/,
+  );
 
   const itemForm = await app.fetch(
     new Request(
@@ -1673,7 +1738,19 @@ test("browser storage representations execute real scoped D1 and R2 operations",
       { headers: { accept: "text/html" } },
     ),
   );
-  assert.match(await itemForm!.text(), /name="key" value="browser\/settings"/);
+  const itemFormHtml = await itemForm!.text();
+  assert.equal(
+    (
+      itemFormHtml.match(/action="\/storage\/records\/browser\/settings"/g) ??
+      []
+    ).length,
+    3,
+  );
+  assert.doesNotMatch(itemFormHtml, /name="key"/);
+  assert.doesNotMatch(itemFormHtml, /name="operation"/);
+  assert.match(itemFormHtml, /name="_method" value="GET"/);
+  assert.match(itemFormHtml, /name="_method" value="PUT"/);
+  assert.match(itemFormHtml, /name="_method" value="DELETE"/);
 
   const fileForm = await app.fetch(
     new Request("https://aittadb.example.test/storage/files", {
@@ -1687,14 +1764,19 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   assert.equal(fileCsrf, recordCsrf);
   const fileFormHtml = await fileForm!.text();
   assert.match(fileFormHtml, /<h1>File object storage<\/h1>/);
-  assert.match(fileFormHtml, /enctype="multipart\/form-data"/);
+  assert.doesNotMatch(fileFormHtml, /enctype="multipart\/form-data"/);
+  assert.doesNotMatch(fileFormHtml, /name="operation"/);
+  assert.match(
+    fileFormHtml,
+    /data-key-action-template="\/storage\/files\/{key}"/,
+  );
 
   const uploadForm = new FormData();
   uploadForm.set("ui", "1");
   uploadForm.set("csrf_token", fileCsrf);
-  uploadForm.set("operation", "upload");
+  uploadForm.set("_method", "PUT");
+  uploadForm.set("auth_mode", "token");
   uploadForm.set("access_token", accessToken);
-  uploadForm.set("key", "browser/hello.txt");
   uploadForm.set(
     "file",
     new File(["hello from browser storage"], "hello.txt", {
@@ -1702,53 +1784,62 @@ test("browser storage representations execute real scoped D1 and R2 operations",
     }),
   );
   const uploadFile = await app.fetch(
-    new Request("https://aittadb.example.test/storage/files", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        cookie: `aittadb_csrf=${fileCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/files/browser/hello.txt",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          cookie: `aittadb_csrf=${fileCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: uploadForm,
       },
-      body: uploadForm,
-    }),
+    ),
   );
   assert.equal(uploadFile?.status, 200);
   assert.match(await uploadFile!.text(), /<h1>File operation result<\/h1>/);
 
-  const listFileForm = new FormData();
-  listFileForm.set("ui", "1");
-  listFileForm.set("csrf_token", fileCsrf);
-  listFileForm.set("operation", "list");
-  listFileForm.set("access_token", accessToken);
   const listFiles = await app.fetch(
     new Request("https://aittadb.example.test/storage/files", {
       method: "POST",
       headers: {
         accept: "text/html",
+        "content-type": "application/x-www-form-urlencoded",
         cookie: `aittadb_csrf=${fileCsrf}`,
         origin: "https://aittadb.example.test",
       },
-      body: listFileForm,
+      body: form({
+        ui: "1",
+        csrf_token: fileCsrf,
+        _method: "GET",
+        auth_mode: "token",
+        access_token: accessToken,
+      }),
     }),
   );
   assert.match(await listFiles!.text(), /browser\/hello\.txt/);
 
-  const downloadForm = new FormData();
-  downloadForm.set("ui", "1");
-  downloadForm.set("csrf_token", fileCsrf);
-  downloadForm.set("operation", "download");
-  downloadForm.set("access_token", accessToken);
-  downloadForm.set("key", "browser/hello.txt");
   const downloadFile = await app.fetch(
-    new Request("https://aittadb.example.test/storage/files", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        cookie: `aittadb_csrf=${fileCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/files/browser/hello.txt",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${fileCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          ui: "1",
+          csrf_token: fileCsrf,
+          _method: "GET",
+          auth_mode: "token",
+          access_token: accessToken,
+        }),
       },
-      body: downloadForm,
-    }),
+    ),
   );
   assert.equal(downloadFile?.headers.get("content-type"), "text/plain");
   assert.match(
@@ -1757,42 +1848,49 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   );
   assert.equal(await downloadFile!.text(), "hello from browser storage");
 
-  const deleteFileForm = new FormData();
-  deleteFileForm.set("ui", "1");
-  deleteFileForm.set("csrf_token", fileCsrf);
-  deleteFileForm.set("operation", "delete");
-  deleteFileForm.set("access_token", accessToken);
-  deleteFileForm.set("key", "browser/hello.txt");
   const deleteFile = await app.fetch(
-    new Request("https://aittadb.example.test/storage/files", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        cookie: `aittadb_csrf=${fileCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/files/browser/hello.txt",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${fileCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          ui: "1",
+          csrf_token: fileCsrf,
+          _method: "DELETE",
+          auth_mode: "token",
+          access_token: accessToken,
+        }),
       },
-      body: deleteFileForm,
-    }),
+    ),
   );
   assert.match(await deleteFile!.text(), /&quot;deleted&quot;: true/);
 
   const deleteRecord = await app.fetch(
-    new Request("https://aittadb.example.test/storage/records", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_csrf=${recordCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/records/browser/settings",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${recordCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          ui: "1",
+          csrf_token: recordCsrf,
+          _method: "DELETE",
+          auth_mode: "token",
+          access_token: accessToken,
+        }),
       },
-      body: form({
-        ui: "1",
-        csrf_token: recordCsrf,
-        operation: "delete",
-        access_token: accessToken,
-        key: "browser/settings",
-      }),
-    }),
+    ),
   );
   assert.match(await deleteRecord!.text(), /&quot;deleted&quot;: true/);
 
@@ -1812,23 +1910,26 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   assert.equal(missingFile?.status, 404);
 
   const oversizedRecord = await app.fetch(
-    new Request("https://aittadb.example.test/storage/records", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_csrf=${recordCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/records/browser/too-large",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${recordCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          ui: "1",
+          csrf_token: recordCsrf,
+          _method: "PUT",
+          auth_mode: "token",
+          access_token: accessToken,
+          value: JSON.stringify("x".repeat(65_536)),
+        }),
       },
-      body: form({
-        ui: "1",
-        csrf_token: recordCsrf,
-        operation: "write",
-        access_token: accessToken,
-        key: "browser/too-large",
-        value: JSON.stringify("x".repeat(65_536)),
-      }),
-    }),
+    ),
   );
   assert.equal(oversizedRecord?.status, 413);
 
@@ -1842,7 +1943,8 @@ test("browser storage representations execute real scoped D1 and R2 operations",
       },
       body: form({
         ui: "1",
-        operation: "list",
+        _method: "GET",
+        auth_mode: "token",
         access_token: accessToken,
       }),
     }),
@@ -1851,16 +1953,19 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   assert.match(await missingCsrf!.text(), /CSRF validation failed/);
 
   const oversizedMultipart = await app.fetch(
-    new Request("https://aittadb.example.test/storage/files", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "multipart/form-data; boundary=oversized",
-        "content-length": String(11 * 1024 * 1024),
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/files/browser/too-large.bin",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "multipart/form-data; boundary=oversized",
+          "content-length": String(11 * 1024 * 1024),
+          origin: "https://aittadb.example.test",
+        },
+        body: "--oversized--\r\n",
       },
-      body: "--oversized--\r\n",
-    }),
+    ),
   );
   assert.equal(oversizedMultipart?.status, 413);
 });
@@ -1880,27 +1985,28 @@ test("current signed-in session drives UserInfo and isolated record and file ope
   const recordHtml = await recordForm!.text();
   assert.match(recordHtml, /option value="session" selected/);
   assert.match(recordHtml, /Current signed-in session/);
-  assert.match(recordHtml, /private signed-in AittaDB namespace/);
-  assert.match(recordHtml, /durable D1 data/);
+  assert.match(recordHtml, /durable private AittaDB namespace/);
 
   const sessionWrite = await app.fetch(
-    new Request("https://aittadb.example.test/storage/records", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_csrf=${recordCsrf}`,
-        origin: "https://aittadb.example.test",
+    new Request(
+      "https://aittadb.example.test/storage/records/current/preferences",
+      {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${recordCsrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          ui: "1",
+          csrf_token: recordCsrf,
+          auth_mode: "session",
+          _method: "PUT",
+          value: JSON.stringify({ density: "compact" }),
+        }),
       },
-      body: form({
-        ui: "1",
-        csrf_token: recordCsrf,
-        auth_mode: "session",
-        operation: "write",
-        key: "current/preferences",
-        value: JSON.stringify({ density: "compact" }),
-      }),
-    }),
+    ),
   );
   const sessionWriteHtml = await sessionWrite!.text();
   assert.equal(sessionWrite?.status, 200);
@@ -1962,14 +2068,13 @@ test("current signed-in session drives UserInfo and isolated record and file ope
   upload.set("ui", "1");
   upload.set("csrf_token", fileCsrf);
   upload.set("auth_mode", "session");
-  upload.set("operation", "upload");
-  upload.set("key", "current/note.txt");
+  upload.set("_method", "PUT");
   upload.set(
     "file",
     new File(["session-owned"], "note.txt", { type: "text/plain" }),
   );
   const sessionUpload = await app.fetch(
-    new Request("https://aittadb.example.test/storage/files", {
+    new Request("https://aittadb.example.test/storage/files/current/note.txt", {
       method: "POST",
       headers: {
         accept: "text/html",
@@ -2058,7 +2163,7 @@ test("current signed-in session drives UserInfo and isolated record and file ope
         ui: "1",
         csrf_token: signedOutCsrf,
         auth_mode: "session",
-        operation: "list",
+        _method: "GET",
       }),
     }),
   );

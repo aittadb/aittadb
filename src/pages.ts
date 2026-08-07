@@ -174,7 +174,7 @@ export function deviceEntryPage(
     visualSummary:
       "The browser confirms the request while the original device keeps polling through the standard device flow.",
     tone: error ? "warning" : "default",
-    body: `${error ? alertMessage(error) : ""}<form method="post" action="/device"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="user_code">User code</label><input id="user_code" name="user_code" autocomplete="one-time-code" value="${escapeHtml(userCode)}" required><div class="actions"><button type="submit">Continue</button></div></form>`,
+    body: `${error ? alertMessage(error) : ""}<form method="post" action="/device" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="user_code">User code</label><input id="user_code" name="user_code" autocomplete="one-time-code" value="${escapeHtml(userCode)}" required><div class="actions"><button type="submit">Continue</button></div></form>`,
   });
 }
 
@@ -193,7 +193,7 @@ export function deviceConsentPage(
     visualHeading: "Match the request before the exchange.",
     visualSummary:
       "Approval creates AittaDB credentials for this client only. The upstream ChatGPT credential never leaves the Sites boundary.",
-    body: `<section class="info-grid" aria-label="Device request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>User code</span><strong>${escapeHtml(grant.userCodeDisplay)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(grant.scope)}</code></div></section><form method="post" action="/device/decision"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="user_code" value="${escapeHtml(grant.userCodeDisplay)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve with current session</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
+    body: `<section class="info-grid" aria-label="Device request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>User code</span><strong>${escapeHtml(grant.userCodeDisplay)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(grant.scope)}</code></div></section><form method="post" action="/device/decision" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="user_code" value="${escapeHtml(grant.userCodeDisplay)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve with current session</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
   });
 }
 
@@ -212,7 +212,7 @@ export function consentPage(
     visualHeading: "Scope stays visible and explicit.",
     visualSummary:
       "Only the listed local permissions cross this boundary, and only after you approve the registered client.",
-    body: `<section class="info-grid" aria-label="Authorization request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(request.scope)}</code></div><div><span>Redirect URI</span><code>${escapeHtml(request.redirectUri)}</code></div></section><form method="post" action="/consent"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="request_id" value="${escapeHtml(request.id)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
+    body: `<section class="info-grid" aria-label="Authorization request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(request.scope)}</code></div><div><span>Redirect URI</span><code>${escapeHtml(request.redirectUri)}</code></div></section><form method="post" action="/consent" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="request_id" value="${escapeHtml(request.id)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
   });
 }
 
@@ -351,6 +351,66 @@ function alertMessage(message: string): string {
   return `<p class="notice">${escapeHtml(message)}</p>`;
 }
 
+export function conditionalField(rule: string, body: string): string {
+  return `<div class="conditional-field" data-show-when="${escapeHtml(rule)}">${body}</div>`;
+}
+
+export function conditionalFormScript(): string {
+  return `<script src="/auth-ui.js" defer></script>`;
+}
+
+export function authUiJs(): string {
+  return `(() => {
+  const encodeKey = (key) => key.split("/").map(encodeURIComponent).join("/");
+  const matches = (form, rule) => {
+    const separator = rule.indexOf(":");
+    if (separator < 1) return false;
+    const name = rule.slice(0, separator);
+    const allowed = rule.slice(separator + 1).split(",");
+    const controller = form.elements.namedItem(name);
+    return Boolean(controller && allowed.includes(controller.value));
+  };
+  const update = (form) => {
+    form.querySelectorAll("[data-show-when]").forEach((field) => {
+      const visible = matches(form, field.dataset.showWhen || "");
+      field.hidden = !visible;
+      if (visible) field.removeAttribute("aria-hidden");
+      else field.setAttribute("aria-hidden", "true");
+      field.querySelectorAll("input, textarea, select, button").forEach((control) => {
+        control.disabled = !visible;
+        control.required = visible && control.dataset.requiredWhenVisible === "true";
+      });
+    });
+    form.dataset.conditionalReady = "true";
+  };
+  document.querySelectorAll("form[data-conditional-form]").forEach((form) => {
+    form.addEventListener("change", () => update(form));
+    update(form);
+  });
+  document.querySelectorAll("form[data-key-action-template]").forEach((form) => {
+    const key = form.querySelector("[data-resource-key]");
+    const template = form.dataset.keyActionTemplate || "";
+    const fallback = form.dataset.fallbackAction || form.getAttribute("action") || "";
+    const updateAction = () => {
+      const value = key && typeof key.value === "string" ? key.value : "";
+      form.setAttribute(
+        "action",
+        value && template.includes("{key}")
+          ? template.replace("{key}", encodeKey(value))
+          : fallback,
+      );
+    };
+    form.addEventListener("input", updateAction);
+    form.addEventListener("change", updateAction);
+    form.addEventListener("submit", () => {
+      updateAction();
+      if (key && key.value) key.disabled = true;
+    });
+    updateAction();
+  });
+})();\n`;
+}
+
 export function authUiCss(): string {
   return `@font-face{font-family:Inter;font-style:normal;font-display:swap;font-weight:100 900;src:url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations')}
   html{color-scheme:light}
@@ -399,20 +459,25 @@ export function authUiCss(): string {
   .operation-grid>a{min-width:0;display:grid;gap:6px;padding:15px;border:1px solid #dbe3eb;border-radius:6px;background:#fff;color:#0b234a;text-decoration:none;box-shadow:0 9px 22px rgba(11,35,74,.055);transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease}
   .operation-grid>a:hover{border-color:#159ca6;box-shadow:0 13px 28px rgba(21,156,166,.14);transform:translateY(-1px)}
   .operation-grid strong{font-size:.94rem}.operation-grid span{color:#647287;font-size:.82rem;line-height:1.42}
+  .resource-address{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 14px;margin:22px 0 30px;padding:16px 0;border-top:1px solid #dbe3eb;border-bottom:1px solid #dbe3eb}.resource-address span{color:#68768a;font-size:.72rem;font-weight:800;text-transform:uppercase}.resource-address code{min-width:0;overflow-wrap:anywhere;color:#183764}
+  .resource-workbench{margin-top:28px}.resource-operation{padding:22px 0;border-top:1px solid #dbe3eb}.resource-operation:last-of-type{border-bottom:1px solid #dbe3eb}.resource-operation>header{display:flex;align-items:flex-start;gap:13px;margin-bottom:8px}.resource-operation>header div{min-width:0}.resource-operation h3{margin:0;color:#13284b;font-size:1rem;letter-spacing:0}.resource-operation header p{margin:5px 0 0;color:#647287;font-size:.88rem}.method-badge{flex:none;min-width:58px;border:1px solid #99cdd1;border-radius:4px;background:#e7f6f7;color:#0b6f77;padding:4px 7px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.72rem;font-weight:800}.method-put{border-color:#f0b6aa;background:#fff0ed;color:#a82c1d}.method-delete{border-color:#e8aaa3;background:#fdecea;color:#94231c}
+  .resource-operation .stacked-form{margin-top:16px}.resource-operation .stacked-form .actions{margin-top:20px}
   .content-frame>code,.content-frame>p code,.content-frame>section code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
-  .content-frame>label,.content-frame>form label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
+  .content-frame>label,.stacked-form label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
   .optional{color:#6c788a;font-size:.78rem;font-weight:560}
-  .content-frame>form input,.content-frame>form textarea,.content-frame>form select,.content-frame>textarea{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
-  .content-frame>form input:hover,.content-frame>form textarea:hover,.content-frame>form select:hover,.content-frame>textarea:hover{border-color:#71839a}
-  .content-frame>form input:focus,.content-frame>form textarea:focus,.content-frame>form select:focus,.content-frame>textarea:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
-  .content-frame>form textarea,.content-frame>textarea{min-height:104px;resize:vertical}
+  .stacked-form .conditional-field[hidden]{display:none}
+  .stacked-form input,.stacked-form textarea,.stacked-form select,.content-frame>textarea{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
+  .stacked-form input:hover,.stacked-form textarea:hover,.stacked-form select:hover,.content-frame>textarea:hover{border-color:#71839a}
+  .stacked-form input:focus,.stacked-form textarea:focus,.stacked-form select:focus,.content-frame>textarea:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
+  .stacked-form textarea,.content-frame>textarea{min-height:104px;resize:vertical}
   textarea.credential-input,textarea.credential-output{min-height:88px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8rem;overflow-wrap:anywhere}.credential-output{background:#f4f7fa;color:#243954}
   .content-frame>p>a,.content-frame>section a,.content-frame>.actions>a,.page-footer a{color:var(--accent-strong)}
-  .brand-lockup:focus-visible,.content-frame>p>a:focus-visible,.content-frame>section a:focus-visible,.content-frame>.actions>a:focus-visible,.page-footer a:focus-visible,.content-frame>form button:focus-visible,.content-frame>form input:focus-visible,.content-frame>form textarea:focus-visible,.content-frame>form select:focus-visible,.content-frame>textarea:focus-visible,.table-actions button:focus-visible{outline:3px solid #f04a32;outline-offset:3px}
-  .content-frame>.actions,.content-frame>form .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
-  .content-frame>form button,.content-frame>.actions>.button,.table-actions button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid #0b234a;border-radius:6px;background:#0b234a;color:#fff;font:inherit;font-weight:780;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 10px 24px rgba(11,35,74,.2);transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease}
-  .content-frame>form button:hover,.content-frame>.actions>.button:hover,.table-actions button:hover{transform:translateY(-1px);background:#159ca6;border-color:#0b6f77;box-shadow:0 14px 30px rgba(21,156,166,.24)}
-  .content-frame>form button.secondary,.content-frame>.actions>.button.secondary,.table-actions button.secondary{background:#fff;color:var(--accent-strong);border-color:#b9c5bf;box-shadow:0 7px 18px rgba(25,46,40,.07)}
+  .brand-lockup:focus-visible,.content-frame>p>a:focus-visible,.content-frame>section a:focus-visible,.content-frame>.actions>a:focus-visible,.page-footer a:focus-visible,.stacked-form button:focus-visible,.stacked-form input:focus-visible,.stacked-form textarea:focus-visible,.stacked-form select:focus-visible,.content-frame>textarea:focus-visible,.table-actions button:focus-visible{outline:3px solid #f04a32;outline-offset:3px}
+  .content-frame>.actions,.stacked-form .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  .stacked-form button,.content-frame>.actions>.button,.table-actions button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid #0b234a;border-radius:6px;background:#0b234a;color:#fff;font:inherit;font-weight:780;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 10px 24px rgba(11,35,74,.2);transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease}
+  .stacked-form button:hover,.content-frame>.actions>.button:hover,.table-actions button:hover{transform:translateY(-1px);background:#159ca6;border-color:#0b6f77;box-shadow:0 14px 30px rgba(21,156,166,.24)}
+  .stacked-form button.secondary,.content-frame>.actions>.button.secondary,.table-actions button.secondary{background:#fff;color:var(--accent-strong);border-color:#b9c5bf;box-shadow:0 7px 18px rgba(25,46,40,.07)}
+  .stacked-form button.danger{border-color:#94231c;background:#c9342a}.stacked-form button.danger:hover{border-color:#702019;background:#a82c1d;box-shadow:0 14px 30px rgba(201,52,42,.22)}
   .table-actions button.compact{min-height:34px;padding:5px 10px;font-size:.88rem;box-shadow:none}
   pre.json-output{white-space:pre-wrap;border:1px solid #183764;background:#0b234a;color:#edf7f8;border-radius:6px;padding:18px;overflow:auto;box-shadow:0 18px 38px rgba(11,35,74,.16)}
   .table-wrap{margin-top:30px;overflow-x:auto;border:1px solid #d9e1ea;border-radius:6px;background:#fff;box-shadow:0 14px 34px rgba(11,35,74,.07)}
@@ -425,7 +490,7 @@ export function authUiCss(): string {
   .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}
   .repo-link{flex:none;font-weight:760;text-decoration-thickness:1px;text-underline-offset:3px}
   @media (max-width:860px){body.aittadb-page{padding:14px}.aittadb-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}.content-frame>h1{font-size:2.75rem}}
-  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}.content-frame>h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.content-frame>.actions,.content-frame>form .actions{display:grid}.content-frame>.actions>.button,.content-frame>form button,.table-actions button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
+  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}.content-frame>h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.resource-address{grid-template-columns:1fr;gap:4px}.resource-address code{margin-bottom:8px}.content-frame>.actions,.stacked-form .actions{display:grid}.content-frame>.actions>.button,.stacked-form button,.table-actions button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
   `;
 }
 

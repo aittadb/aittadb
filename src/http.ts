@@ -109,6 +109,14 @@ export function stylesheet(body: string, init: ResponseInit = {}): Response {
   return new Response(body, { ...init, headers });
 }
 
+export function javascript(body: string, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "text/javascript; charset=utf-8");
+  headers.set("cache-control", "no-store");
+  addSecurityHeaders(headers);
+  return new Response(body, { ...init, headers });
+}
+
 export function addSecurityHeaders(headers: Headers): void {
   headers.set("x-content-type-options", "nosniff");
   headers.set("x-frame-options", "DENY");

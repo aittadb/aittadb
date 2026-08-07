@@ -30,9 +30,9 @@ const requiredMethods: Record<string, readonly string[]> = {
   "/oauth/introspect": ["get", "post"],
   "/userinfo": ["get", "post"],
   "/storage/records": ["get", "post"],
-  "/storage/records/{key}": ["get", "put", "delete"],
+  "/storage/records/{key}": ["get", "post", "put", "delete"],
   "/storage/files": ["get", "post"],
-  "/storage/files/{key}": ["get", "put", "delete"],
+  "/storage/files/{key}": ["get", "post", "put", "delete"],
   "/openapi.json": ["get"],
   "/docs": ["get"],
 };

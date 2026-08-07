@@ -1,4 +1,10 @@
-import { escapeHtml, pageDocument, type PageAction } from "./pages";
+import {
+  conditionalField,
+  conditionalFormScript,
+  escapeHtml,
+  pageDocument,
+  type PageAction,
+} from "./pages";
 
 export function structuredDataPage(options: {
   title: string;
@@ -106,7 +112,7 @@ export function tokenFormPage(csrf: string): string {
     visualHeading: "One endpoint. Three standards-based grants.",
     visualSummary:
       "The token endpoint validates the selected grant, registered client, one-time state, and rotation rules before issuing credentials.",
-    body: `<form method="post" action="/oauth/token" class="stacked-form">${browserFields(csrf)}<label for="token_grant_type">Grant type</label><select id="token_grant_type" name="grant_type" required><option value="urn:ietf:params:oauth:grant-type:device_code">Device code</option><option value="authorization_code">Authorization code</option><option value="refresh_token">Refresh token</option></select><label for="token_client_id">Client ID</label><input id="token_client_id" name="client_id" autocomplete="off" required><label for="token_client_secret">Client secret <span class="optional">confidential clients only</span></label><input id="token_client_secret" name="client_secret" type="password" autocomplete="new-password"><label for="token_device_code">Device code</label><textarea id="token_device_code" name="device_code" class="credential-input" autocomplete="off" spellcheck="false"></textarea><label for="token_code">Authorization code</label><textarea id="token_code" name="code" class="credential-input" autocomplete="off" spellcheck="false"></textarea><label for="token_redirect_uri">Redirect URI for authorization code</label><input id="token_redirect_uri" name="redirect_uri" type="url" autocomplete="off"><label for="token_code_verifier">PKCE code verifier</label><textarea id="token_code_verifier" name="code_verifier" class="credential-input" autocomplete="off" spellcheck="false"></textarea><label for="token_refresh_token">Refresh token</label><textarea id="token_refresh_token" name="refresh_token" class="credential-input" autocomplete="off" spellcheck="false"></textarea><div class="actions"><button type="submit">Exchange grant</button></div></form><p class="note">Only fields belonging to the selected grant are evaluated. Successful credentials are shown once in the next no-store response and are never placed in a URL.</p>`,
+    body: `<form method="post" action="/oauth/token" class="stacked-form" data-conditional-form>${browserFields(csrf)}<label for="token_grant_type">Grant type</label><select id="token_grant_type" name="grant_type" required><option value="urn:ietf:params:oauth:grant-type:device_code">Device code</option><option value="authorization_code">Authorization code</option><option value="refresh_token">Refresh token</option></select><label for="token_client_id">Client ID</label><input id="token_client_id" name="client_id" autocomplete="off" required><label for="token_client_secret">Client secret <span class="optional">confidential clients only</span></label><input id="token_client_secret" name="client_secret" type="password" autocomplete="new-password">${conditionalField("grant_type:urn:ietf:params:oauth:grant-type:device_code", `<label for="token_device_code">Device code</label><textarea id="token_device_code" name="device_code" class="credential-input" autocomplete="off" spellcheck="false" data-required-when-visible="true"></textarea>`)}${conditionalField("grant_type:authorization_code", `<label for="token_code">Authorization code</label><textarea id="token_code" name="code" class="credential-input" autocomplete="off" spellcheck="false" data-required-when-visible="true"></textarea><label for="token_redirect_uri">Redirect URI for authorization code</label><input id="token_redirect_uri" name="redirect_uri" type="url" autocomplete="off" data-required-when-visible="true"><label for="token_code_verifier">PKCE code verifier</label><textarea id="token_code_verifier" name="code_verifier" class="credential-input" autocomplete="off" spellcheck="false" data-required-when-visible="true"></textarea>`)}${conditionalField("grant_type:refresh_token", `<label for="token_refresh_token">Refresh token</label><textarea id="token_refresh_token" name="refresh_token" class="credential-input" autocomplete="off" spellcheck="false" data-required-when-visible="true"></textarea>`)}<div class="actions"><button type="submit">Exchange grant</button></div></form><p class="note">Only fields belonging to the selected grant are evaluated. Without JavaScript, all fields remain visible and the endpoint still validates the selected grant server-side. Successful credentials are shown once in the next no-store response and are never placed in a URL.</p>`,
     actions: [
       {
         href: "/oauth/device_authorization",
@@ -115,6 +121,7 @@ export function tokenFormPage(csrf: string): string {
       },
       { href: "/authorize", label: "Start authorization", secondary: true },
     ],
+    scripts: conditionalFormScript(),
   });
 }
 
@@ -188,9 +195,10 @@ export function userInfoFormPage(csrf: string, signedIn = false): string {
       : "Sign in to read your own claims or submit an AittaDB bearer access token without placing it in the URL.",
     action: "/userinfo",
     csrf,
-    fields: `<label for="userinfo_auth_mode">Authentication</label><select id="userinfo_auth_mode" name="auth_mode" required><option value="session"${signedIn ? " selected" : ""}>Current signed-in session${signedIn ? "" : " (sign-in required)"}</option><option value="token"${signedIn ? "" : " selected"}>AittaDB access token</option></select><label for="userinfo_token">Access token <span class="optional">only for access-token mode</span></label><textarea id="userinfo_token" name="access_token" class="credential-input" autocomplete="off" spellcheck="false"></textarea><p class="note">Current-session mode creates a short-lived internal credential, invokes the canonical UserInfo validator, and never exposes that credential to the page. Access-token mode preserves normal OIDC bearer semantics.</p>`,
+    fields: `<label for="userinfo_auth_mode">Authentication</label><select id="userinfo_auth_mode" name="auth_mode" required><option value="session"${signedIn ? " selected" : ""}>Current signed-in session${signedIn ? "" : " (sign-in required)"}</option><option value="token"${signedIn ? "" : " selected"}>AittaDB access token</option></select>${conditionalField("auth_mode:token", `<label for="userinfo_token">AittaDB access token</label><textarea id="userinfo_token" name="access_token" class="credential-input" autocomplete="off" spellcheck="false" data-required-when-visible="true"></textarea>`)}<p class="note">Current-session mode creates a short-lived internal credential, invokes the canonical UserInfo validator, and never exposes that credential to the page. Access-token mode preserves normal OIDC bearer semantics.</p>`,
     submitLabel: "Read UserInfo",
     visualHeading: "Claims follow the granted local scopes.",
+    conditional: true,
   });
 }
 
@@ -254,6 +262,7 @@ function credentialOperationForm(options: {
   fields: string;
   submitLabel: string;
   visualHeading: string;
+  conditional?: boolean;
 }): string {
   return pageDocument({
     title: options.title,
@@ -264,11 +273,12 @@ function credentialOperationForm(options: {
     visualHeading: options.visualHeading,
     visualSummary:
       "Sensitive values travel in a same-origin request body, never in the browser URL or persistent client-side state.",
-    body: `<form method="post" action="${escapeHtml(options.action)}" class="stacked-form">${browserFields(options.csrf)}${options.fields}<div class="actions"><button type="submit">${escapeHtml(options.submitLabel)}</button></div></form>`,
+    body: `<form method="post" action="${escapeHtml(options.action)}" class="stacked-form"${options.conditional ? " data-conditional-form" : ""}>${browserFields(options.csrf)}${options.fields}<div class="actions"><button type="submit">${escapeHtml(options.submitLabel)}</button></div></form>`,
     actions: [
       { href: "/docs", label: "API docs", secondary: true },
       { href: "/session", label: "My session", secondary: true },
     ],
+    scripts: options.conditional ? conditionalFormScript() : undefined,
   });
 }
 

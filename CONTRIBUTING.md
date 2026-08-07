@@ -4,7 +4,7 @@ Read `AGENTS.md` before changing code. Every implementation change must include 
 
 Use feature branches. Do not push directly to `main`, merge without review, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
 
-Run `npm run validate` before requesting review.
+Run `npm run validate` before requesting review. It includes `npm run agents:check`; keep the authoritative root `AGENTS.md` below 32,000 bytes so Codex loads the complete instruction set by default. Prefer concise rules and move explanatory background to linked files in `docs/`.
 
 Dependencies are lockfile-pinned where runtime compatibility or vendored browser assets matter. Run `npm ci` for a clean install and do not suppress the explicit `npm run audit:high` result. Dependabot tracks routine npm updates; React, React Server Components, Vinext, Vite, Cloudflare, and Wrangler updates must be tested as a compatible group.
 

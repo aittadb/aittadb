@@ -12,6 +12,7 @@ import {
   csrfTokenForRequest,
   csrfTokenMatches,
   html,
+  javascript,
   json,
   oauthError,
   readForm,
@@ -29,6 +30,7 @@ import {
 import { isBrowserSessionClientId } from "./system-client";
 import {
   adminClientsPage,
+  authUiJs,
   authUiCss,
   consentPage,
   deviceConsentPage,
@@ -323,6 +325,9 @@ async function route(
   }
   if (url.pathname === "/auth-ui.css" && request.method === "GET") {
     return stylesheet(authUiCss());
+  }
+  if (url.pathname === "/auth-ui.js" && request.method === "GET") {
+    return javascript(authUiJs());
   }
   if (
     url.pathname === "/.well-known/openid-configuration" &&
@@ -1342,6 +1347,7 @@ export function isAittaDBRoute(pathname: string): boolean {
     pathname === "/health" ||
     pathname === "/session" ||
     pathname === "/auth-ui.css" ||
+    pathname === "/auth-ui.js" ||
     pathname === "/.well-known/openid-configuration" ||
     pathname === "/.well-known/jwks.json" ||
     pathname === "/authorize" ||
@@ -1391,6 +1397,7 @@ function needsStore(pathname: string): boolean {
     "/",
     "/health",
     "/auth-ui.css",
+    "/auth-ui.js",
     "/.well-known/openid-configuration",
     "/.well-known/jwks.json",
     "/openapi.json",
