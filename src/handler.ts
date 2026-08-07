@@ -65,7 +65,9 @@ export function createAuthBrokerWithStore(
   return {
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
-      const corsHeaders = cors(request, config.allowedCorsOrigins);
+      const corsHeaders = isCorsControlledRoute(url.pathname)
+        ? cors(request, config.allowedCorsOrigins)
+        : new Headers();
       if (corsHeaders instanceof Response) return corsHeaders;
       if (request.method === "OPTIONS")
         return new Response(null, { status: 204, headers: corsHeaders });
@@ -583,6 +585,16 @@ function isBrokerRoute(pathname: string): boolean {
     pathname === "/device/decision" ||
     pathname === "/consent" ||
     pathname.startsWith("/admin/")
+  );
+}
+
+function isCorsControlledRoute(pathname: string): boolean {
+  return (
+    pathname.startsWith("/oauth/") ||
+    pathname === "/userinfo" ||
+    pathname === "/openapi.json" ||
+    pathname === "/.well-known/openid-configuration" ||
+    pathname === "/.well-known/jwks.json"
   );
 }
 
