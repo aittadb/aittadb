@@ -45,6 +45,8 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   const browserRootHtml = await browserRoot!.text();
   assert.match(browserRootHtml, /<h1>Sites Auth Broker<\/h1>/);
+  assert.match(browserRootHtml, /href="\/auth-ui\.css"/);
+  assert.doesNotMatch(browserRootHtml, /<style>/);
   assert.match(browserRootHtml, /identity-graphic/);
   assert.match(
     browserRootHtml,
@@ -52,6 +54,16 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   );
   assert.match(browserRootHtml, /sendanor\/sites-auth-broker on GitHub/);
   assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
+
+  const browserCss = await app.fetch(
+    new Request("https://broker.example.test/auth-ui.css", {
+      headers: { accept: "text/css,*/*;q=0.1" },
+    }),
+  );
+  assert.match(browserCss!.headers.get("content-type") ?? "", /^text\/css/);
+  const browserCssText = await browserCss!.text();
+  assert.match(browserCssText, /\.sab-shell/);
+  assert.match(browserCssText, /\.repo-badge/);
 
   const cliHealth = await app.fetch(
     new Request("https://broker.example.test/health", {

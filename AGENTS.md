@@ -131,6 +131,7 @@ OAuth rules:
 - Require explicit consent unless remembered consent exactly covers the client and requested scopes.
 - Return standard OAuth error formats and content types.
 - Browser-facing responses and errors must use the shared content-negotiated HTML page shell when the client prefers `text/html`. JSON API errors must include hypermedia `_links` and `actions`; token success responses must remain OAuth/OIDC protocol-compatible.
+- Browser UI styles must be served from same-origin stylesheet routes such as `/auth-ui.css`; do not rely on inline `<style>` blocks that are blocked by the strict CSP.
 
 ## Database and Migration Rules
 
