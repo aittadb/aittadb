@@ -192,7 +192,7 @@ function pageDocument(options: PageOptions): string {
         )
         .join("")}</nav>`
     : "";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(options.title)}</title>${pageStyles()}</head><body class="sab-page"><main class="sab-shell tone-${tone}"><section class="brand-rail"><div class="brand-card" aria-hidden="true"><span class="brand-mark"><span></span></span><span>Sites Auth Broker</span></div><div class="identity-graphic" aria-hidden="true"><div class="credential-card source-card"><span>Sites identity</span><strong>email signal</strong></div><div class="flow-line"><span></span><span></span><span></span></div><div class="credential-card broker-card"><span>Broker session</span><strong>OAuth / OIDC</strong></div><div class="token-stack"><span></span><span></span><span></span></div></div><div class="brand-footer"><p class="brand-note">Local tokens. Standard protocols. No ChatGPT credentials forwarded.</p><a class="repo-badge" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer"><span>GitHub</span><strong>sendanor/sites-auth-broker</strong><em>source-available</em></a></div></section><section class="content-panel"><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer">Project source: <a href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">sendanor/sites-auth-broker on GitHub</a></footer></section></main></body></html>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(options.title)}</title><link rel="stylesheet" href="/auth-ui.css"></head><body class="sab-page"><main class="sab-shell tone-${tone}"><section class="brand-rail"><div class="brand-card" aria-hidden="true"><span class="brand-mark"><span></span></span><span>Sites Auth Broker</span></div><div class="identity-graphic" aria-hidden="true"><div class="credential-card source-card"><span>Sites identity</span><strong>email signal</strong></div><div class="flow-line"><span></span><span></span><span></span></div><div class="credential-card broker-card"><span>Broker session</span><strong>OAuth / OIDC</strong></div><div class="token-stack"><span></span><span></span><span></span></div></div><div class="brand-footer"><p class="brand-note">Local tokens. Standard protocols. No ChatGPT credentials forwarded.</p><a class="repo-badge" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer"><span>GitHub</span><strong>sendanor/sites-auth-broker</strong><em>source-available</em></a></div></section><section class="content-panel"><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer">Project source: <a href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">sendanor/sites-auth-broker on GitHub</a></footer></section></main></body></html>`;
 }
 
 function adminAction(
@@ -208,9 +208,8 @@ function alertMessage(message: string): string {
   return `<p class="notice">${escapeHtml(message)}</p>`;
 }
 
-function pageStyles(): string {
-  return `<style>
-html{color-scheme:light}
+export function authUiCss(): string {
+  return `html{color-scheme:light}
 body.sab-page{margin:0;min-height:100vh;background:#edf3f4;color:#172033;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5;text-rendering:optimizeLegibility}
 .sab-page:before{content:"";position:fixed;inset:0;background:linear-gradient(126deg,#eff7f6 0%,#f7f9fc 40%,#fbf3e8 100%);z-index:-3}
 .sab-page:after{content:"";position:fixed;inset:0;background:linear-gradient(120deg,rgba(18,48,65,.11) 1px,transparent 1px),linear-gradient(30deg,rgba(18,48,65,.07) 1px,transparent 1px);background-size:76px 76px,52px 52px;mask-image:linear-gradient(140deg,rgba(0,0,0,.72),transparent 76%);z-index:-2}
@@ -277,7 +276,7 @@ th{color:#5f7083;font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;
 .table-actions form{margin:0}
 @media (max-width:820px){.sab-shell{grid-template-columns:1fr;min-height:auto;border-radius:24px}.brand-rail{min-height:260px}.identity-graphic{margin:34px 0 18px}.broker-card{margin-left:28px}.content-panel{padding:26px}h1{font-size:2.35rem}}
 @media (max-width:520px){.sab-shell{width:min(100% - 18px,1120px);margin:9px auto;border-radius:20px}.brand-rail{padding:24px}.content-panel{padding:22px}.info-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.broker-card{margin-left:12px}.token-stack{margin-left:24px}}
-</style>`;
+`;
 }
 
 function escapeHtml(value: string): string {

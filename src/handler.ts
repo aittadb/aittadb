@@ -16,10 +16,12 @@ import {
   readForm,
   redirect,
   requireSameOrigin,
+  stylesheet,
 } from "./http";
 import { oidcConfiguration, openApiSpec } from "./openapi";
 import {
   adminClientsPage,
+  authUiCss,
   consentPage,
   deviceConsentPage,
   deviceEntryPage,
@@ -220,6 +222,9 @@ async function route(
       },
     };
     return acceptsHtml(request) ? html(healthPage(status)) : json(status);
+  }
+  if (url.pathname === "/auth-ui.css" && request.method === "GET") {
+    return stylesheet(authUiCss());
   }
   if (
     url.pathname === "/.well-known/openid-configuration" &&
@@ -787,6 +792,7 @@ function isBrokerRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/auth-ui.css" ||
     pathname === "/.well-known/openid-configuration" ||
     pathname === "/.well-known/jwks.json" ||
     pathname === "/authorize" ||
@@ -823,6 +829,7 @@ function needsStore(pathname: string): boolean {
   return ![
     "/",
     "/health",
+    "/auth-ui.css",
     "/.well-known/openid-configuration",
     "/.well-known/jwks.json",
     "/openapi.json",

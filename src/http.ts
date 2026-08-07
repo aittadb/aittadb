@@ -98,6 +98,14 @@ export function html(body: string, init: ResponseInit = {}): Response {
   return new Response(`<!doctype html>${body}`, { ...init, headers });
 }
 
+export function stylesheet(body: string, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "text/css; charset=utf-8");
+  headers.set("cache-control", "no-store");
+  addSecurityHeaders(headers);
+  return new Response(body, { ...init, headers });
+}
+
 export function addSecurityHeaders(headers: Headers): void {
   headers.set("x-content-type-options", "nosniff");
   headers.set("x-frame-options", "DENY");
@@ -105,7 +113,7 @@ export function addSecurityHeaders(headers: Headers): void {
   headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
   headers.set(
     "content-security-policy",
-    "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    "default-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
   );
 }
 
