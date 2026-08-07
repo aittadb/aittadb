@@ -42,3 +42,6 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+
+# checkout-local Sites project metadata
+/.openai/hosting.json

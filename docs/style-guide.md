@@ -1,16 +1,16 @@
-# Browser UI Style Guide
+# AittaDB Browser UI Style Guide
 
-Sites Auth Broker is a REST API and authentication service, so its browser UI must stay small. The expected quality level is contemporary ChatGPT Sites generated pages: careful spacing, strong typographic hierarchy, polished panels, responsive composition, and purposeful visual treatment. The UI must not look like an unstyled form or a default server error page.
+AittaDB is a REST API, application-data service, and authentication service, so its browser UI must stay focused on service metadata and mandatory browser-mediated operations. The expected quality level is contemporary ChatGPT Sites generated pages: careful spacing, strong typographic hierarchy, polished panels, responsive composition, and purposeful visual treatment. The UI must not look like an unstyled form or a default server error page.
 
-This style guide describes style-level alignment only. Do not copy ChatGPT product branding, imply affiliation, or make issued broker tokens look like OpenAI or ChatGPT tokens.
+This style guide describes style-level alignment only. Do not copy ChatGPT product branding, imply affiliation, or make AittaDB-issued tokens look like OpenAI or ChatGPT tokens.
 
 ## Page Model
 
 Use one shared authentication-service shell for all normal HTML responses:
 
-- A full-bleed visual panel that communicates the identity-to-token broker concept.
+- A full-bleed visual panel that communicates the sign-in, independent identity, session, and application-data boundary.
 - One focused content panel for the current task.
-- A consistent footer or badge linking to `https://github.com/sendanor/sites-auth-broker`.
+- A consistent AittaDB wordmark and footer linking to `https://github.com/aittadb/aittadb`.
 - No broad site navigation, marketing sections, testimonials, pricing, blog content, dashboard, or user profile.
 
 The normal page set is limited to service metadata, health, device-code entry, device approval or denial, OAuth consent, OAuth errors, administrator client registration, and the minimal OpenAPI viewer.
@@ -19,7 +19,18 @@ The normal page set is limited to service metadata, health, device-code entry, d
 
 The first user-facing reference to the upstream authentication must say "ChatGPT sign-in inside ChatGPT Sites." Later references on the same page may say "ChatGPT sign-in." Do not present the standalone phrase "Sites identity" to users.
 
-Always pair the upstream description with the boundary: Sites Auth Broker creates a separate local user with an immutable UUID and issues its own tokens. Those tokens are not OpenAI or ChatGPT tokens, and the broker never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
+Always pair the upstream description with the boundary: AittaDB creates a separate user with an immutable UUID, issues its own tokens, and stores application data only inside AittaDB. Those tokens are not OpenAI or ChatGPT tokens, and AittaDB never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
+
+## Brand System
+
+The product name is **AittaDB**. Render the wordmark as two adjacent spans so its typography and colors cannot drift:
+
+- `Aitta`: Inter, weight `750`, midnight navy `#0B234A`.
+- `DB`: Inter, weight `750`, red-orange `#F04A32`.
+- Font fallback order: `Inter, system-ui, "Segoe UI", sans-serif`.
+- Icon accent: cool teal `#159CA6`.
+
+Use `public/aittadb-mark.svg` as the canonical mark and favicon. It depicts a geometric storehouse containing three data bars and event nodes. Do not redraw, recolor, rotate, crop, add effects inside, or combine it with OpenAI or ChatGPT marks. Keep the navy and red-orange wordmark on a light surface when it overlays the dark visual panel.
 
 ## Visual Direction
 
@@ -28,23 +39,25 @@ Prefer:
 - A calm, high-trust authentication-product aesthetic.
 - Off-white or lightly tinted page backgrounds with depth from panels, borders, and shadows.
 - Balanced contrast with one dark anchoring area and one light task area.
-- Teal, blue, green, and warm accent colors used sparingly.
+- Midnight navy `#0B234A` for structural anchors, teal `#159CA6` for active/service accents, and red-orange `#F04A32` for the `DB` wordmark and focused highlights.
 - Restrained 6-8px corner radii for the outer shell, controls, and metadata surfaces.
-- Original locally hosted imagery that explains the broker flow, paired with page-specific visual copy.
+- Original locally hosted imagery that explains the AittaDB boundary, paired with page-specific visual copy.
 
 Avoid:
 
 - Plain black text on default white backgrounds.
 - Default browser button/form styling.
 - Clip-art, stock-photo filler, generic hero sections, or decorative images unrelated to authentication.
-- External fonts, external images, trackers, or third-party client scripts.
+- Runtime-loaded third-party fonts, external images, trackers, or third-party client scripts.
 - Purple-blue gradient dominance, one-note palettes, or novelty styling that lowers trust.
 
 ## Images and Visual Assets
 
-Images are allowed only when they help communicate the broker boundary or improve trust in a mandatory auth page. Prefer local, checked-in assets generated or designed specifically for this project. CSS artwork is acceptable when it gives the same level of polish without adding asset-loading risk.
+Images are allowed only when they communicate the AittaDB boundary, carry the product identity, or improve trust in a mandatory auth page. Prefer local, checked-in assets generated or designed specifically for this project. CSS artwork is acceptable when it gives the same level of polish without adding asset-loading risk.
 
-The shared production asset is `public/broker-aperture.jpg`. Its glass apertures show one signal crossing a boundary and resolving into separate local credentials. It is decorative in HTML and must retain an empty `alt` attribute because the adjacent visual copy carries the meaning. Every page supplies a relevant visual eyebrow, heading, and explanation instead of reusing generic marketing copy.
+The shared production illustration is `public/aittadb-boundary.jpg`. Its glass apertures show one signal crossing a boundary and resolving into separate AittaDB identity, sessions, and storage. It is decorative in HTML and must retain an empty `alt` attribute because the adjacent visual copy carries the meaning. The canonical brand mark is `public/aittadb-mark.svg`; when an adjacent visible wordmark already names AittaDB, render the mark with an empty `alt` value to avoid duplicate screen-reader output.
+
+Use `public/og.png` as the canonical 1200x630 social preview. It carries the exact AittaDB wordmark and the sentence "ChatGPT sign-in, app-ready identity and data." Root-page Open Graph and X metadata must reference it through an absolute URL derived from the configured issuer. Review the rendered card for exact text and logo fidelity whenever it is replaced.
 
 Any image asset must:
 
@@ -58,7 +71,7 @@ Do not add image dependencies to token responses, JSON API responses, or machine
 
 ## Typography and Layout
 
-Use system fonts and keep letter spacing at `0`. Use fixed responsive type steps at explicit breakpoints rather than scaling font size with viewport width.
+Self-host the Inter variable font from `public/fonts/inter-latin-wght-normal.woff2`; do not fetch it from a third-party origin. The checked-in `public/fonts/Inter-LICENSE.txt` preserves its SIL Open Font License. Use `Inter, system-ui, "Segoe UI", sans-serif`, keep letter spacing at `0`, and use fixed responsive type steps at explicit breakpoints rather than scaling font size with viewport width. The AittaDB wordmark always uses weight `750`.
 
 Every page should have:
 
@@ -93,6 +106,8 @@ Before completing browser UI work:
 - Check every page has the GitHub project affordance.
 - Check desktop and mobile layouts do not overlap.
 - Check CSP remains compatible with the stylesheet and assets.
-- Check no external fonts, images, or scripts were introduced.
-- Check `broker-aperture.jpg` remains local, decorative, and free of text, marks, secrets, PII, and deployment identifiers.
+- Check the AittaDB mark and wordmark use the canonical assets, colors, Inter weight, and fallback stack.
+- Check no runtime-loaded third-party fonts, external images, or scripts were introduced.
+- Check `aittadb-boundary.jpg` remains local, decorative, and free of text, marks, secrets, PII, and deployment identifiers.
+- Check `og.png` is 1200x630, uses exact brand text, and is advertised through issuer-derived root metadata.
 - Check errors are content-aware and not default/plain server output.

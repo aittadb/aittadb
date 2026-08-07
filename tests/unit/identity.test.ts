@@ -4,7 +4,7 @@ import { readSitesIdentity, safeRelativeReturnPath } from "../../src/identity";
 import { requireSameOrigin } from "../../src/http";
 
 test("parses Sites identity headers with percent-encoded UTF-8 name", () => {
-  const request = new Request("https://broker.example.test/device", {
+  const request = new Request("https://aittadb.example.test/device", {
     headers: {
       "oai-authenticated-user-email": "person@example.test",
       "oai-authenticated-user-full-name": "Ada%20Lovelace",
@@ -19,7 +19,7 @@ test("parses Sites identity headers with percent-encoded UTF-8 name", () => {
 });
 
 test("falls back to email when full-name encoding is unsupported", () => {
-  const request = new Request("https://broker.example.test/device", {
+  const request = new Request("https://aittadb.example.test/device", {
     headers: {
       "oai-authenticated-user-email": "person@example.test",
       "oai-authenticated-user-full-name": "Ada%20Lovelace",
@@ -42,7 +42,7 @@ test("rejects unsafe return paths", () => {
 test("accepts null origin only with same-origin fetch metadata", () => {
   assert.equal(
     requireSameOrigin(
-      new Request("https://broker.example.test/admin/clients", {
+      new Request("https://aittadb.example.test/admin/clients", {
         method: "POST",
         headers: { origin: "null", "sec-fetch-site": "same-origin" },
       }),
@@ -51,7 +51,7 @@ test("accepts null origin only with same-origin fetch metadata", () => {
   );
   assert.equal(
     requireSameOrigin(
-      new Request("https://broker.example.test/admin/clients", {
+      new Request("https://aittadb.example.test/admin/clients", {
         method: "POST",
         headers: { origin: "null", "sec-fetch-site": "cross-site" },
       }),

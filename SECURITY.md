@@ -1,6 +1,6 @@
 # Security Policy
 
-Sites Auth Broker is experimental security-sensitive authentication software. Report vulnerabilities privately to Jaakko Heusala <jheusala@iki.fi>.
+AittaDB is experimental, security-sensitive application-backend software. Report vulnerabilities privately to Jaakko Heusala <jheusala@iki.fi>.
 
 Do not file public issues that include working exploits, private keys, client secrets, refresh tokens, access tokens, authorization codes, device codes, cookies, or PII.
 

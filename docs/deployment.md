@@ -6,11 +6,12 @@ Before creating a private Sites deployment:
 
 1. Generate a signing key with `make generate-local-jwt-key`.
 2. Create a fresh Sites project for the fork.
-3. Configure D1 binding `DB`.
-4. Configure R2 binding `BUCKET` for broker file storage.
-5. Configure hosted secrets for `ISSUER_URL`, `JWT_KEY_ID`, `JWT_PRIVATE_JWK`, and `ADMIN_EMAILS`.
-6. Run `npm run validate`.
-7. Deploy privately only after explicit approval.
+3. Copy `.openai/hosting.example.json` to `.openai/hosting.json` and replace the placeholder with that new Sites project ID.
+4. Configure D1 binding `DB`.
+5. Configure R2 binding `BUCKET` for AittaDB object storage.
+6. Configure hosted secrets for `ISSUER_URL`, `JWT_KEY_ID`, `JWT_PRIVATE_JWK`, and `ADMIN_EMAILS`.
+7. Run `npm run validate`.
+8. Deploy privately only after explicit approval.
 
 Do not commit real `.openai/hosting.json` production `project_id` values as part of reusable public templates.
 

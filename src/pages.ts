@@ -18,6 +18,11 @@ interface PageOptions {
   actions?: readonly PageAction[];
   tone?: "default" | "success" | "warning" | "danger";
   status?: number;
+  social?: {
+    description: string;
+    imageUrl: string;
+    url: string;
+  };
 }
 
 export function serviceHomePage(metadata: {
@@ -36,17 +41,24 @@ export function serviceHomePage(metadata: {
   _links?: Record<string, { href: string; type?: string }>;
   actions?: Record<string, unknown>;
 }): string {
+  const description =
+    "ChatGPT sign-in, app-ready identity and data through independent OAuth, OpenID Connect, D1, and R2 services.";
   return pageDocument({
     title: metadata.service,
-    eyebrow: "Authentication broker",
+    eyebrow: "Hosted application backend",
     heading: metadata.service,
     summary:
-      "Independent OAuth 2.0, OpenID Connect, and JWT sessions based on ChatGPT sign-in inside ChatGPT Sites.",
+      "Independent OAuth and OpenID Connect sessions with per-user application data, based on ChatGPT sign-in inside ChatGPT Sites.",
     visualEyebrow: "ChatGPT sign-in boundary",
-    visualHeading: "ChatGPT sign-in. Your own local authority.",
+    visualHeading: "ChatGPT sign-in. App-ready identity and data.",
     visualSummary:
-      "ChatGPT signs the person into this Sites app. The broker maps that server-side signal to a separate local user and issues its own tokens.",
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Token authority</span><strong>${escapeHtml(metadata.tokenAuthority)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> Sites Auth Broker creates a separate local UUID and its own OAuth, OIDC, and JWT tokens. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p>`,
+      "AittaDB turns the server-side sign-in signal into independent sessions and isolated app storage without forwarding ChatGPT credentials.",
+    social: {
+      description,
+      imageUrl: `${metadata.issuer}/og.png`,
+      url: metadata.issuer,
+    },
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Upstream sign-in</span><strong>${escapeHtml(metadata.upstreamSignIn.source)}</strong></div><div><span>Issuer</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Official OpenAI product</span><strong>${metadata.officialOpenAIProduct ? "yes" : "no"}</strong></div><div><span>Token authority</span><strong>${escapeHtml(metadata.tokenAuthority)} only</strong></div></section><p class="note"><strong>ChatGPT supplies the browser sign-in inside ChatGPT Sites.</strong> AittaDB creates a separate local UUID, issues its own OAuth, OIDC, and JWT tokens, and provides client-isolated storage. It never forwards ChatGPT credentials, and its tokens are not OpenAI or ChatGPT tokens.</p>`,
     actions: [
       { href: "/docs", label: "API docs" },
       { href: "/openapi.json", label: "OpenAPI JSON", secondary: true },
@@ -67,15 +79,15 @@ export function healthPage(status: {
     eyebrow: "Runtime status",
     heading: "Service health",
     summary: status.ok
-      ? "The broker is reachable and ready to answer requests."
-      : "The broker is reachable but one or more dependencies are unavailable.",
+      ? "AittaDB is reachable and ready to answer requests."
+      : "AittaDB is reachable but one or more dependencies are unavailable.",
     tone: status.ok ? "success" : "danger",
     visualEyebrow: "Runtime map",
     visualHeading: status.ok
       ? "Every service, accounted for."
       : "One or more layers need attention.",
     visualSummary:
-      "The broker reports its durable storage bindings without exposing operational secrets.",
+      "AittaDB reports its durable data and object-storage bindings without exposing operational secrets.",
     body: `<section class="info-grid" aria-label="Health checks"><div><span>Status</span><strong>${status.ok ? "ok" : "unavailable"}</strong></div><div><span>Service</span><code>${escapeHtml(status.service)}</code></div><div><span>D1 binding</span><strong>${status.d1 ? "available" : "unavailable"}</strong></div><div><span>R2 binding</span><strong>${status.r2 ? "available" : "unavailable"}</strong></div></section>`,
     actions: [
       { href: "/", label: "Service" },
@@ -86,16 +98,16 @@ export function healthPage(status: {
 
 export function docsPage(): string {
   return pageDocument({
-    title: "Sites Auth Broker API",
+    title: "AittaDB API",
     eyebrow: "API reference",
-    heading: "Sites Auth Broker API",
+    heading: "AittaDB API",
     summary:
-      "Minimal endpoint map for the OAuth 2.0, OpenID Connect, and administrative API surface.",
+      "Minimal endpoint map for OAuth, OpenID Connect, application storage, and administration.",
     visualEyebrow: "Protocol surface",
     visualHeading: "Familiar standards. One independent issuer.",
     visualSummary:
-      "Discovery, authorization, tokens, identity, and storage remain explicit parts of the same local trust boundary.",
-    body: `<p class="note">The canonical machine-readable OpenAPI 3.1 document is available as JSON. ChatGPT supplies the upstream sign-in inside ChatGPT Sites; downstream OAuth and OIDC tokens are issued only by Sites Auth Broker.</p><pre id="spec" aria-label="OpenAPI summary">GET /
+      "Discovery, authorization, tokens, records, and objects remain explicit parts of the same application boundary.",
+    body: `<p class="note">The canonical machine-readable OpenAPI 3.1 document is available as JSON. ChatGPT supplies the upstream sign-in inside ChatGPT Sites; downstream OAuth and OIDC tokens and stored application data belong only to AittaDB.</p><pre id="spec" aria-label="OpenAPI summary">GET /
 GET /health
 GET /.well-known/openid-configuration
 GET /.well-known/jwks.json
@@ -156,7 +168,7 @@ export function deviceConsentPage(
     visualEyebrow: "Device handoff",
     visualHeading: "Match the request before the exchange.",
     visualSummary:
-      "Approval creates broker-owned credentials for this client only. The upstream Sites credential never leaves the boundary.",
+      "Approval creates AittaDB credentials for this client only. The upstream ChatGPT credential never leaves the Sites boundary.",
     body: `<section class="info-grid" aria-label="Device request"><div><span>Client</span><strong>${escapeHtml(client.name)}</strong></div><div><span>User code</span><strong>${escapeHtml(grant.userCodeDisplay)}</strong></div><div><span>Local scopes</span><code>${escapeHtml(grant.scope)}</code></div></section><form method="post" action="/device/decision"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="user_code" value="${escapeHtml(grant.userCodeDisplay)}"><div class="actions"><button name="decision" value="approve" type="submit">Approve</button><button class="secondary" name="decision" value="deny" type="submit">Deny</button></div></form>`,
   });
 }
@@ -171,7 +183,7 @@ export function consentPage(
     eyebrow: "OAuth consent",
     heading: "Approve application",
     summary:
-      "This grants the client local Sites Auth Broker scopes. It does not grant access to ChatGPT or OpenAI data.",
+      "This grants the client local AittaDB scopes. It does not grant access to ChatGPT or OpenAI data.",
     visualEyebrow: "Permission boundary",
     visualHeading: "Scope stays visible and explicit.",
     visualSummary:
@@ -228,10 +240,10 @@ export function errorPage(
       status === 403
         ? "Access stops at the boundary."
         : status >= 500
-          ? "The broker needs a moment."
+          ? "AittaDB needs a moment."
           : "This request stopped here.",
     visualSummary:
-      "The broker rejected this step without passing credentials or request secrets beyond its trust boundary.",
+      "AittaDB rejected this step without passing credentials or request secrets beyond its trust boundary.",
     body: `<section class="info-grid" aria-label="Error details"><div><span>Status</span><strong>${status}</strong></div>${options.error ? `<div><span>Error</span><code>${escapeHtml(options.error)}</code></div>` : ""}</section>`,
     actions: options.actions ?? [
       { href: "/", label: "Service" },
@@ -249,7 +261,7 @@ function pageDocument(options: PageOptions): string {
         ? "Attention required"
         : tone === "danger"
           ? "Service interruption"
-          : "Independent token issuer";
+          : "AittaDB service";
   const actions = options.actions?.length
     ? `<nav class="actions" aria-label="Available actions">${options.actions
         .map(
@@ -258,7 +270,18 @@ function pageDocument(options: PageOptions): string {
         )
         .join("")}</nav>`
     : "";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#15372f"><title>${escapeHtml(options.title)}</title><link rel="icon" href="/favicon.svg"><link rel="preload" href="/broker-aperture.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css"></head><body class="sab-page"><main class="sab-shell tone-${tone}"><aside class="visual-panel" aria-label="Sites Auth Broker trust boundary"><img class="visual-image" src="/broker-aperture.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="Sites Auth Broker service home"><span class="brand-symbol" aria-hidden="true"><span></span></span><span>Sites Auth Broker</span></a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Trust boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "ChatGPT sign-in. Local authority out.")}</h2><p>${escapeHtml(options.visualSummary ?? "The broker creates a separate local user and standard credentials without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to local token exchange"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>Broker</span><strong>Local user UUID</strong></div><div><span>Downstream</span><strong>OAuth / OIDC</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth 2.0 / OIDC</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "Sites Auth Broker")}</p><h1>${escapeHtml(options.heading)}</h1>${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><strong>Sites Auth Broker</strong><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/sendanor/sites-auth-broker" rel="noreferrer">View source on GitHub</a></footer></section></main></body></html>`;
+  const heading =
+    options.heading === "AittaDB"
+      ? `<h1 class="brand-heading" aria-label="AittaDB">${brandWordmark()}</h1>`
+      : `<h1>${escapeHtml(options.heading)}</h1>`;
+  const social = options.social
+    ? `<meta name="description" content="${escapeHtml(options.social.description)}"><link rel="canonical" href="${escapeHtml(options.social.url)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(options.title)}"><meta property="og:description" content="${escapeHtml(options.social.description)}"><meta property="og:url" content="${escapeHtml(options.social.url)}"><meta property="og:image" content="${escapeHtml(options.social.imageUrl)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="AittaDB: ChatGPT sign-in, app-ready identity and data."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(options.title)}"><meta name="twitter:description" content="${escapeHtml(options.social.description)}"><meta name="twitter:image" content="${escapeHtml(options.social.imageUrl)}">`
+    : "";
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css"></head><body class="aittadb-page"><main class="aittadb-shell tone-${tone}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application boundary")}</p><h2>${escapeHtml(options.visualHeading ?? "Identity and data, ready for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate local user, standard credentials, and isolated application storage without forwarding upstream ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Local identity</strong></div><div><span>Application</span><strong>Sessions + storage</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">OAuth / OIDC / Storage</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main></body></html>`;
+}
+
+function brandWordmark(): string {
+  return `<span class="brand-wordmark" aria-hidden="true"><span class="brand-aitta">Aitta</span><span class="brand-db">DB</span></span>`;
 }
 
 function adminAction(
@@ -275,24 +298,24 @@ function alertMessage(message: string): string {
 }
 
 export function authUiCss(): string {
-  return `html{color-scheme:light}
-  *{box-sizing:border-box}
-  body.sab-page{--accent:#176c62;--accent-strong:#10534c;--accent-soft:#e8f3ef;margin:0;min-height:100vh;padding:24px;background:#e8ece8;color:#16201d;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5;text-rendering:optimizeLegibility}
-  .sab-page:before{content:"";position:fixed;inset:0;z-index:-1;background:repeating-linear-gradient(90deg,rgba(27,60,51,.035) 0 1px,transparent 1px 80px),#e8ece8}
-  .sab-shell{width:min(100%,1240px);min-height:min(820px,calc(100vh - 48px));margin:0 auto;display:grid;grid-template-columns:minmax(390px,.92fr) minmax(0,1.08fr);background:#fffdf9;border:1px solid #c4ccc6;border-radius:8px;box-shadow:0 28px 72px rgba(22,48,40,.17);overflow:hidden}
-  .tone-success{--accent:#18714f;--accent-strong:#0d5439;--accent-soft:#e8f4ed}.tone-warning{--accent:#9a6517;--accent-strong:#71480e;--accent-soft:#fbf1df}.tone-danger{--accent:#b44b3d;--accent-strong:#873429;--accent-soft:#fbeae7}
-  .visual-panel{position:relative;min-height:720px;isolation:isolate;overflow:hidden;background:#15372f;color:#fff}
+  return `@font-face{font-family:Inter;font-style:normal;font-display:swap;font-weight:100 900;src:url('/fonts/inter-latin-wght-normal.woff2') format('woff2-variations')}
+  html{color-scheme:light}
+  *{box-sizing:border-box;letter-spacing:0}
+  body.aittadb-page{--navy:#0b234a;--orange:#f04a32;--teal:#159ca6;--accent:#159ca6;--accent-strong:#0b6f77;--accent-soft:#e7f6f7;margin:0;min-height:100vh;padding:24px;background:#edf2f4;color:#15243d;font-family:Inter,system-ui,"Segoe UI",sans-serif;line-height:1.5;text-rendering:optimizeLegibility}
+  .aittadb-page:before{content:"";position:fixed;inset:0;z-index:-1;background:repeating-linear-gradient(90deg,rgba(11,35,74,.035) 0 1px,transparent 1px 80px),#edf2f4}
+  .aittadb-shell{width:min(100%,1240px);min-height:min(820px,calc(100vh - 48px));margin:0 auto;display:grid;grid-template-columns:minmax(390px,.92fr) minmax(0,1.08fr);background:#fff;border:1px solid #c9d4df;border-radius:8px;box-shadow:0 28px 72px rgba(11,35,74,.17);overflow:hidden}
+  .tone-success{--accent:#159ca6;--accent-strong:#0b6f77;--accent-soft:#e7f6f7}.tone-warning{--accent:#d83e2a;--accent-strong:#a82c1d;--accent-soft:#fff0ed}.tone-danger{--accent:#c9342a;--accent-strong:#94231c;--accent-soft:#fdecea}
+  .visual-panel{position:relative;min-height:720px;isolation:isolate;overflow:hidden;background:#0b234a;color:#fff}
   .visual-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:56% center;z-index:-3}
-  .visual-panel:before{content:"";position:absolute;inset:0;z-index:-2;background:linear-gradient(180deg,rgba(9,28,24,.38) 0%,rgba(9,28,24,.04) 42%,rgba(8,25,22,.9) 100%)}
+  .visual-panel:before{content:"";position:absolute;inset:0;z-index:-2;background:linear-gradient(180deg,rgba(11,35,74,.48) 0%,rgba(11,35,74,.08) 38%,rgba(6,22,48,.94) 100%)}
   .visual-panel:after{content:"";position:absolute;inset:0;z-index:-1;box-shadow:inset 0 0 0 1px rgba(255,255,255,.09)}
   .visual-inner{height:100%;min-height:720px;padding:30px;display:grid;grid-template-rows:auto 1fr auto;gap:34px}
-  .brand-lockup{width:max-content;max-width:100%;display:flex;align-items:center;gap:12px;color:#fff;text-decoration:none;font-weight:780;text-shadow:0 2px 16px rgba(0,0,0,.35)}
-  .brand-symbol{width:38px;height:38px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.54);border-radius:8px;background:rgba(11,35,29,.34);backdrop-filter:blur(14px)}
-  .brand-symbol span{position:relative;width:18px;height:18px;display:block;border:2px solid #f7f1e6;border-radius:50%}
-  .brand-symbol span:after{content:"";position:absolute;width:6px;height:6px;right:-4px;bottom:-3px;border-radius:50%;background:#f29a73;border:2px solid #16372f}
+  .brand-lockup{width:max-content;max-width:100%;display:flex;align-items:center;gap:9px;padding:7px 13px 7px 8px;border:1px solid rgba(255,255,255,.72);border-radius:6px;background:rgba(255,255,255,.95);color:#0b234a;text-decoration:none;box-shadow:0 12px 30px rgba(4,18,42,.22);backdrop-filter:blur(14px)}
+  .brand-mark{width:40px;height:40px;display:block;flex:none}
+  .brand-wordmark{display:inline-flex;align-items:baseline;font-family:Inter,system-ui,"Segoe UI",sans-serif;font-size:1.16rem;font-weight:750;line-height:1;letter-spacing:0;white-space:nowrap}.brand-aitta{color:#0b234a}.brand-db{color:#f04a32}
   .visual-copy{align-self:end;max-width:490px;text-shadow:0 2px 24px rgba(0,0,0,.42)}
   .visual-eyebrow,.eyebrow{margin:0 0 11px;font-size:.76rem;font-weight:820;text-transform:uppercase;letter-spacing:0}
-  .visual-eyebrow{color:#f4b28f}
+  .visual-eyebrow{color:#ff8a75}
   .visual-copy h2{max-width:12ch;margin:0;color:#fff;font-size:3.25rem;line-height:.98;font-weight:780;letter-spacing:0}
   .visual-copy>p:last-child{max-width:46ch;margin:18px 0 0;color:rgba(255,255,255,.82);font-size:1rem}
   .visual-legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid rgba(255,255,255,.3);padding-top:16px}
@@ -301,45 +324,45 @@ export function authUiCss(): string {
   .visual-legend span,.visual-legend strong{display:block;letter-spacing:0}
   .visual-legend span{margin-bottom:4px;color:rgba(255,255,255,.62);font-size:.7rem;text-transform:uppercase;font-weight:750}
   .visual-legend strong{color:#fff;font-size:.82rem;overflow-wrap:anywhere}
-  .content-panel{min-width:0;display:grid;grid-template-rows:auto 1fr auto;padding:30px 42px 26px;background:#fffdf9}
-  .content-topline{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-bottom:24px;border-bottom:1px solid #e2e6e1;color:#53635e;font-size:.78rem;font-weight:720}
+  .content-panel{min-width:0;display:grid;grid-template-rows:auto 1fr auto;padding:30px 42px 26px;background:#fff}
+  .content-topline{display:flex;align-items:center;justify-content:space-between;gap:18px;padding-bottom:24px;border-bottom:1px solid #e2e7ed;color:#526278;font-size:.78rem;font-weight:720}
   .authority-status{display:inline-flex;align-items:center;gap:8px}.authority-status>span{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
-  .protocol-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#6c7773}
+  .protocol-label{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#65738a}
   .content-frame{width:min(100%,680px);align-self:center;justify-self:center;padding:44px 0}
   .eyebrow{color:var(--accent)}
-  h1{margin:0;color:#131a18;font-size:3.35rem;line-height:1.01;font-weight:790;letter-spacing:0;text-wrap:balance}
-  h2{margin:32px 0 14px;color:#17211e;font-size:1.18rem;letter-spacing:0}
-  .summary{max-width:60ch;margin:17px 0 28px;color:#596762;font-size:1.08rem}
-  .note,.notice{border:1px solid #cbded7;border-left:4px solid var(--accent);background:var(--accent-soft);padding:14px 16px;border-radius:6px;color:#28433b}
+  h1{margin:0;color:#0b234a;font-size:3.35rem;line-height:1.01;font-weight:790;letter-spacing:0;text-wrap:balance}.brand-heading .brand-wordmark{font-size:inherit;font-weight:750}
+  h2{margin:32px 0 14px;color:#13284b;font-size:1.18rem;letter-spacing:0}
+  .summary{max-width:60ch;margin:17px 0 28px;color:#53637a;font-size:1.08rem}
+  .note,.notice{border:1px solid #bce1e4;border-left:4px solid var(--accent);background:var(--accent-soft);padding:14px 16px;border-radius:6px;color:#173d52}
   .tone-warning .notice,.tone-warning .note{border-color:#ead5ac;color:#5f451c}.tone-danger .notice,.tone-danger .note{border-color:#efc6bf;color:#702f26}.tone-success .notice,.tone-success .note{border-color:#bfdccb;color:#244c37}
   .info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:24px 0}
-  .info-grid div{min-width:0;padding:15px;border:1px solid #dce1dc;border-radius:6px;background:#fff;box-shadow:0 9px 22px rgba(25,46,40,.055)}
-  .info-grid span{display:block;margin-bottom:6px;color:#68756f;font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0}
+  .info-grid div{min-width:0;padding:15px;border:1px solid #dbe3eb;border-radius:6px;background:#fff;box-shadow:0 9px 22px rgba(11,35,74,.055)}
+  .info-grid span{display:block;margin-bottom:6px;color:#68768a;font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
-  label{display:block;margin:18px 0 7px;font-weight:760;color:#26332f}
-  input,textarea,select{width:100%;border:1px solid #aab6b0;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#17201e;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
-  input:hover,textarea:hover,select:hover{border-color:#74847d}
+  label{display:block;margin:18px 0 7px;font-weight:760;color:#233752}
+  input,textarea,select{width:100%;border:1px solid #aab7c7;border-radius:6px;font:inherit;padding:12px 13px;background:#fff;color:#15243d;box-shadow:0 1px 0 rgba(255,255,255,.9) inset;transition:border-color .16s ease,box-shadow .16s ease}
+  input:hover,textarea:hover,select:hover{border-color:#71839a}
   input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 16%,transparent)}
   textarea{min-height:104px;resize:vertical}
   a{color:var(--accent-strong)}
-  a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #f29a73;outline-offset:3px}
+  a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:3px solid #f04a32;outline-offset:3px}
   .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
-  button,.button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid var(--accent-strong);border-radius:6px;background:var(--accent-strong);color:#fff;font:inherit;font-weight:780;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 10px 24px color-mix(in srgb,var(--accent-strong) 20%,transparent);transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease}
-  button:hover,.button:hover{transform:translateY(-1px);background:var(--accent);box-shadow:0 14px 30px color-mix(in srgb,var(--accent-strong) 24%,transparent)}
+  button,.button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;border:1px solid #0b234a;border-radius:6px;background:#0b234a;color:#fff;font:inherit;font-weight:780;padding:10px 17px;text-decoration:none;cursor:pointer;box-shadow:0 10px 24px rgba(11,35,74,.2);transition:transform .16s ease,box-shadow .16s ease,background-color .16s ease}
+  button:hover,.button:hover{transform:translateY(-1px);background:#159ca6;border-color:#0b6f77;box-shadow:0 14px 30px rgba(21,156,166,.24)}
   button.secondary,.button.secondary{background:#fff;color:var(--accent-strong);border-color:#b9c5bf;box-shadow:0 7px 18px rgba(25,46,40,.07)}
   button.compact{min-height:34px;padding:5px 10px;font-size:.88rem;box-shadow:none}
-  pre{white-space:pre-wrap;border:1px solid #263a34;background:#14251f;color:#eaf4ef;border-radius:6px;padding:18px;overflow:auto;box-shadow:0 18px 38px rgba(17,35,29,.16)}
-  .table-wrap{margin-top:30px;overflow-x:auto;border:1px solid #d9dfda;border-radius:6px;background:#fff;box-shadow:0 14px 34px rgba(25,46,40,.07)}
+  pre{white-space:pre-wrap;border:1px solid #183764;background:#0b234a;color:#edf7f8;border-radius:6px;padding:18px;overflow:auto;box-shadow:0 18px 38px rgba(11,35,74,.16)}
+  .table-wrap{margin-top:30px;overflow-x:auto;border:1px solid #d9e1ea;border-radius:6px;background:#fff;box-shadow:0 14px 34px rgba(11,35,74,.07)}
   table{width:100%;border-collapse:collapse;font-size:.91rem}
   th,td{padding:12px;border-bottom:1px solid #e5e9e5;text-align:left;vertical-align:top}
   tbody tr:last-child td{border-bottom:0}
-  th{color:#5e6d67;font-size:.72rem;text-transform:uppercase;letter-spacing:0;background:#f4f6f3}
+  th{color:#5e6c80;font-size:.72rem;text-transform:uppercase;letter-spacing:0;background:#f4f7fa}
   .table-actions{display:flex;flex-wrap:wrap;gap:8px}.table-actions form{margin:0}
-  .page-footer{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding-top:20px;border-top:1px solid #e2e6e1;color:#66736e;font-size:.82rem}
-  .page-footer div{display:grid;gap:2px}.page-footer strong{color:#27332f}.page-footer span{font-size:.75rem}
+  .page-footer{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding-top:20px;border-top:1px solid #e2e7ed;color:#667488;font-size:.82rem}
+  .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}
   .repo-link{flex:none;font-weight:760;text-decoration-thickness:1px;text-underline-offset:3px}
-  @media (max-width:860px){body.sab-page{padding:14px}.sab-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}h1{font-size:2.75rem}}
-  @media (max-width:540px){body.sab-page{padding:0}.sab-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}h1{font-size:2.35rem}.info-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
+  @media (max-width:860px){body.aittadb-page{padding:14px}.aittadb-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}h1{font-size:2.75rem}}
+  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}h1{font-size:2.35rem}.info-grid{grid-template-columns:1fr}.actions{display:grid}.button,button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
   `;
 }
 
