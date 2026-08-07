@@ -13,3 +13,4 @@
 - Removed request-time D1 schema work, packaged reviewed SQL migrations into Sites deployment artifacts, bypassed application startup for static assets, bounded cleanup scheduling, and parallelized client metadata hydration.
 - Corrected browser form origin validation for canonical custom domains and Sites same-origin dispatch behavior without allowing arbitrary cross-origin submissions.
 - Kept validated host-only CSRF session tokens stable across concurrently open browser forms while retaining malformed-token, mismatch, and same-origin rejection.
+- Completed custom-domain acceptance with real ChatGPT Sites identity, OAuth/device-flow coverage, signed-in D1/R2 operations, all-route content negotiation, responsive browser QA, green CI, and improved warm request latency.
