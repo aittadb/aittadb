@@ -192,7 +192,7 @@ export async function createDeviceAuthorization(
     id: uuid(),
     deviceCodeHash: await sha256(deviceCode),
     userCodeHash: await sha256(normalizeUserCode(userCode)),
-    userCodeDisplay: userCode,
+    userCodeDisplay: "",
     clientId: client.id,
     scope: scopes.join(" "),
     status: "pending",

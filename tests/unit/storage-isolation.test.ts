@@ -34,12 +34,17 @@ test("D1 storage reads and deletes always bind user and client ownership", async
   };
   const store = new D1AuthStore(db);
 
-  await store.listStorageRecords("user-a", "client-a");
+  await store.listStorageRecords("user-a", "client-a", null, 50);
   await store.getStorageRecord("user-a", "client-a", "record-key");
   await store.deleteStorageRecord("user-a", "client-a", "record-key");
-  await store.listStorageFiles("user-a", "client-a");
+  await store.listStorageFiles("user-a", "client-a", null, 50);
   await store.getStorageFileMetadata("user-a", "client-a", "file-key");
-  await store.deleteStorageFileMetadata("user-a", "client-a", "file-key");
+  await store.deleteStorageFileMetadata(
+    "user-a",
+    "client-a",
+    "file-key",
+    "physical-key",
+  );
 
   assert.equal(calls.length, 6);
   for (const call of calls) {
@@ -47,12 +52,14 @@ test("D1 storage reads and deletes always bind user and client ownership", async
     assert.deepEqual(call.values.slice(0, 2), ["user-a", "client-a"]);
   }
   assert.deepEqual(
-    calls.filter((call) => call.values.length === 3).map((call) => call.values),
+    calls
+      .filter((call) => typeof call.values[2] === "string")
+      .map((call) => call.values),
     [
       ["user-a", "client-a", "record-key"],
       ["user-a", "client-a", "record-key"],
       ["user-a", "client-a", "file-key"],
-      ["user-a", "client-a", "file-key"],
+      ["user-a", "client-a", "file-key", "physical-key"],
     ],
   );
 });

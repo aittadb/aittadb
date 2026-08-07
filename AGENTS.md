@@ -125,11 +125,11 @@ OAuth rules:
 - Authorization codes are high-entropy, one-time, and short-lived.
 - Preserve `state` and OIDC `nonce`.
 - Require explicit consent unless remembered consent exactly covers client and scopes.
-- Device polling enforces interval, `slow_down`, pending, denied, expired, client binding, and one-time approval.
+- Device polling enforces interval, `slow_down`, pending, denied, expired, client binding, and one-time approval. Persist device and user codes only as hashes; reconstruct a short user-code display only from the already-matching same-origin browser submission.
 - Use standard OAuth content types and errors. Token success remains protocol-standard.
 - Introspection is for authorized confidential clients and active access tokens only. Revocation authenticates the owning client, handles access and refresh tokens even when the hint is omitted or wrong, revokes refresh families, records access-token `jti`, and preserves standard non-disclosure behavior.
 
-Admin operations require trusted ChatGPT sign-in plus an exact server-side `ADMIN_EMAILS` match. Support list/create, public/confidential type, display name, exact redirects, scopes, origins, disable, secret rotation, and grant revocation. No unrestricted dynamic registration.
+Admin operations require trusted ChatGPT sign-in, an allowed local subject or explicitly audited exact-email bootstrap, and the independent deployment key through a header or short-lived subject-bound secure cookie. The key is never sufficient without Sites identity. Support list/create, public/confidential type, display name, exact redirects, scopes, origins, disable, secret rotation, and grant revocation. No unrestricted dynamic registration.
 
 ## Storage Isolation
 
@@ -140,9 +140,11 @@ Admin operations require trusted ChatGPT sign-in plus an exact server-side `ADMI
 - Canonical storage methods require AittaDB bearer access tokens and `storage.read`, `storage.write`, or `storage.delete`.
 - Expose no generic SQL, table, D1, R2 listing, environment, binding, owner/client ID, physical key, configuration, or secret API.
 - Omit private JWKs, secrets, deployment values, owner IDs, client IDs, and R2 keys from success and failure output.
-- Record JSON is limited to 64 KiB. File bytes are limited to 10 MiB. Browser multipart wrappers stream into a bounded buffer before parsing, distrust missing/invalid/understated `Content-Length`, bound form overhead, and recheck parsed file size.
-- File replacement uses copy-on-write physical keys. D1/R2 failures use bounded cleanup or rollback so metadata and bytes remain paired; simultaneous persistent primary and compensation failures cannot be made atomic across D1 and R2, must fail generically, and must never disclose internal keys.
+- Record JSON is limited to 64 KiB. File bytes are limited to 10 MiB. Require trusted Sites identity before parsing a browser multipart wrapper; then stream-bound it, distrust `Content-Length`, bound overhead, and recheck file size. Raw bearer uploads remain canonical API operations.
+- File replacement uses copy-on-write physical keys and D1 compare-and-set against the observed R2 key. Stale mutations fail `409` and retire their objects. D1/R2 failures use bounded cleanup or rollback; persistent cross-service failures fail generically and never disclose keys.
 - Attachment filenames are safe and logical-key based.
+- Enforce finite deployment, local-user, and local-user/client item and byte ceilings atomically in D1. The write kill switch blocks create/replace but leaves authorized deletion available. Responses disclose only the current user/client namespace usage and limits.
+- Collection reads use bounded deterministic keyset pages. Continuation cursors use canonical AES-GCM authenticated encryption bound to resource kind, local subject, and client; expose no position or cross-namespace inventory. Signing-key rotation invalidates cursors.
 
 Current-session storage uses the reserved browser client, so it is durable but isolated from every normal OAuth client, even for the same user. Token mode uses the token's client namespace. Submitted and internal tokens never reach HTML, URLs, cookies, logs, or browser storage.
 
@@ -178,7 +180,7 @@ Brand contract: self-host Inter with `system-ui, "Segoe UI", sans-serif`; Aitta 
 
 ## Database and Migrations
 
-D1 schema must explicitly cover local users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs where needed, audit events, rate limits, storage records, and file metadata. Add expiration indexes and bounded cleanup.
+D1 schema must explicitly cover local users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs where needed, audit events, rate limits, storage records, and file metadata. Rate increments are single-statement atomic. Index expiration, cleanup joins, and pages; bound every cleanup category and retain new empty refresh families through the documented race-prevention grace window.
 
 `db/migrations/` is canonical reviewed SQL. `db/schema.ts` is the required-table manifest. `build/sites-migrations.ts` deterministically emits Sites artifacts and journal under `dist/.openai/drizzle/`; Sites applies them. Runtime handlers never execute `CREATE`, `ALTER`, or `DROP`. This project intentionally uses handwritten migrations, not Drizzle ORM/Kit. Do not reintroduce ORM tooling without a complete architecture task.
 
@@ -192,13 +194,13 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` lists names and documentation, never values. Important configuration includes `ISSUER_URL`, `JWT_PRIVATE_JWK`, `JWT_KEY_ID`, `ADMIN_EMAILS`, token/code/device lifetimes, polling interval, CORS origins, and environment marker. Production fails closed when required secrets are absent. The canonical `ISSUER_URL` is exactly `https://aittadb.com` with no path or trailing slash; issuer changes invalidate the old token boundary and require explicit acceptance notes.
+`.env.example` lists names and documentation, never values. Important configuration includes issuer/signing data, token lifetimes, exact client origins, finite storage ceilings/page/rate settings, a storage write switch, administrator subjects, a narrow email bootstrap allowlist, and the independent administrator-key hash. Production fails closed when required secrets are absent. The canonical `ISSUER_URL` is exactly `https://aittadb.com` with no path or trailing slash; issuer changes invalidate the old token boundary and require explicit acceptance notes.
 
-Generate local ES256 keys only through the documented script/Make target. Secret key files are ignored. Never print/process a generated private key in agent conversation, commit it, or place it in public hosting metadata.
+Generate local ES256 and administrator keys only through documented script/Make targets. Secret key files are ignored. Never print/process a generated private or administrator key in agent conversation, commit it, or place it in public hosting metadata. Remove bootstrap email entries after subject enrollment where practical; the independent key remains mandatory because upstream Sites identity has no documented stable subject and email reassignment remains possible.
 
 Redact PII and every credential from logs. Use generic auth errors that do not reveal account existence. Minimal audit events may contain event type, local UUID, client ID, request ID, carefully bounded coarse request metadata, and timestamps. OAuth, identity, storage, and token responses use `Cache-Control: no-store` where sensitive.
 
-Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer policy, and permissions policy. CORS is least privilege: exact configured origins, no wildcard credentialed CORS, and no user-controlled issuer/audience. Enforce request limits and rate limits for device creation/polling, client auth, and admin operations. See `docs/threat-model.md` and `SECURITY.md`.
+Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer policy, permissions policy, and production HTTPS HSTS. Bearer CORS is bound to the token audience's active client and exact origin. Token-endpoint CORS binds the submitted active client before consuming a credential. Never use wildcard credentialed CORS or user-controlled issuer/audience. Stream-enforce bounds and rate-limit OAuth, storage, client-authentication, and administration. See `docs/threat-model.md` and `SECURITY.md`.
 
 ## Documentation Set
 
@@ -221,6 +223,7 @@ README must prominently state experimental status, independence, the Sites ident
 - Production build: `npm run build`
 - Complete validation: `npm run validate`
 - Local key file: `make generate-local-jwt-key`
+- Local administrator key files: `make generate-local-admin-access-key`
 - Ephemeral stdout key generation: `npm run keys:generate`
 
 Keep commands synchronized with `package.json`, CI, README, and contributor docs. CI uses lockfile installation and runs format, lint, typecheck, unit/integration tests, OpenAPI, Swagger, migration, AGENTS-size, audit, and production build checks. It never deploys.
@@ -232,6 +235,8 @@ Before implementing any repository-affecting user request, first capture it in r
 Process in order unless a discovered dependency is documented. Add missing work as a new unchecked flat item at the correct position before doing it. Mark `[x]` only after the entire definition of done passes. Never mark partial work complete or rewrite completed descriptions; PLAN is audit history.
 
 Parallelize independent reads, validation commands, and non-overlapping implementation work whenever practical. Serialize dependent, overlapping, and security-sensitive edits; use an isolated Git worktree only when it reduces conflict without replacing this canonical checkout.
+
+Prefer the smallest implementation that materially reduces risk and leaves a coherent working repository; do not speculate beyond the requested or evidenced problem. Whenever deciding that a feature, task, deployment, or release is ready, report an evidence-based readiness confidence from `0/100` to `100/100`, name the decisive evidence and material residual uncertainty, and rarely use `100/100`. The score informs judgment but never replaces security gates or the definition of done. Capture every material residual finding in `PLAN.md`, `ROADMAP.md`, or `BACKLOG.md` before handoff.
 
 `ROADMAP.md` lists future product direction as one flat stable `ROADMAP-NNN` checkbox list. `BACKLOG.md` lists uncommitted, unscheduled ideas as one flat stable `BACKLOG-NNN` checkbox list. Neither implies availability or authorizes implementation. Before implementing an item from either file, capture the integrated delivery unit in `PLAN.md`; update its source item only after the PLAN definition of done passes or the idea is explicitly retired with a documented replacement.
 

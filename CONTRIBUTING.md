@@ -4,6 +4,8 @@ Read `AGENTS.md` before changing code. Every implementation change must include 
 
 Use [PLAN.md](PLAN.md) for accepted, dependency-ordered implementation work, [ROADMAP.md](ROADMAP.md) for stable future product direction, and [BACKLOG.md](BACKLOG.md) for uncommitted ideas with no delivery commitment. Roadmap and backlog checkboxes describe unavailable work. Before implementing either, create a complete unchecked PLAN task; do not treat a checkbox in those files as authorization to begin.
 
+When declaring work ready, include a `0/100` evidence-based readiness confidence, the decisive validation evidence, and material residual uncertainty. The score does not waive security controls or the definition of done. Record remaining findings in PLAN, ROADMAP, or BACKLOG before handoff, and prefer a small verified risk reduction to speculative complexity.
+
 Use feature branches. Do not push directly to `main`, merge without review, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
 
 Run `npm run validate` before requesting review. It includes `npm run agents:check`; keep the authoritative root `AGENTS.md` below 32,000 bytes so Codex loads the complete instruction set by default. Prefer concise rules and move explanatory background to linked files in `docs/`.

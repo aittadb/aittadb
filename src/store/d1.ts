@@ -1,4 +1,5 @@
 import { uuid } from "../crypto";
+import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
@@ -14,24 +15,150 @@ import type {
   RefreshTokenFamily,
   RefreshTokenRecord,
   StorageFileMetadata,
+  StorageLimits,
+  StorageListPage,
+  StorageListPosition,
   StorageRecord,
+  StorageUsage,
   UpstreamIdentity,
 } from "../types";
 
 type Row = Record<string, unknown>;
 
+const CLEANUP_BATCH_SIZE = 500;
+const AUDIT_RETENTION_SECONDS = 90 * 24 * 60 * 60;
+const RATE_COUNTER_RETENTION_SECONDS = 5 * 60;
+const MAX_RATE_COUNTERS = 10_000;
+
+const UPSERT_STORAGE_RECORD_WITH_LIMITS = `
+INSERT INTO storage_records (user_id, client_id, key, value_json, created_at, updated_at)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6
+WHERE
+  (SELECT COUNT(*) FROM storage_records) +
+  (SELECT COUNT(*) FROM storage_files) +
+  CASE WHEN EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?7
+  AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records) +
+  (SELECT COALESCE(SUM(size), 0) FROM storage_files) -
+  COALESCE((SELECT length(CAST(value_json AS BLOB)) FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) +
+  length(CAST(?4 AS BLOB)) <= ?8
+  AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1) +
+  CASE WHEN EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?9
+  AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1) -
+  COALESCE((SELECT length(CAST(value_json AS BLOB)) FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) +
+  length(CAST(?4 AS BLOB)) <= ?10
+  AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) +
+  CASE WHEN EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?11
+  AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) -
+  COALESCE((SELECT length(CAST(value_json AS BLOB)) FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) +
+  length(CAST(?4 AS BLOB)) <= ?12
+ON CONFLICT(user_id, client_id, key) DO UPDATE SET
+  value_json = excluded.value_json,
+  updated_at = excluded.updated_at`;
+
+const UPSERT_STORAGE_FILE_WITH_LIMITS = `
+INSERT INTO storage_files (user_id, client_id, key, r2_key, content_type, size, sha256, created_at, updated_at)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+WHERE
+  ((?10 IS NULL AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3))
+    OR (?10 IS NOT NULL AND EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3 AND r2_key = ?10)))
+  AND
+  (SELECT COUNT(*) FROM storage_records) +
+  (SELECT COUNT(*) FROM storage_files) +
+  CASE WHEN EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?11
+  AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records) +
+  (SELECT COALESCE(SUM(size), 0) FROM storage_files) -
+  COALESCE((SELECT size FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) + ?6 <= ?12
+  AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1) +
+  CASE WHEN EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?13
+  AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1) -
+  COALESCE((SELECT size FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) + ?6 <= ?14
+  AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) +
+  CASE WHEN EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?15
+  AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) -
+  COALESCE((SELECT size FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) + ?6 <= ?16
+ON CONFLICT(user_id, client_id, key) DO UPDATE SET
+  r2_key = excluded.r2_key,
+  content_type = excluded.content_type,
+  size = excluded.size,
+  sha256 = excluded.sha256,
+  updated_at = excluded.updated_at
+WHERE storage_files.r2_key = ?10`;
+
+const UPSERT_STORAGE_FILE_COMPARE_AND_SET = `
+INSERT INTO storage_files (user_id, client_id, key, r2_key, content_type, size, sha256, created_at, updated_at)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+WHERE
+  ((?10 IS NULL AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3))
+    OR (?10 IS NOT NULL AND EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3 AND r2_key = ?10)))
+ON CONFLICT(user_id, client_id, key) DO UPDATE SET
+  r2_key = excluded.r2_key,
+  content_type = excluded.content_type,
+  size = excluded.size,
+  sha256 = excluded.sha256,
+  updated_at = excluded.updated_at
+WHERE storage_files.r2_key = ?10`;
+
 export class D1AuthStore implements AuthStore {
   constructor(private readonly db: D1Database) {}
 
   async cleanup(now: number): Promise<void> {
-    await this.db
-      .prepare("DELETE FROM revoked_access_tokens WHERE expires_at <= ?")
-      .bind(now)
-      .run();
-    await this.db
-      .prepare("DELETE FROM rate_limit_counters WHERE window_start <= ?")
-      .bind(now - 86400)
-      .run();
+    const deletions: Array<[string, ...unknown[]]> = [
+      [
+        "DELETE FROM authorization_codes WHERE rowid IN (SELECT rowid FROM authorization_codes WHERE expires_at <= ? LIMIT ?)",
+        now,
+        CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "DELETE FROM authorization_requests WHERE rowid IN (SELECT ar.rowid FROM authorization_requests ar WHERE ar.expires_at <= ? AND NOT EXISTS (SELECT 1 FROM authorization_codes ac WHERE ac.auth_request_id = ar.id AND ac.expires_at > ?) LIMIT ?)",
+        now,
+        now,
+        CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "DELETE FROM device_grants WHERE rowid IN (SELECT rowid FROM device_grants WHERE expires_at <= ? LIMIT ?)",
+        now,
+        CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "DELETE FROM refresh_tokens WHERE rowid IN (SELECT rowid FROM refresh_tokens WHERE expires_at <= ? LIMIT ?)",
+        now,
+        CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "DELETE FROM refresh_token_families WHERE rowid IN (SELECT rtf.rowid FROM refresh_token_families rtf WHERE rtf.created_at <= ? AND NOT EXISTS (SELECT 1 FROM refresh_tokens rt WHERE rt.family_id = rtf.id) LIMIT ?)",
+        now - REFRESH_FAMILY_ORPHAN_GRACE_SECONDS,
+        CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "DELETE FROM revoked_access_tokens WHERE rowid IN (SELECT rowid FROM revoked_access_tokens WHERE expires_at <= ? LIMIT ?)",
+        now,
+        CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "DELETE FROM audit_events WHERE rowid IN (SELECT rowid FROM audit_events WHERE created_at <= ? LIMIT ?)",
+        now - AUDIT_RETENTION_SECONDS,
+        CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "DELETE FROM rate_limit_counters WHERE rowid IN (SELECT rowid FROM rate_limit_counters WHERE window_start <= ? LIMIT ?)",
+        now - RATE_COUNTER_RETENTION_SECONDS,
+        CLEANUP_BATCH_SIZE,
+      ],
+    ];
+    for (const [sql, ...values] of deletions) {
+      await this.db
+        .prepare(sql)
+        .bind(...values)
+        .run();
+    }
   }
 
   async rateLimit(
@@ -42,25 +169,20 @@ export class D1AuthStore implements AuthStore {
   ): Promise<boolean> {
     const row = await this.db
       .prepare(
-        "SELECT count, window_start FROM rate_limit_counters WHERE key = ?",
+        "INSERT INTO rate_limit_counters (key, count, window_start) SELECT ?, 1, ? WHERE EXISTS (SELECT 1 FROM rate_limit_counters WHERE key = ?) OR (SELECT COUNT(*) FROM rate_limit_counters) < ? ON CONFLICT(key) DO UPDATE SET count = CASE WHEN rate_limit_counters.window_start + ? <= ? THEN 1 ELSE rate_limit_counters.count + 1 END, window_start = CASE WHEN rate_limit_counters.window_start + ? <= ? THEN excluded.window_start ELSE rate_limit_counters.window_start END RETURNING count",
       )
-      .bind(key)
+      .bind(
+        key,
+        now,
+        key,
+        MAX_RATE_COUNTERS,
+        windowSeconds,
+        now,
+        windowSeconds,
+        now,
+      )
       .first<Row>();
-    if (!row || Number(row.window_start) + windowSeconds <= now) {
-      await this.db
-        .prepare(
-          "INSERT INTO rate_limit_counters (key, count, window_start) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET count = excluded.count, window_start = excluded.window_start",
-        )
-        .bind(key, 1, now)
-        .run();
-      return true;
-    }
-    const next = Number(row.count) + 1;
-    await this.db
-      .prepare("UPDATE rate_limit_counters SET count = ? WHERE key = ?")
-      .bind(next, key)
-      .run();
-    return next <= limit;
+    return Boolean(row && Number(row.count) <= limit);
   }
 
   async audit(
@@ -204,6 +326,16 @@ export class D1AuthStore implements AuthStore {
       .bind(id)
       .first<Row>();
     return typeof row?.secret_hash === "string" ? row.secret_hash : null;
+  }
+
+  async hasActiveClientOrigin(origin: string): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        "SELECT 1 AS allowed FROM client_origins co JOIN oauth_clients oc ON oc.id = co.client_id WHERE co.origin = ? AND oc.disabled_at IS NULL LIMIT 1",
+      )
+      .bind(origin)
+      .first<Row>();
+    return Boolean(row);
   }
 
   async setClientDisabled(
@@ -565,14 +697,30 @@ export class D1AuthStore implements AuthStore {
   async listStorageRecords(
     userId: string,
     clientId: string,
-  ): Promise<StorageRecord[]> {
+    after: StorageListPosition | null,
+    limit: number,
+  ): Promise<StorageListPage<StorageRecord>> {
     const rows = await this.db
       .prepare(
-        "SELECT * FROM storage_records WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC, key ASC",
+        after
+          ? "SELECT * FROM storage_records WHERE user_id = ? AND client_id = ? AND (updated_at < ? OR (updated_at = ? AND key > ?)) ORDER BY updated_at DESC, key ASC LIMIT ?"
+          : "SELECT * FROM storage_records WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC, key ASC LIMIT ?",
       )
-      .bind(userId, clientId)
+      .bind(
+        ...(after
+          ? [
+              userId,
+              clientId,
+              after.updatedAt,
+              after.updatedAt,
+              after.key,
+              limit + 1,
+            ]
+          : [userId, clientId, limit + 1]),
+      )
       .all<Row>();
-    return (rows.results ?? []).map(rowToStorageRecord);
+    const items = (rows.results ?? []).map(rowToStorageRecord);
+    return { items: items.slice(0, limit), hasMore: items.length > limit };
   }
 
   async getStorageRecord(
@@ -589,11 +737,12 @@ export class D1AuthStore implements AuthStore {
     return row ? rowToStorageRecord(row) : null;
   }
 
-  async upsertStorageRecord(record: StorageRecord): Promise<void> {
-    await this.db
-      .prepare(
-        "INSERT INTO storage_records (user_id, client_id, key, value_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, client_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
-      )
+  async upsertStorageRecord(
+    record: StorageRecord,
+    limits: StorageLimits,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(UPSERT_STORAGE_RECORD_WITH_LIMITS)
       .bind(
         record.userId,
         record.clientId,
@@ -601,8 +750,15 @@ export class D1AuthStore implements AuthStore {
         record.valueJson,
         record.createdAt,
         record.updatedAt,
+        limits.globalMaxItems,
+        limits.globalMaxBytes,
+        limits.userMaxItems,
+        limits.userMaxBytes,
+        limits.namespaceMaxItems,
+        limits.namespaceMaxBytes,
       )
       .run();
+    return mutationChanges(result) === 1;
   }
 
   async deleteStorageRecord(
@@ -621,14 +777,30 @@ export class D1AuthStore implements AuthStore {
   async listStorageFiles(
     userId: string,
     clientId: string,
-  ): Promise<StorageFileMetadata[]> {
+    after: StorageListPosition | null,
+    limit: number,
+  ): Promise<StorageListPage<StorageFileMetadata>> {
     const rows = await this.db
       .prepare(
-        "SELECT * FROM storage_files WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC, key ASC",
+        after
+          ? "SELECT * FROM storage_files WHERE user_id = ? AND client_id = ? AND (updated_at < ? OR (updated_at = ? AND key > ?)) ORDER BY updated_at DESC, key ASC LIMIT ?"
+          : "SELECT * FROM storage_files WHERE user_id = ? AND client_id = ? ORDER BY updated_at DESC, key ASC LIMIT ?",
       )
-      .bind(userId, clientId)
+      .bind(
+        ...(after
+          ? [
+              userId,
+              clientId,
+              after.updatedAt,
+              after.updatedAt,
+              after.key,
+              limit + 1,
+            ]
+          : [userId, clientId, limit + 1]),
+      )
       .all<Row>();
-    return (rows.results ?? []).map(rowToStorageFile);
+    const items = (rows.results ?? []).map(rowToStorageFile);
+    return { items: items.slice(0, limit), hasMore: items.length > limit };
   }
 
   async getStorageFileMetadata(
@@ -645,10 +817,16 @@ export class D1AuthStore implements AuthStore {
     return row ? rowToStorageFile(row) : null;
   }
 
-  async upsertStorageFileMetadata(file: StorageFileMetadata): Promise<void> {
-    await this.db
+  async upsertStorageFileMetadata(
+    file: StorageFileMetadata,
+    expectedR2Key: string | null,
+    limits?: StorageLimits,
+  ): Promise<boolean> {
+    const result = await this.db
       .prepare(
-        "INSERT INTO storage_files (user_id, client_id, key, r2_key, content_type, size, sha256, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, client_id, key) DO UPDATE SET r2_key = excluded.r2_key, content_type = excluded.content_type, size = excluded.size, sha256 = excluded.sha256, updated_at = excluded.updated_at",
+        limits
+          ? UPSERT_STORAGE_FILE_WITH_LIMITS
+          : UPSERT_STORAGE_FILE_COMPARE_AND_SET,
       )
       .bind(
         file.userId,
@@ -660,21 +838,60 @@ export class D1AuthStore implements AuthStore {
         file.sha256,
         file.createdAt,
         file.updatedAt,
+        expectedR2Key,
+        ...(limits
+          ? [
+              limits.globalMaxItems,
+              limits.globalMaxBytes,
+              limits.userMaxItems,
+              limits.userMaxBytes,
+              limits.namespaceMaxItems,
+              limits.namespaceMaxBytes,
+            ]
+          : []),
       )
       .run();
+    return mutationChanges(result) === 1;
   }
 
   async deleteStorageFileMetadata(
     userId: string,
     clientId: string,
     key: string,
-  ): Promise<void> {
-    await this.db
+    expectedR2Key: string,
+  ): Promise<boolean> {
+    const result = await this.db
       .prepare(
-        "DELETE FROM storage_files WHERE user_id = ? AND client_id = ? AND key = ?",
+        "DELETE FROM storage_files WHERE user_id = ? AND client_id = ? AND key = ? AND r2_key = ?",
       )
-      .bind(userId, clientId, key)
+      .bind(userId, clientId, key, expectedR2Key)
       .run();
+    return mutationChanges(result) === 1;
+  }
+
+  async getStorageUsage(
+    userId: string,
+    clientId: string,
+  ): Promise<StorageUsage> {
+    const row = await this.db
+      .prepare(
+        "SELECT (SELECT COUNT(*) FROM storage_records WHERE user_id = ? AND client_id = ?) + (SELECT COUNT(*) FROM storage_files WHERE user_id = ? AND client_id = ?) AS item_count, (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ? AND client_id = ?) + (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ? AND client_id = ?) AS byte_count",
+      )
+      .bind(
+        userId,
+        clientId,
+        userId,
+        clientId,
+        userId,
+        clientId,
+        userId,
+        clientId,
+      )
+      .first<Row>();
+    return {
+      itemCount: Number(row?.item_count ?? 0),
+      byteCount: Number(row?.byte_count ?? 0),
+    };
   }
 
   private async hydrateClient(row: Row): Promise<ClientView> {
@@ -836,9 +1053,12 @@ function mutationChanges(result: D1Result): number {
 function redact(data: Record<string, unknown>): Record<string, unknown> {
   const redacted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
-    redacted[key] = /token|secret|code|cookie|authorization/i.test(key)
-      ? "[REDACTED]"
-      : value;
+    redacted[key] =
+      /token|secret|code|cookie|authorization|password|credential|access_key/i.test(
+        key,
+      )
+        ? "[REDACTED]"
+        : value;
   }
   return redacted;
 }

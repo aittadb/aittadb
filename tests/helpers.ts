@@ -1,4 +1,5 @@
 import { createAittaDBWithStore, type AittaDBApp } from "../src/handler";
+import { sha256 } from "../src/crypto";
 import type { UpstreamIdentityProvider } from "../src/identity";
 import type { AuthStore, RuntimeEnv, UpstreamIdentity } from "../src/types";
 
@@ -74,6 +75,7 @@ export async function testEnv(
     JWT_KEY_ID: "test-key",
     JWT_PRIVATE_JWK: JSON.stringify(privateJwk),
     ADMIN_EMAILS: "admin@example.test",
+    ADMIN_ACCESS_KEY_HASH: await sha256("test-admin-key"),
     BUCKET: new MemoryR2Bucket(),
     ...extra,
   };

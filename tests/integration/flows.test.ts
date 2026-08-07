@@ -1103,6 +1103,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
       ?.method,
     "POST",
   );
+  assert.equal(Array.from(store.devices.values())[0]?.userCodeDisplay, "");
 
   const pending = await app.fetch(
     new Request("https://aittadb.example.test/oauth/token", {
@@ -1147,10 +1148,9 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
       body: form({ csrf_token: csrf, user_code: deviceJson.user_code }),
     }),
   );
-  assert.match(
-    await continueResponse!.text(),
-    /Match the request before the exchange/,
-  );
+  const consentHtml = await continueResponse!.text();
+  assert.match(consentHtml, /Match the request before the exchange/);
+  assert.match(consentHtml, new RegExp(deviceJson.user_code));
   const decisionCsrf = cookieValue(continueResponse!, "aittadb_csrf");
   const approved = await app.fetch(
     new Request("https://aittadb.example.test/device/decision", {
@@ -2692,7 +2692,10 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
 
   const admin = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
-      headers: { accept: "text/html" },
+      headers: {
+        accept: "text/html",
+        "x-aittadb-admin-key": "test-admin-key",
+      },
     }),
   );
   const adminCsrf = cookieValue(admin!, "aittadb_csrf");
@@ -2707,6 +2710,7 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
         "content-type": "application/x-www-form-urlencoded",
         cookie: `aittadb_csrf=${adminCsrf}`,
         origin: "https://aittadb.example.test",
+        "x-aittadb-admin-key": "test-admin-key",
       },
       body: form({
         csrf_token: adminCsrf,

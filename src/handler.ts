@@ -6,8 +6,14 @@ import type {
   AuthStore,
   ClientRegistrationInput,
   ClientView,
+  LocalUser,
   UpstreamIdentity,
 } from "./types";
+import {
+  hasValidAdminSession,
+  issueAdminSession,
+  verifyAdminAccessKey,
+} from "./admin-session";
 import {
   requireSitesIdentity,
   sitesIdentityProvider,
@@ -29,6 +35,7 @@ import {
   javascript,
   json,
   oauthError,
+  parseBasicAuth,
   readForm,
   redirect,
   requireSameOrigin,
@@ -62,6 +69,7 @@ import {
 } from "./transaction-resources";
 import {
   adminClientsPage,
+  adminUnlockPage,
   authUiJs,
   authUiCss,
   consentPage,
@@ -107,7 +115,7 @@ export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
 }
 
-const CLEANUP_INTERVAL_SECONDS = 300;
+const CLEANUP_INTERVAL_SECONDS = 60;
 let nextCleanupAt = 0;
 
 export async function createAittaDB(
@@ -131,12 +139,17 @@ export function createAittaDBWithStore(
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
       const corsHeaders = isCorsControlledRoute(url.pathname)
-        ? cors(request, config.allowedCorsOrigins, config.issuerUrl)
+        ? await corsHeadersForRequest(request, url, config, store)
         : new Headers();
       if (corsHeaders instanceof Response)
         return finalizeResponse(request, corsHeaders, config);
       if (request.method === "OPTIONS")
-        return new Response(null, { status: 204, headers: corsHeaders });
+        return finalizeResponse(
+          request,
+          new Response(null, { status: 204 }),
+          config,
+          corsHeaders,
+        );
       if (!isAittaDBRoute(url.pathname)) {
         if (isAssetRoute(url.pathname)) return null;
         return finalizeResponse(
@@ -226,7 +239,9 @@ async function route(
     const identity = identityProvider.read(request);
     const signedIn = Boolean(identity);
     const showAdmin = Boolean(
-      identity && config.adminEmails.includes(identity.email),
+      identity &&
+      config.adminAccessKeyHash &&
+      config.adminEmails.includes(identity.email),
     );
     const metadata = {
       service: "AittaDB",
@@ -488,7 +503,14 @@ async function route(
             ),
           );
     }
-    return createAuthorizeRequest(url, config, store);
+    const limited = await endpointRateLimit(
+      store,
+      request,
+      config,
+      "authorize",
+      30,
+    );
+    return limited ?? createAuthorizeRequest(url, config, store);
   }
   if (
     url.pathname === "/oauth/device_authorization" &&
@@ -519,16 +541,14 @@ async function route(
       );
       if (rejected) return rejected;
     }
-    if (
-      !(await store.rateLimit(
-        `device:${clientIp(request)}`,
-        30,
-        60,
-        nowSeconds(),
-      ))
-    ) {
-      return oauthError("slow_down", "Rate limit exceeded", 429);
-    }
+    const limited = await endpointRateLimit(
+      store,
+      request,
+      config,
+      "device",
+      30,
+    );
+    if (limited) return limited;
     const response = await createDeviceAuthorization(
       request,
       form,
@@ -584,6 +604,14 @@ async function route(
         );
   }
   if (url.pathname === "/oauth/revoke" && request.method === "POST") {
+    const limited = await endpointRateLimit(
+      store,
+      request,
+      config,
+      "revoke",
+      60,
+    );
+    if (limited) return limited;
     const form = await readForm(request);
     const browser = isBrowserUiForm(form);
     if (browser) {
@@ -632,6 +660,14 @@ async function route(
         );
   }
   if (url.pathname === "/oauth/introspect" && request.method === "POST") {
+    const limited = await endpointRateLimit(
+      store,
+      request,
+      config,
+      "introspect",
+      120,
+    );
+    if (limited) return limited;
     const form = await readForm(request);
     const browser = isBrowserUiForm(form);
     if (browser) {
@@ -798,6 +834,14 @@ async function route(
       : response;
   }
   if (url.pathname.startsWith("/storage/")) {
+    const limited = await endpointRateLimit(
+      store,
+      request,
+      config,
+      "storage",
+      240,
+    );
+    if (limited) return limited;
     const browserResponse = await storageBrowserEndpoint(
       request,
       url,
@@ -882,7 +926,11 @@ async function localSessionEndpoint(
   }
 
   const user = await store.findOrCreateUser(identity, nowSeconds());
-  const isAdmin = config.adminEmails.includes(identity.email);
+  const isAdmin = Boolean(
+    config.adminAccessKeyHash &&
+    (config.adminSubjects.includes(user.id) ||
+      config.adminEmails.includes(identity.email)),
+  );
   const csrf = csrfTokenForRequest(request);
   const session = {
     authenticated: true,
@@ -1009,6 +1057,12 @@ async function finalizeResponse(
   const headers = new Headers(negotiated.headers);
   for (const [key, value] of corsHeaders.entries()) headers.set(key, value);
   addSecurityHeaders(headers);
+  if (config.isProduction && new URL(config.issuerUrl).protocol === "https:") {
+    headers.set(
+      "strict-transport-security",
+      "max-age=31536000; includeSubDomains",
+    );
+  }
   return new Response(negotiated.body, {
     status: negotiated.status,
     statusText: negotiated.statusText,
@@ -1225,28 +1279,62 @@ async function tokenEndpoint(
   store: AuthStore,
   submittedForm?: URLSearchParams,
 ): Promise<Response> {
-  if (
-    !(await store.rateLimit(
-      `token:${clientIp(request)}`,
-      120,
-      60,
-      nowSeconds(),
-    ))
-  ) {
-    return oauthError("slow_down", "Rate limit exceeded", 429);
-  }
   const form = submittedForm ?? (await readForm(request));
+  const [limited, corsHeaders] = await Promise.all([
+    endpointRateLimit(store, request, config, "token", 120),
+    tokenClientCorsHeaders(request, form, config, store),
+  ]);
+  if (corsHeaders instanceof Response) return corsHeaders;
+  if (limited) return responseWithHeaders(limited, corsHeaders);
   const grantType = form.get("grant_type");
-  if (grantType === "urn:ietf:params:oauth:grant-type:device_code")
-    return pollDeviceToken(request, form, config, store);
+  if (grantType === "urn:ietf:params:oauth:grant-type:device_code") {
+    return responseWithHeaders(
+      await pollDeviceToken(request, form, config, store),
+      corsHeaders,
+    );
+  }
 
   const client = await authenticateClient(request, form, store);
-  if (client instanceof Response) return client;
-  if (grantType === "authorization_code")
-    return exchangeAuthorizationCode(form, config, store, client);
-  if (grantType === "refresh_token")
-    return rotateRefreshToken(form, config, store, client);
-  return oauthError("unsupported_grant_type", "Unsupported grant type");
+  if (client instanceof Response)
+    return responseWithHeaders(client, corsHeaders);
+  let response: Response;
+  if (grantType === "authorization_code") {
+    response = await exchangeAuthorizationCode(form, config, store, client);
+  } else if (grantType === "refresh_token") {
+    response = await rotateRefreshToken(form, config, store, client);
+  } else {
+    response = oauthError("unsupported_grant_type", "Unsupported grant type");
+  }
+  return responseWithHeaders(response, corsHeaders);
+}
+
+async function tokenClientCorsHeaders(
+  request: Request,
+  form: URLSearchParams,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore,
+): Promise<Headers | Response> {
+  const origin = request.headers.get("origin");
+  if (!origin) return new Headers();
+  const basic = parseBasicAuth(request);
+  const clientId = basic?.username || form.get("client_id") || "";
+  const client = clientId ? await store.getClient(clientId) : null;
+  const allowedOrigins =
+    client && !client.disabledAt && !isBrowserSessionClientId(client.id)
+      ? client.origins
+      : [];
+  return cors(request, allowedOrigins, config.issuerUrl);
+}
+
+function responseWithHeaders(response: Response, extra: Headers): Response {
+  if ([...extra].length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of extra) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 async function revokeEndpoint(
@@ -1322,7 +1410,9 @@ async function userInfoEndpoint(
   try {
     const verified = await verifyAccessToken(token, config, store, audience);
     const user = await store.getUser(verified.claims.sub);
-    if (!user) return oauthError("invalid_token", "Invalid token", 401);
+    const client = await store.getClient(audience);
+    if (!user || !client || client.disabledAt)
+      return oauthError("invalid_token", "Invalid token", 401);
     const scopes = parseScopes(String(verified.claims.scope || ""));
     if (!scopes.includes("openid"))
       return oauthError("invalid_token", "Invalid token", 401);
@@ -1377,6 +1467,7 @@ async function deviceEntryPost(
       actions: retry.actions,
     });
   }
+  grant.userCodeDisplay = normalizeUserCode(userCode);
   const identity = requireTransactionIdentity(
     request,
     identityProvider,
@@ -1621,8 +1712,18 @@ async function adminClientsGet(
   store: AuthStore,
   identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
-  const admin = await requireAdmin(request, config, store, identityProvider);
+  const limited = await endpointRateLimit(store, request, config, "admin", 30);
+  if (limited) return limited;
+  const admin = await requireAdminIdentity(
+    request,
+    config,
+    store,
+    identityProvider,
+  );
   if (admin instanceof Response) return admin;
+  if (!(await hasAdminCredential(request, admin.user.id, config))) {
+    return adminUnlockResponse(request);
+  }
   const csrf = csrfTokenForRequest(request);
   return adminClientsResponse(
     request,
@@ -1639,7 +1740,14 @@ async function adminClientsPost(
   store: AuthStore,
   identityProvider: UpstreamIdentityProvider,
 ): Promise<Response> {
-  const admin = await requireAdmin(request, config, store, identityProvider);
+  const limited = await endpointRateLimit(store, request, config, "admin", 30);
+  if (limited) return limited;
+  const admin = await requireAdminIdentity(
+    request,
+    config,
+    store,
+    identityProvider,
+  );
   if (admin instanceof Response) return admin;
   if (!requireSameOrigin(request, config.issuerUrl)) {
     return negotiatedFormError(
@@ -1659,6 +1767,34 @@ async function adminClientsPost(
     );
   }
   const action = form.get("action");
+  if (action === "unlock") {
+    if (
+      !(await verifyAdminAccessKey(form.get("admin_access_key") || "", config))
+    ) {
+      await store.audit(
+        "admin.session.rejected",
+        { identity_source: admin.authorizationSource },
+        nowSeconds(),
+      );
+      return adminUnlockResponse(request, 401);
+    }
+    const session = await issueAdminSession(
+      admin.user.id,
+      config,
+      nowSeconds(),
+    );
+    await store.audit(
+      "admin.session.created",
+      { identity_source: admin.authorizationSource },
+      nowSeconds(),
+    );
+    const response = redirect("/admin/clients", 303);
+    response.headers.set("set-cookie", session.cookie);
+    return response;
+  }
+  if (!(await hasAdminCredential(request, admin.user.id, config))) {
+    return adminUnlockResponse(request, 401);
+  }
   if (action) {
     const clientId = form.get("client_id") || "";
     if (isBrowserSessionClientId(clientId)) {
@@ -1667,6 +1803,16 @@ async function adminClientsPost(
         "not_found",
         "Client is unavailable",
         404,
+      );
+    }
+    if (
+      !["disable", "enable", "revoke_grants", "rotate_secret"].includes(action)
+    ) {
+      return negotiatedFormError(
+        request,
+        "invalid_request",
+        "Unsupported administrative action",
+        400,
       );
     }
     if (action === "disable")
@@ -1682,6 +1828,7 @@ async function adminClientsPost(
         nowSeconds(),
       );
       const csrf = csrfTokenForRequest(request);
+      await auditAdminMutation(store, action, clientId, admin);
       return adminClientsResponse(
         request,
         config,
@@ -1690,6 +1837,7 @@ async function adminClientsPost(
         secret,
       );
     }
+    await auditAdminMutation(store, action, clientId, admin);
     const csrf = csrfTokenForRequest(request);
     return adminClientsResponse(
       request,
@@ -1710,6 +1858,7 @@ async function adminClientsPost(
     origins: splitLines(form.get("origins") || ""),
   };
   const result = await createClientRegistration(input, store, nowSeconds());
+  await auditAdminMutation(store, "create", result.client.id, admin);
   const csrf = csrfTokenForRequest(request);
   return adminClientsResponse(
     request,
@@ -1720,12 +1869,22 @@ async function adminClientsPost(
   );
 }
 
-async function requireAdmin(
+async function requireAdminIdentity(
   request: Request,
   config: ReturnType<typeof loadConfig>,
   store: AuthStore,
   identityProvider: UpstreamIdentityProvider,
-): Promise<true | Response> {
+): Promise<
+  | { user: LocalUser; authorizationSource: "subject" | "email-bootstrap" }
+  | Response
+> {
+  if (!config.adminAccessKeyHash) {
+    return oauthError(
+      "admin_unavailable",
+      "Administrative operations require a configured independent access key",
+      503,
+    );
+  }
   const identity = identityProvider.read(request);
   if (!identity) {
     if (acceptsHtml(request))
@@ -1747,7 +1906,10 @@ async function requireAdmin(
       },
     );
   }
-  if (!config.adminEmails.includes(identity.email)) {
+  const user = await store.findOrCreateUser(identity, nowSeconds());
+  const subjectAllowed = config.adminSubjects.includes(user.id);
+  const emailBootstrapAllowed = config.adminEmails.includes(identity.email);
+  if (!subjectAllowed && !emailBootstrapAllowed) {
     return acceptsHtml(request)
       ? html(
           errorPage(
@@ -1763,8 +1925,58 @@ async function requireAdmin(
           403,
         );
   }
-  await store.findOrCreateUser(identity, nowSeconds());
-  return true;
+  return {
+    user,
+    authorizationSource: subjectAllowed ? "subject" : "email-bootstrap",
+  };
+}
+
+async function hasAdminCredential(
+  request: Request,
+  subject: string,
+  config: ReturnType<typeof loadConfig>,
+): Promise<boolean> {
+  const headerKey = request.headers.get("x-aittadb-admin-key") || "";
+  return (
+    (await verifyAdminAccessKey(headerKey, config)) ||
+    (await hasValidAdminSession(request, subject, config, nowSeconds()))
+  );
+}
+
+function adminUnlockResponse(request: Request, status = 200): Response {
+  if (!acceptsHtml(request)) {
+    return oauthError(
+      "admin_authentication_required",
+      "Independent administrator authentication is required",
+      401,
+    );
+  }
+  const csrf = csrfTokenForRequest(request);
+  return html(adminUnlockPage(csrf), {
+    status,
+    headers: { "set-cookie": csrfCookie(csrf) },
+  });
+}
+
+async function auditAdminMutation(
+  store: AuthStore,
+  actionName: string,
+  clientId: string,
+  admin: {
+    user: LocalUser;
+    authorizationSource: "subject" | "email-bootstrap";
+  },
+): Promise<void> {
+  await store.audit(
+    "admin.client.mutated",
+    {
+      action: actionName,
+      client_reference: await sha256(clientId),
+      actor_subject_hash: await sha256(admin.user.id),
+      identity_source: admin.authorizationSource,
+    },
+    nowSeconds(),
+  );
 }
 
 function adminClientsResponse(
@@ -2108,6 +2320,46 @@ function isCorsControlledRoute(pathname: string): boolean {
   );
 }
 
+async function corsHeadersForRequest(
+  request: Request,
+  url: URL,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore | null,
+): Promise<Headers | Response> {
+  const origin = request.headers.get("origin");
+  if (url.pathname === "/oauth/token") {
+    if (!origin || request.method !== "OPTIONS") return new Headers();
+    const allowed = Boolean(
+      store && (await store.hasActiveClientOrigin(origin)),
+    );
+    return cors(request, allowed ? [origin] : [], config.issuerUrl);
+  }
+  if (!origin || !isClientCorsRoute(url.pathname)) {
+    return cors(
+      request,
+      origin ? config.allowedCorsOrigins : [],
+      config.issuerUrl,
+    );
+  }
+
+  let allowed = false;
+  if (store && request.method === "OPTIONS") {
+    allowed = await store.hasActiveClientOrigin(origin);
+  } else if (store) {
+    const token = bearerToken(request);
+    const audience = token ? parseJwtAudience(token) : null;
+    const client = audience ? await store.getClient(audience) : null;
+    allowed = Boolean(
+      client && !client.disabledAt && client.origins.includes(origin),
+    );
+  }
+  return cors(request, allowed ? [origin] : [], config.issuerUrl);
+}
+
+function isClientCorsRoute(pathname: string): boolean {
+  return pathname === "/userinfo" || pathname.startsWith("/storage/");
+}
+
 function needsStore(pathname: string): boolean {
   return ![
     "/",
@@ -2130,6 +2382,40 @@ function splitLines(value: string): string[] {
 
 function clientIp(request: Request): string {
   return request.headers.get("cf-connecting-ip") || "unknown";
+}
+
+async function endpointRateLimit(
+  store: AuthStore,
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  family: string,
+  perIpLimit: number,
+): Promise<Response | null> {
+  const now = nowSeconds();
+  const ipHash = await sha256(
+    `rate-ip:${config.jwtPrivateJwk.d}:${clientIp(request)}`,
+  );
+  const ipAllowed = await store.rateLimit(
+    `${family}:ip:${ipHash}`,
+    perIpLimit,
+    60,
+    now,
+  );
+  if (!ipAllowed) return rateLimitResponse();
+  const globalAllowed = await store.rateLimit(
+    `${family}:global`,
+    perIpLimit * 10,
+    60,
+    now,
+  );
+  if (globalAllowed) return null;
+  return rateLimitResponse();
+}
+
+function rateLimitResponse(): Response {
+  const response = oauthError("slow_down", "Rate limit exceeded", 429);
+  response.headers.set("retry-after", "60");
+  return response;
 }
 
 function parseJwtAudience(token: string): string | null {

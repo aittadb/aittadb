@@ -46,6 +46,8 @@ curl -s -X POST "$ISSUER_URL/oauth/token" \
   --data-urlencode "device_code=$DEVICE_CODE"
 ```
 
+The response contains the short user code and `verification_uri_complete` as required by the Device Grant. AittaDB persists only hashes of the device code and short user code. The verification browser supplies the matching user code back in a same-origin form so consent can display it without a durable plaintext copy.
+
 ## Browser or Native PKCE
 
 Create a 43-128 character verifier, send its base64url-encoded SHA-256 digest as `code_challenge`, and request:
@@ -78,6 +80,15 @@ make generate-local-jwt-key
 
 The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is ignored by Git.
 
+Generate the independent administrator key separately:
+
+```sh
+make generate-local-admin-access-key
+# Equivalent: npm run admin-key:generate
+```
+
+The generator writes the plaintext key and SHA-256 base64url hash to separate ignored files under `.secrets/` with restrictive permissions and prints no key material. Configure the hosted `ADMIN_ACCESS_KEY_HASH` secret from the hash file. The plaintext key unlocks a 15-minute browser administrator session only after the signed-in local UUID is allowed by `ADMIN_SUBJECTS` or, during migration, its exact email is temporarily allowed by `ADMIN_EMAILS`. UUID allowlisting does not eliminate reassignment risk because AittaDB still locates that UUID by upstream email; the independent key is the separate factor.
+
 ## AittaDB Storage
 
 Register a client that is allowed to request `storage.read`, `storage.write`, and `storage.delete`. After the user approves those local scopes, use the returned access token with the storage API.
@@ -102,6 +113,25 @@ curl -s "$ISSUER_URL/storage/records/app/settings" \
   -H "authorization: Bearer $ACCESS_TOKEN"
 ```
 
+List a bounded page and follow the server-provided `next` link. This example uses `jq` only to select that link; clients should not decode or construct cursors:
+
+```sh
+PAGE=$(curl -s "$ISSUER_URL/storage/records?page_size=25" \
+  -H "authorization: Bearer $ACCESS_TOKEN" \
+  -H 'accept: application/vnd.aittadb+json; version=0.1')
+
+NEXT=$(printf '%s' "$PAGE" | jq -r \
+  '.links[]? | select(.rel | index("next")) | .href' | head -n 1)
+
+if [ -n "$NEXT" ]; then
+  curl -s "$NEXT" \
+    -H "authorization: Bearer $ACCESS_TOKEN" \
+    -H 'accept: application/vnd.aittadb+json; version=0.1'
+fi
+```
+
+The collection's `usage` object combines record and file item/byte usage only for the access token's current local-user/client namespace. It does not expose the deployment-wide or per-user totals used internally for enforcement. The default page size is 50 and the initial maximum is 100; an invalid size or a cursor from another resource kind, user, or client returns `400 invalid_request`.
+
 Create a file with a server-generated logical key:
 
 ```sh
@@ -123,3 +153,49 @@ curl -s -X PUT "$ISSUER_URL/storage/files/notes/hello.txt" \
 ```
 
 The logical key in the URL is application metadata. AittaDB generates the physical R2 key and isolates every list, read, write, and delete by its immutable user UUID and OAuth client ID. Neither storage mode can enumerate AittaDB tables, other users or clients, physical R2 keys, bindings, configuration, or deployment secrets.
+
+## Capacity and Rate Responses
+
+Clients must treat these responses as state, not infer Sites provider capacity from them. The relevant error fields are duplicated at the top level and under `data`; the complete response also contains the standard AittaDB hypermedia envelope.
+
+A rate counter returns `429` and a recovery interval:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 60
+Content-Type: application/json; charset=utf-8
+
+{
+  "error": "slow_down",
+  "error_description": "Rate limit exceeded",
+  "type": "error",
+  "data": {
+    "error": "slow_down",
+    "error_description": "Rate limit exceeded"
+  }
+}
+```
+
+When the deployment kill switch is off, creates and replacements return `503`; authorized reads and deletes remain available:
+
+```http
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json; charset=utf-8
+
+{
+  "error": "storage_writes_disabled",
+  "error_description": "Storage writes are temporarily disabled by this AittaDB deployment"
+}
+```
+
+When an AittaDB-configured item or byte ceiling is reached, the write returns `507`. Deleting items can make room again:
+
+```http
+HTTP/1.1 507 Insufficient Storage
+Content-Type: application/json; charset=utf-8
+
+{
+  "error": "storage_limit_exceeded",
+  "error_description": "A configured AittaDB storage limit has been reached"
+}
+```

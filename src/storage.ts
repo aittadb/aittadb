@@ -4,6 +4,7 @@ import {
   hypermediaJson,
   isJsonMediaType,
   oauthError,
+  readBoundedBody,
 } from "./http";
 import {
   HYPERMEDIA_MEDIA_TYPE,
@@ -16,13 +17,16 @@ import {
   type HypermediaField,
 } from "./hypermedia";
 import { parseScopes, verifyAccessToken } from "./oauth";
+import { decodeStorageCursor, encodeStorageCursor } from "./storage-cursor";
 import type {
   AppConfig,
   AuthStore,
   ClientView,
   RuntimeEnv,
   StorageFileMetadata,
+  StorageListPosition,
   StorageRecord,
+  StorageUsage,
 } from "./types";
 
 export const MAX_RECORD_BYTES = 65_536;
@@ -35,6 +39,7 @@ interface StoragePrincipal {
   userId: string;
   client: ClientView;
   scopes: string[];
+  writesEnabled: boolean;
 }
 
 export interface StorageRepresentationContext {
@@ -47,6 +52,7 @@ interface StorageActionContext {
   scopes: readonly string[];
   authorizationScheme: "bearer" | "sites-session";
   csrfToken?: string;
+  writesEnabled: boolean;
 }
 
 interface StorageRecordData {
@@ -65,6 +71,19 @@ interface StorageFileData {
   updated_at: number;
 }
 
+interface StoragePageRequest {
+  cursor: string | null;
+  position: StorageListPosition | null;
+  pageSize: number;
+}
+
+interface StorageCollectionPage {
+  cursor: string | null;
+  nextCursor: string | null;
+  pageSize: number;
+  usage: StorageUsage;
+}
+
 export async function storageEndpoint(
   request: Request,
   url: URL,
@@ -81,16 +100,30 @@ export async function storageEndpoint(
       "storage.read",
     );
     if (principal instanceof Response) return principal;
-    const records = await store.listStorageRecords(
-      principal.userId,
-      principal.client.id,
+    const page = await parseStoragePage(url, "records", principal, config);
+    if (page instanceof Response) return page;
+    const [records, usage] = await Promise.all([
+      store.listStorageRecords(
+        principal.userId,
+        principal.client.id,
+        page.position,
+        page.pageSize,
+      ),
+      store.getStorageUsage(principal.userId, principal.client.id),
+    ]);
+    const nextCursor = await nextStorageCursor(
+      "records",
+      records.items,
+      records.hasMore,
+      principal,
+      config,
     );
     return hypermediaJson(
       request,
       storageCollectionDocument(
         config,
         "records",
-        records.map((record) =>
+        records.items.map((record) =>
           recordDocument(
             record,
             config,
@@ -98,6 +131,12 @@ export async function storageEndpoint(
           ),
         ),
         storageActionContext(principal, representation),
+        {
+          cursor: page.cursor,
+          nextCursor,
+          pageSize: page.pageSize,
+          usage,
+        },
       ),
     );
   }
@@ -159,7 +198,9 @@ export async function storageEndpoint(
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       };
-      await store.upsertStorageRecord(record);
+      if (!(await store.upsertStorageRecord(record, config.storageLimits))) {
+        return storageLimitExceeded();
+      }
       return hypermediaJson(
         request,
         recordDocument(
@@ -203,16 +244,30 @@ export async function storageEndpoint(
       "storage.read",
     );
     if (principal instanceof Response) return principal;
-    const files = await store.listStorageFiles(
-      principal.userId,
-      principal.client.id,
+    const page = await parseStoragePage(url, "files", principal, config);
+    if (page instanceof Response) return page;
+    const [files, usage] = await Promise.all([
+      store.listStorageFiles(
+        principal.userId,
+        principal.client.id,
+        page.position,
+        page.pageSize,
+      ),
+      store.getStorageUsage(principal.userId, principal.client.id),
+    ]);
+    const nextCursor = await nextStorageCursor(
+      "files",
+      files.items,
+      files.hasMore,
+      principal,
+      config,
     );
     return hypermediaJson(
       request,
       storageCollectionDocument(
         config,
         "files",
-        files.map((file) =>
+        files.items.map((file) =>
           fileDocument(
             file,
             config,
@@ -221,6 +276,12 @@ export async function storageEndpoint(
           ),
         ),
         storageActionContext(principal, representation),
+        {
+          cursor: page.cursor,
+          nextCursor,
+          pageSize: page.pageSize,
+          usage,
+        },
       ),
     );
   }
@@ -339,13 +400,9 @@ export async function storageEndpoint(
           503,
         );
       if (file) {
-        await deleteStorageFileConsistently(env.BUCKET!, store, file);
-      } else {
-        await store.deleteStorageFileMetadata(
-          principal.userId,
-          principal.client.id,
-          fileKey,
-        );
+        if (!(await deleteStorageFileConsistently(env.BUCKET!, store, file))) {
+          return storageConflict();
+        }
       }
       return hypermediaJson(
         request,
@@ -409,14 +466,39 @@ async function writeStorageFile(
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
+  const expectedR2Key = existing?.r2Key ?? null;
   try {
-    await store.upsertStorageFileMetadata(file);
+    if (
+      !(await store.upsertStorageFileMetadata(
+        file,
+        expectedR2Key,
+        config.storageLimits,
+      ))
+    ) {
+      await deleteR2Object(env.BUCKET, r2Key);
+      const current = await store.getStorageFileMetadata(
+        principal.userId,
+        principal.client.id,
+        fileKey,
+      );
+      if (
+        (expectedR2Key === null && current !== null) ||
+        (expectedR2Key !== null && current?.r2Key !== expectedR2Key)
+      ) {
+        return storageConflict();
+      }
+      return storageLimitExceeded();
+    }
   } catch (error) {
     await deleteR2Object(env.BUCKET, r2Key);
     throw error;
   }
   if (existing) {
-    await retireReplacedStorageObject(env.BUCKET, store, existing, file);
+    if (
+      !(await retireReplacedStorageObject(env.BUCKET, store, existing, file))
+    ) {
+      return storageConflict();
+    }
   }
   return hypermediaJson(
     request,
@@ -439,22 +521,35 @@ async function deleteStorageFileConsistently(
   bucket: R2Bucket,
   store: AuthStore,
   file: StorageFileMetadata,
-): Promise<void> {
-  await store.deleteStorageFileMetadata(file.userId, file.clientId, file.key);
+): Promise<boolean> {
+  if (
+    !(await store.deleteStorageFileMetadata(
+      file.userId,
+      file.clientId,
+      file.key,
+      file.r2Key,
+    ))
+  ) {
+    return false;
+  }
   try {
     await deleteR2Object(bucket, file.r2Key);
+    return true;
   } catch (deleteError) {
     const present = await r2ObjectPresent(bucket, file.r2Key);
-    if (present === false) return;
+    if (present === false) return true;
     if (present === true) {
       try {
-        await store.upsertStorageFileMetadata(file);
+        if (!(await store.upsertStorageFileMetadata(file, null))) {
+          await deleteR2Object(bucket, file.r2Key);
+          return false;
+        }
       } catch (restoreError) {
         // If metadata restoration fails, complete the deletion when possible
         // instead of leaving an unreferenced object after a partial rollback.
         try {
           await deleteR2Object(bucket, file.r2Key);
-          return;
+          return true;
         } catch {
           throw restoreError;
         }
@@ -469,22 +564,29 @@ async function retireReplacedStorageObject(
   store: AuthStore,
   previous: StorageFileMetadata,
   replacement: StorageFileMetadata,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await deleteR2Object(bucket, previous.r2Key);
   } catch (deleteError) {
     const previousPresent = await r2ObjectPresent(bucket, previous.r2Key);
-    if (previousPresent === false) return;
+    if (previousPresent === false) {
+      return currentFileIs(store, replacement);
+    }
     if (previousPresent !== true) throw deleteError;
 
     try {
-      await store.upsertStorageFileMetadata(previous);
+      if (
+        !(await store.upsertStorageFileMetadata(previous, replacement.r2Key))
+      ) {
+        await deleteR2Object(bucket, previous.r2Key);
+        return false;
+      }
     } catch (restoreError) {
       // The replacement remains internally consistent. One final bounded
       // retirement attempt avoids rolling metadata back to an uncertain key.
       try {
         await deleteR2Object(bucket, previous.r2Key);
-        return;
+        return false;
       } catch {
         throw restoreError;
       }
@@ -497,7 +599,12 @@ async function retireReplacedStorageObject(
         // Keep metadata paired with the object that is known to exist if
         // rollback cleanup itself fails.
         try {
-          await store.upsertStorageFileMetadata(replacement);
+          if (
+            await store.upsertStorageFileMetadata(replacement, previous.r2Key)
+          ) {
+            await deleteR2Object(bucket, previous.r2Key);
+            return true;
+          }
         } catch {
           // The outer request still fails generically; no internal key leaks.
         }
@@ -506,6 +613,22 @@ async function retireReplacedStorageObject(
     }
     throw deleteError;
   }
+  return currentFileIs(store, replacement);
+}
+
+async function currentFileIs(
+  store: AuthStore,
+  expected: StorageFileMetadata,
+): Promise<boolean> {
+  return (
+    (
+      await store.getStorageFileMetadata(
+        expected.userId,
+        expected.clientId,
+        expected.key,
+      )
+    )?.r2Key === expected.r2Key
+  );
 }
 
 async function deleteR2Object(bucket: R2Bucket, key: string): Promise<void> {
@@ -559,7 +682,40 @@ async function requireStorageScope(
     const client = await store.getClient(audience);
     if (!user || !client || client.disabledAt)
       return oauthError("invalid_token", "Invalid token", 401);
-    return { userId: user.id, client, scopes };
+    const rateKind = requiredScope === "storage.read" ? "read" : "write";
+    const rateLimit =
+      rateKind === "read"
+        ? config.storageReadRateLimit
+        : config.storageWriteRateLimit;
+    const ownerHash = await sha256(`${user.id}:${client.id}`);
+    if (
+      !(await store.rateLimit(
+        `storage:${rateKind}:${ownerHash}`,
+        rateLimit,
+        60,
+        nowSeconds(),
+      ))
+    ) {
+      const response = oauthError("slow_down", "Rate limit exceeded", 429);
+      response.headers.set("retry-after", "60");
+      return response;
+    }
+    if (
+      requiredScope === "storage.write" &&
+      !config.storageLimits.writesEnabled
+    ) {
+      return oauthError(
+        "storage_writes_disabled",
+        "Storage writes are temporarily disabled by this AittaDB deployment",
+        503,
+      );
+    }
+    return {
+      userId: user.id,
+      client,
+      scopes,
+      writesEnabled: config.storageLimits.writesEnabled,
+    };
   } catch {
     return oauthError("invalid_token", "Invalid token", 401);
   }
@@ -572,9 +728,14 @@ async function readJsonBody(
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.includes("application/json"))
     return oauthError("invalid_request", "JSON content type required", 415);
-  const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > maxBytes)
+  let text: string;
+  try {
+    text = new TextDecoder().decode(
+      await readBoundedBody(request.body, maxBytes),
+    );
+  } catch {
     return oauthError("invalid_request", "Storage record is too large", 413);
+  }
   try {
     return JSON.parse(text) as unknown;
   } catch {
@@ -589,9 +750,12 @@ async function readBytes(
   const length = Number(request.headers.get("content-length") || "0");
   if (Number.isFinite(length) && length > maxBytes)
     return oauthError("invalid_request", "Storage file is too large", 413);
-  const body = await request.arrayBuffer();
-  if (body.byteLength > maxBytes)
+  let body: ArrayBuffer;
+  try {
+    body = await readBoundedBody(request.body, maxBytes);
+  } catch {
     return oauthError("invalid_request", "Storage file is too large", 413);
+  }
   return body;
 }
 
@@ -619,13 +783,26 @@ function storageCollectionDocument(
   kind: "records" | "files",
   items: readonly HypermediaDocument<unknown>[],
   context: StorageActionContext,
+  page: StorageCollectionPage,
 ) {
-  const href = `${config.issuerUrl}/storage/${kind}`;
+  const href = storagePageHref(config, kind, page.pageSize, page.cursor);
   return resourceDocument({
     type: `storage-${kind}-collection`,
     id: href,
-    data: { count: items.length, items: [...items] },
-    links: storageCollectionLinks(config, kind),
+    data: {
+      count: items.length,
+      page_size: page.pageSize,
+      has_more: Boolean(page.nextCursor),
+      usage: {
+        item_count: page.usage.itemCount,
+        byte_count: page.usage.byteCount,
+        item_limit: config.storageLimits.namespaceMaxItems,
+        byte_limit: config.storageLimits.namespaceMaxBytes,
+        writes_enabled: config.storageLimits.writesEnabled,
+      },
+      items: [...items],
+    },
+    links: storageCollectionLinks(config, kind, page),
     actions: storageCollectionActions(config, kind, context),
   });
 }
@@ -697,18 +874,32 @@ function storageDeletionDocument(
       }),
       link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
     ],
-    actions: hasScope(context.scopes, "storage.write")
-      ? [storagePutAction(config, kind, context, key, undefined, "missing")]
-      : [],
+    actions:
+      context.writesEnabled && hasScope(context.scopes, "storage.write")
+        ? [storagePutAction(config, kind, context, key, undefined, "missing")]
+        : [],
   });
 }
 
-function storageCollectionLinks(config: AppConfig, kind: "records" | "files") {
+function storageCollectionLinks(
+  config: AppConfig,
+  kind: "records" | "files",
+  page: StorageCollectionPage,
+) {
   const other = kind === "records" ? "files" : "records";
   return [
-    link("self", `${config.issuerUrl}/storage/${kind}`, {
+    link("self", storagePageHref(config, kind, page.pageSize, page.cursor), {
       type: HYPERMEDIA_MEDIA_TYPE,
     }),
+    ...(page.nextCursor
+      ? [
+          link(
+            "next",
+            storagePageHref(config, kind, page.pageSize, page.nextCursor),
+            { type: HYPERMEDIA_MEDIA_TYPE },
+          ),
+        ]
+      : []),
     link(`storage-${other}`, `${config.issuerUrl}/storage/${other}`, {
       type: HYPERMEDIA_MEDIA_TYPE,
     }),
@@ -780,7 +971,7 @@ function storageCollectionActions(
       ),
     );
   }
-  if (hasScope(context.scopes, "storage.write")) {
+  if (context.writesEnabled && hasScope(context.scopes, "storage.write")) {
     if (kind === "files") {
       actions.push(storageCreateFileAction(config, context));
     }
@@ -835,7 +1026,7 @@ function storageItemActions(
       );
     }
   }
-  if (hasScope(context.scopes, "storage.write")) {
+  if (context.writesEnabled && hasScope(context.scopes, "storage.write")) {
     actions.push(storagePutAction(config, kind, context, key, data));
   }
   if (hasScope(context.scopes, "storage.delete")) {
@@ -978,10 +1169,95 @@ function storageActionContext(
   return {
     scopes: representation.actionScopes ?? principal.scopes,
     authorizationScheme: representation.authorizationScheme ?? "bearer",
+    writesEnabled: principal.writesEnabled,
     ...(representation.csrfToken
       ? { csrfToken: representation.csrfToken }
       : {}),
   };
+}
+
+async function parseStoragePage(
+  url: URL,
+  kind: "records" | "files",
+  principal: StoragePrincipal,
+  config: AppConfig,
+): Promise<StoragePageRequest | Response> {
+  const rawPageSize = url.searchParams.get("page_size");
+  const pageSize = rawPageSize
+    ? Number.parseInt(rawPageSize, 10)
+    : config.storageDefaultPageSize;
+  if (
+    !Number.isSafeInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > config.storageMaxPageSize ||
+    (rawPageSize !== null && String(pageSize) !== rawPageSize)
+  ) {
+    return oauthError(
+      "invalid_request",
+      `page_size must be an integer from 1 to ${config.storageMaxPageSize}`,
+    );
+  }
+  const cursor = url.searchParams.get("cursor");
+  const position = cursor
+    ? await decodeStorageCursor(
+        cursor,
+        kind,
+        principal.userId,
+        principal.client.id,
+        config,
+      )
+    : null;
+  if (cursor && !position) {
+    return oauthError("invalid_request", "Invalid storage cursor");
+  }
+  return { cursor, position, pageSize };
+}
+
+async function nextStorageCursor(
+  kind: "records" | "files",
+  items: readonly { updatedAt: number; key: string }[],
+  hasMore: boolean,
+  principal: StoragePrincipal,
+  config: AppConfig,
+): Promise<string | null> {
+  const last = hasMore ? items.at(-1) : null;
+  return last
+    ? encodeStorageCursor(
+        kind,
+        principal.userId,
+        principal.client.id,
+        { updatedAt: last.updatedAt, key: last.key },
+        config,
+      )
+    : null;
+}
+
+function storagePageHref(
+  config: AppConfig,
+  kind: "records" | "files",
+  pageSize: number,
+  cursor: string | null,
+): string {
+  const url = new URL(`${config.issuerUrl}/storage/${kind}`);
+  url.searchParams.set("page_size", String(pageSize));
+  if (cursor) url.searchParams.set("cursor", cursor);
+  return url.toString();
+}
+
+function storageLimitExceeded(): Response {
+  return oauthError(
+    "storage_limit_exceeded",
+    "A configured AittaDB storage limit has been reached",
+    507,
+  );
+}
+
+function storageConflict(): Response {
+  return oauthError(
+    "storage_conflict",
+    "The file changed while this request was being processed",
+    409,
+  );
 }
 
 function sessionAdapterFields(
