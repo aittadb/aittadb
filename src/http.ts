@@ -36,6 +36,7 @@ export function defaultHypermediaLinks(): Record<
 > {
   return {
     service: { href: "/", type: "text/html" },
+    session: { href: "/session", type: "text/html" },
     health: { href: "/health", type: "application/json" },
     docs: { href: "/docs", type: "text/html" },
     openapi: { href: "/openapi.json", type: "application/json" },

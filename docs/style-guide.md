@@ -13,7 +13,9 @@ Use one shared authentication-service shell for all normal HTML responses:
 - A consistent AittaDB wordmark and footer linking to `https://github.com/aittadb/aittadb`.
 - No broad site navigation, marketing sections, testimonials, pricing, blog content, dashboard, or user profile.
 
-The normal page set is limited to service metadata, health, device-code entry, device approval or denial, OAuth consent, OAuth errors, administrator client registration, and the minimal OpenAPI viewer.
+The normal page set is limited to service metadata, the protected local-session boundary, health, real OAuth/OIDC protocol forms and results, real storage operation forms and results, device-code entry, device approval or denial, OAuth consent, OAuth errors, administrator client registration, and the interactive OpenAPI viewer.
+
+The public service home is an operation map, not a simulated demo. Its links must enter the real production routes. The protected session view must use the production Sites identity adapter and durable local-user repository; protocol and storage forms must invoke the same services, scope checks, and persistence as non-browser API requests. Never add mock sign-in, sample-only tokens, fake storage, or browser-only grants.
 
 ## Terminology
 
@@ -98,6 +100,8 @@ Tables should be used only where density is useful, such as client administratio
 ## Hypermedia Equivalence
 
 HTML pages show available actions as buttons or links. JSON responses should expose equivalent `_links` and `actions` objects where protocol compatibility allows. OAuth token success responses remain standards-compliant and do not include decorative hypermedia.
+
+The root remains publicly readable so clients can discover the issuer and begin OAuth flows before authentication. Identity-aware browser operations enter through `/session`, which starts the Sites-owned ChatGPT sign-in flow when needed and displays only the signed-in user's local AittaDB subject. A signed-in browser is not automatically authorized for client-scoped storage.
 
 ## Review Checklist
 

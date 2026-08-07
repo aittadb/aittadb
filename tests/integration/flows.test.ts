@@ -30,8 +30,15 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       credentialsForwarded: boolean;
     };
     sessionIssuer: string;
-    _links: { docs: { href: string }; oidcConfiguration: { href: string } };
-    actions: { deviceAuthorization: { method: string } };
+    _links: {
+      docs: { href: string };
+      oidcConfiguration: { href: string };
+      session: { href: string };
+    };
+    actions: {
+      authenticate: { href: string };
+      deviceAuthorization: { method: string };
+    };
   };
   assert.equal(apiRootJson.service, "AittaDB");
   assert.equal(
@@ -53,6 +60,14 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(
     apiRootJson._links.oidcConfiguration.href,
     "https://aittadb.example.test/.well-known/openid-configuration",
+  );
+  assert.equal(
+    apiRootJson._links.session.href,
+    "https://aittadb.example.test/session",
+  );
+  assert.equal(
+    apiRootJson.actions.authenticate.href,
+    "https://aittadb.example.test/session",
   );
   assert.equal(apiRootJson.actions.deviceAuthorization.method, "POST");
 
@@ -84,6 +99,10 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /separate local UUID/);
   assert.match(browserRootHtml, /tokens are not OpenAI or ChatGPT tokens/);
   assert.match(browserRootHtml, /Session issuer/);
+  assert.match(browserRootHtml, /href="\/session"/);
+  assert.match(browserRootHtml, /href="\/device"/);
+  assert.match(browserRootHtml, /href="\/storage\/records"/);
+  assert.match(browserRootHtml, /href="\/storage\/files"/);
   assert.doesNotMatch(browserRootHtml, /Token authority/i);
   assert.doesNotMatch(browserRootHtml, /Sites identity/);
   assert.doesNotMatch(browserRootHtml, /Sites Auth Broker/);
@@ -204,6 +223,86 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   const forbiddenAdminHtml = await forbiddenAdmin!.text();
   assert.match(forbiddenAdminHtml, /<h1>Forbidden<\/h1>/);
   assert.match(forbiddenAdminHtml, /Access stops at the boundary/);
+});
+
+test("public home enters the real protected local AittaDB session", async () => {
+  const env = await testEnv();
+  const store = new MemoryAuthStore();
+  const app = createAittaDBWithStore(env, store);
+
+  const browserSession = await app.fetch(
+    new Request("https://aittadb.example.test/session", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  assert.equal(browserSession?.status, 200);
+  const browserHtml = await browserSession!.text();
+  assert.match(browserHtml, /<h1>My AittaDB session<\/h1>/);
+  assert.match(browserHtml, /Test User/);
+  assert.match(browserHtml, /user@example\.test/);
+  assert.match(browserHtml, /AittaDB subject/);
+  assert.match(browserHtml, /href="\/signout-with-chatgpt\?return_to=%2F"/);
+  assert.match(browserHtml, /Being signed in does not itself grant/);
+
+  const apiSession = await app.fetch(
+    new Request("https://aittadb.example.test/session", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  const apiSessionJson = (await apiSession?.json()) as {
+    authenticated: boolean;
+    user: { sub: string; email: string };
+    credentialsForwarded: boolean;
+    _links: { signOut: { href: string }; storageRecords: { href: string } };
+  };
+  assert.equal(apiSessionJson.authenticated, true);
+  assert.equal(apiSessionJson.user.email, "user@example.test");
+  assert.match(apiSessionJson.user.sub, /^[0-9a-f-]{36}$/);
+  assert.equal(apiSessionJson.credentialsForwarded, false);
+  assert.equal(
+    apiSessionJson._links.storageRecords.href,
+    "https://aittadb.example.test/storage/records",
+  );
+
+  const repeated = await app.fetch(
+    new Request("https://aittadb.example.test/session", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(
+    ((await repeated?.json()) as { user: { sub: string } }).user.sub,
+    apiSessionJson.user.sub,
+  );
+
+  const anonymousEnv = await testEnv({
+    TEST_AUTH_EMAIL: undefined,
+    TEST_AUTH_FULL_NAME: undefined,
+  });
+  const anonymousApp = createAittaDBWithStore(
+    anonymousEnv,
+    new MemoryAuthStore(),
+  );
+  const anonymousBrowser = await anonymousApp.fetch(
+    new Request("https://aittadb.example.test/session", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  assert.equal(anonymousBrowser?.status, 302);
+  assert.equal(
+    anonymousBrowser?.headers.get("location"),
+    "https://aittadb.example.test/signin-with-chatgpt?return_to=%2Fsession",
+  );
+
+  const anonymousApi = await anonymousApp.fetch(
+    new Request("https://aittadb.example.test/session", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(anonymousApi?.status, 401);
+  assert.equal(
+    ((await anonymousApi?.json()) as { error: string }).error,
+    "login_required",
+  );
 });
 
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {

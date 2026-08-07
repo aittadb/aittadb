@@ -40,6 +40,26 @@ export const openApiSpec = {
         responses: { "200": { description: "Healthy" } },
       },
     },
+    "/session": {
+      get: {
+        summary: "Current AittaDB local session",
+        description:
+          "Uses the server-side ChatGPT sign-in signal supplied inside the trusted Sites runtime to locate or create an immutable local AittaDB user. Browsers without that upstream session are sent through the Sites-owned sign-in route. This does not return or forward ChatGPT credentials.",
+        responses: {
+          "200": {
+            description: "Current local AittaDB identity",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/LocalSession" },
+              },
+              "text/html": { schema: { type: "string" } },
+            },
+          },
+          "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
+          "401": { description: "No upstream browser session for JSON client" },
+        },
+      },
+    },
     "/.well-known/openid-configuration": {
       get: {
         summary: "OpenID Provider metadata",
@@ -338,6 +358,40 @@ export const openApiSpec = {
             type: "object",
             additionalProperties: true,
           },
+        },
+      },
+      LocalSession: {
+        type: "object",
+        required: [
+          "authenticated",
+          "user",
+          "upstreamSignIn",
+          "sessionIssuer",
+          "credentialsForwarded",
+          "_links",
+          "actions",
+        ],
+        properties: {
+          authenticated: { type: "boolean", const: true },
+          user: {
+            type: "object",
+            required: ["sub", "email", "name", "created_at", "updated_at"],
+            properties: {
+              sub: { type: "string", format: "uuid" },
+              email: { type: "string", format: "email" },
+              name: { type: "string" },
+              created_at: { type: "integer" },
+              updated_at: { type: "integer" },
+            },
+          },
+          upstreamSignIn: {
+            type: "string",
+            const: "ChatGPT sign-in inside ChatGPT Sites",
+          },
+          sessionIssuer: { type: "string", const: "AittaDB" },
+          credentialsForwarded: { type: "boolean", const: false },
+          _links: { $ref: "#/components/schemas/HypermediaLinks" },
+          actions: { type: "object", additionalProperties: true },
         },
       },
       HypermediaLinks: {
