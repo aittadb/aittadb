@@ -79,6 +79,7 @@ Maintain this structure unless `AGENTS.md` is updated in the same task that chan
 - `.openai/hosting.example.json`: safe reusable Sites hosting template with logical D1 and R2 binding names.
 - `.openai/hosting.json`: ignored checkout-local Sites project metadata; it may hold the active `project_id` and must never be committed.
 - `app/`: Vinext route handlers and minimal browser pages. HTTP handlers must delegate protocol and storage behavior to `src/`.
+- `build/`: Node-only build integration for Vinext/Sites, including typed hosting metadata loading. It must not contain deployed domain behavior.
 - `db/`: D1 schema definitions and checked-in SQL migrations.
 - `docs/`: Markdown documentation, architecture notes, threat model, deployment guide, self-hosting notes, examples, and key rotation instructions.
 - `openapi/`: canonical OpenAPI 3.1 source.
@@ -203,6 +204,8 @@ Important configuration includes:
 - token polling interval
 - allowed CORS origins where applicable
 - production/test environment marker
+
+Build tooling must prefer the ignored checkout-local `.openai/hosting.json` when it exists and fall back to the checked-in `.openai/hosting.example.json` only for clean-checkout validation. The safe template is not deployable configuration and must never substitute for creating a fork-specific Sites project before deployment.
 
 Production startup must fail closed when required secrets are missing.
 

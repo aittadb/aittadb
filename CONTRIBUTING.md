@@ -5,3 +5,5 @@ Read `AGENTS.md` before changing code. Every implementation change must include 
 Use feature branches. Do not push directly to `main`, merge without review, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
 
 Run `npm run validate` before requesting review.
+
+Clean-checkout validation uses `.openai/hosting.example.json` when the ignored checkout-local `.openai/hosting.json` does not exist. Create the local file with your own Sites project ID before running or deploying an actual Sites instance; the template is only a non-secret build fallback.
