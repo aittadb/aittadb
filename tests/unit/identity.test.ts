@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readSitesIdentity, safeRelativeReturnPath } from "../../src/identity";
-import { requireSameOrigin } from "../../src/http";
+import { cors, requireSameOrigin } from "../../src/http";
 
 test("parses Sites identity headers with percent-encoded UTF-8 name", () => {
   const request = new Request("https://aittadb.example.test/device", {
@@ -58,4 +58,42 @@ test("accepts null origin only with same-origin fetch metadata", () => {
     ),
     false,
   );
+});
+
+test("accepts the configured public origin behind the Sites dispatch URL", () => {
+  const canonicalRequest = new Request(
+    "https://internal.chatgpt.site/userinfo",
+    {
+      method: "POST",
+      headers: { origin: "https://aittadb.example.test" },
+    },
+  );
+  assert.equal(
+    requireSameOrigin(canonicalRequest, "https://aittadb.example.test"),
+    true,
+  );
+  assert.ok(
+    cors(canonicalRequest, [], "https://aittadb.example.test") instanceof
+      Headers,
+  );
+
+  const sameSiteNullRequest = new Request(
+    "https://internal.chatgpt.site/userinfo",
+    {
+      method: "POST",
+      headers: { origin: "null", "sec-fetch-site": "same-origin" },
+    },
+  );
+  assert.ok(
+    cors(sameSiteNullRequest, [], "https://aittadb.example.test") instanceof
+      Headers,
+  );
+
+  const foreignRequest = new Request("https://internal.chatgpt.site/userinfo", {
+    method: "POST",
+    headers: { origin: "https://attacker.example" },
+  });
+  const rejected = cors(foreignRequest, [], "https://aittadb.example.test");
+  assert.ok(rejected instanceof Response);
+  assert.equal(rejected.status, 403);
 });

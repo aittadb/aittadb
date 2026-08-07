@@ -93,7 +93,7 @@ export function createAittaDBWithStore(
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
       const corsHeaders = isCorsControlledRoute(url.pathname)
-        ? cors(request, config.allowedCorsOrigins)
+        ? cors(request, config.allowedCorsOrigins, config.issuerUrl)
         : new Headers();
       if (corsHeaders instanceof Response)
         return finalizeResponse(request, corsHeaders, config);
@@ -398,7 +398,11 @@ async function route(
     const form = await readForm(request);
     const browser = isBrowserUiForm(form);
     if (browser) {
-      const rejected = rejectInvalidBrowserForm(request, form);
+      const rejected = rejectInvalidBrowserForm(
+        request,
+        form,
+        config.issuerUrl,
+      );
       if (rejected) return rejected;
     }
     if (
@@ -434,7 +438,11 @@ async function route(
     const form = await readForm(request);
     const browser = isBrowserUiForm(form);
     if (browser) {
-      const rejected = rejectInvalidBrowserForm(request, form);
+      const rejected = rejectInvalidBrowserForm(
+        request,
+        form,
+        config.issuerUrl,
+      );
       if (rejected) return rejected;
     }
     const response = await tokenEndpoint(request, config, store, form);
@@ -451,7 +459,11 @@ async function route(
     const form = await readForm(request);
     const browser = isBrowserUiForm(form);
     if (browser) {
-      const rejected = rejectInvalidBrowserForm(request, form);
+      const rejected = rejectInvalidBrowserForm(
+        request,
+        form,
+        config.issuerUrl,
+      );
       if (rejected) return rejected;
     }
     const response = await revokeEndpoint(request, store, form);
@@ -488,7 +500,11 @@ async function route(
     const form = await readForm(request);
     const browser = isBrowserUiForm(form);
     if (browser) {
-      const rejected = rejectInvalidBrowserForm(request, form);
+      const rejected = rejectInvalidBrowserForm(
+        request,
+        form,
+        config.issuerUrl,
+      );
       if (rejected) return rejected;
     }
     const response = await introspectEndpoint(request, config, store, form);
@@ -544,7 +560,7 @@ async function route(
   if (url.pathname === "/userinfo" && request.method === "POST") {
     const form = await readForm(request);
     if (!isBrowserUiForm(form)) return methodNotAllowed("GET");
-    const rejected = rejectInvalidBrowserForm(request, form);
+    const rejected = rejectInvalidBrowserForm(request, form, config.issuerUrl);
     if (rejected) return rejected;
     const submittedToken = form.get("access_token") || "";
     const useSession =
@@ -602,16 +618,16 @@ async function route(
     );
   }
   if (url.pathname === "/device" && request.method === "POST") {
-    return deviceEntryPost(request, env, store);
+    return deviceEntryPost(request, env, store, config);
   }
   if (url.pathname === "/device/decision" && request.method === "POST") {
-    return deviceDecisionPost(request, env, store);
+    return deviceDecisionPost(request, env, store, config);
   }
   if (url.pathname === "/consent" && request.method === "GET") {
     return consentGet(request, env, store);
   }
   if (url.pathname === "/consent" && request.method === "POST") {
-    return consentPost(request, env, store);
+    return consentPost(request, env, store, config);
   }
   if (url.pathname === "/admin/clients" && request.method === "GET") {
     return adminClientsGet(request, env, config, store);
@@ -842,8 +858,9 @@ function isBrowserUiForm(form: URLSearchParams): boolean {
 function rejectInvalidBrowserForm(
   request: Request,
   form: URLSearchParams,
+  canonicalOrigin: string,
 ): Response | null {
-  if (!requireSameOrigin(request)) {
+  if (!requireSameOrigin(request, canonicalOrigin)) {
     return html(
       errorPage("Invalid request", "Same-origin form submission is required", {
         status: 403,
@@ -993,8 +1010,9 @@ async function deviceEntryPost(
   request: Request,
   env: RuntimeEnv,
   store: AuthStore,
+  config: ReturnType<typeof loadConfig>,
 ): Promise<Response> {
-  if (!requireSameOrigin(request))
+  if (!requireSameOrigin(request, config.issuerUrl))
     return html(
       errorPage("Invalid request", "Same-origin form submission is required", {
         status: 403,
@@ -1037,8 +1055,9 @@ async function deviceDecisionPost(
   request: Request,
   env: RuntimeEnv,
   store: AuthStore,
+  config: ReturnType<typeof loadConfig>,
 ): Promise<Response> {
-  if (!requireSameOrigin(request))
+  if (!requireSameOrigin(request, config.issuerUrl))
     return html(
       errorPage("Invalid request", "Same-origin form submission is required", {
         status: 403,
@@ -1118,8 +1137,9 @@ async function consentPost(
   request: Request,
   env: RuntimeEnv,
   store: AuthStore,
+  config: ReturnType<typeof loadConfig>,
 ): Promise<Response> {
-  if (!requireSameOrigin(request))
+  if (!requireSameOrigin(request, config.issuerUrl))
     return html(
       errorPage("Invalid request", "Same-origin form submission is required", {
         status: 403,
@@ -1188,7 +1208,7 @@ async function adminClientsPost(
 ): Promise<Response> {
   const admin = await requireAdmin(request, env, config, store);
   if (admin instanceof Response) return admin;
-  if (!requireSameOrigin(request))
+  if (!requireSameOrigin(request, config.issuerUrl))
     return html(
       errorPage("Invalid request", "Same-origin form submission is required", {
         status: 403,

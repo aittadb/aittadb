@@ -142,11 +142,12 @@ export function redirect(location: string, status = 302): Response {
 export function cors(
   request: Request,
   allowedOrigins: readonly string[],
+  canonicalOrigin?: string,
 ): Headers | Response {
   const origin = request.headers.get("origin");
   const headers = new Headers();
   if (!origin) return headers;
-  if (origin === new URL(request.url).origin) return headers;
+  if (isSameOrigin(request, canonicalOrigin)) return headers;
   if (!allowedOrigins.includes(origin))
     return oauthError("invalid_request", "Origin is not allowed", 403);
   headers.set("access-control-allow-origin", origin);
@@ -157,13 +158,26 @@ export function cors(
   return headers;
 }
 
-export function requireSameOrigin(request: Request): boolean {
+export function requireSameOrigin(
+  request: Request,
+  canonicalOrigin?: string,
+): boolean {
+  return isSameOrigin(request, canonicalOrigin);
+}
+
+function isSameOrigin(request: Request, canonicalOrigin?: string): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return true;
   if (origin === "null") {
     return request.headers.get("sec-fetch-site") === "same-origin";
   }
-  return origin === new URL(request.url).origin;
+  if (origin === new URL(request.url).origin) return true;
+  if (!canonicalOrigin) return false;
+  try {
+    return origin === new URL(canonicalOrigin).origin;
+  } catch {
+    return false;
+  }
 }
 
 export function parseBasicAuth(

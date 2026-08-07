@@ -58,7 +58,7 @@ export async function storageBrowserEndpoint(
     return null;
   }
 
-  if (!requireSameOrigin(request)) {
+  if (!requireSameOrigin(request, config.issuerUrl)) {
     return html(
       errorPage("Invalid request", "Same-origin form submission is required", {
         status: 403,
