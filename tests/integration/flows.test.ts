@@ -60,6 +60,17 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     cliHealthJson._links.service.href,
     "https://broker.example.test",
   );
+
+  const browserHealth = await app.fetch(
+    new Request("https://broker.example.test/health", {
+      headers: {
+        accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    }),
+  );
+  assert.match(await browserHealth!.text(), /<h1>Service health<\/h1>/);
+  assert.match(browserHealth!.headers.get("content-type") ?? "", /^text\/html/);
 });
 
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {
