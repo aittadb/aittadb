@@ -13,6 +13,10 @@ import {
 import { oauthError, parseBasicAuth } from "./http";
 import { HYPERMEDIA_API_VERSION, action, field, link } from "./hypermedia";
 import { isBrowserSessionClientId } from "./system-client";
+import {
+  isSubjectAuthorizationDenied,
+  requireActiveSubject,
+} from "./subject-access";
 import type {
   AppConfig,
   AuthStore,
@@ -118,6 +122,7 @@ export async function issueTokens(params: {
   includeRefresh: boolean;
   now: number;
 }): Promise<Record<string, unknown>> {
+  await requireActiveSubject(params.store, params.user.id);
   const scopeList = parseScopes(params.scope);
   const accessJti = uuid();
   const accessToken = await signJwt(
@@ -323,17 +328,24 @@ export async function pollDeviceToken(
     return oauthError("invalid_grant", "Device grant unavailable");
   const user = await store.getUser(consumed.userId);
   if (!user) return oauthError("invalid_grant", "Device grant unavailable");
-  return jsonToken(
-    await issueTokens({
-      config,
-      store,
-      user,
-      client: authenticatedClient,
-      scope: grant.scope,
-      includeRefresh: parseScopes(grant.scope).includes("offline_access"),
-      now,
-    }),
-  );
+  try {
+    return jsonToken(
+      await issueTokens({
+        config,
+        store,
+        user,
+        client: authenticatedClient,
+        scope: grant.scope,
+        includeRefresh: parseScopes(grant.scope).includes("offline_access"),
+        now,
+      }),
+    );
+  } catch (error) {
+    if (isSubjectAuthorizationDenied(error)) {
+      return oauthError("invalid_grant", "Device grant unavailable");
+    }
+    throw error;
+  }
 }
 
 export async function createAuthorizeRequest(
@@ -488,18 +500,25 @@ export async function exchangeAuthorizationCode(
   }
   const user = await store.getUser(code.userId);
   if (!user) return oauthError("invalid_grant", "Invalid authorization code");
-  return jsonToken(
-    await issueTokens({
-      config,
-      store,
-      user,
-      client,
-      scope: code.scope,
-      nonce: code.nonce,
-      includeRefresh: parseScopes(code.scope).includes("offline_access"),
-      now,
-    }),
-  );
+  try {
+    return jsonToken(
+      await issueTokens({
+        config,
+        store,
+        user,
+        client,
+        scope: code.scope,
+        nonce: code.nonce,
+        includeRefresh: parseScopes(code.scope).includes("offline_access"),
+        now,
+      }),
+    );
+  } catch (error) {
+    if (isSubjectAuthorizationDenied(error)) {
+      return oauthError("invalid_grant", "Invalid authorization code");
+    }
+    throw error;
+  }
 }
 
 export async function rotateRefreshToken(
@@ -517,6 +536,23 @@ export async function rotateRefreshToken(
   if (!existing) return oauthError("invalid_grant", "Invalid refresh token");
   const user = await store.getUser(existing.userId);
   if (!user) return oauthError("invalid_grant", "Invalid refresh token");
+  let tokens: Record<string, unknown>;
+  try {
+    tokens = await issueTokens({
+      config,
+      store,
+      user,
+      client,
+      scope: existing.scope,
+      includeRefresh: false,
+      now,
+    });
+  } catch (error) {
+    if (isSubjectAuthorizationDenied(error)) {
+      return oauthError("invalid_grant", "Invalid refresh token");
+    }
+    throw error;
+  }
   const refreshToken = randomToken(48);
   await store.createRefreshToken({
     id: uuid(),
@@ -528,15 +564,6 @@ export async function rotateRefreshToken(
     expiresAt: now + config.refreshTokenTtlSeconds,
     usedAt: null,
     revokedAt: null,
-  });
-  const tokens = await issueTokens({
-    config,
-    store,
-    user,
-    client,
-    scope: existing.scope,
-    includeRefresh: false,
-    now,
   });
   tokens.refresh_token = refreshToken;
   return jsonToken(tokens);
@@ -559,9 +586,11 @@ export async function verifyAccessToken(
   );
   if (
     verified.claims.token_use !== "access" ||
-    typeof verified.claims.jti !== "string"
+    typeof verified.claims.jti !== "string" ||
+    typeof verified.claims.sub !== "string"
   )
     throw new Error("invalid_token_use");
+  await requireActiveSubject(store, verified.claims.sub);
   if (await store.isAccessTokenJtiRevoked(verified.claims.jti))
     throw new Error("revoked_token");
   return verified;

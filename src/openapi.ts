@@ -277,7 +277,7 @@ export const openApiSpec = {
       get: {
         summary: "Current AittaDB local session",
         description:
-          "Uses the server-side ChatGPT sign-in signal supplied inside the trusted Sites runtime to locate or create an immutable local AittaDB user. Browsers without that upstream session are sent through the Sites-owned sign-in route. This does not return or forward ChatGPT credentials.",
+          "Uses the server-side ChatGPT sign-in signal supplied inside the trusted Sites runtime to locate or create an immutable local AittaDB user. Browsers without that upstream session are sent through the Sites-owned sign-in route. A local subject with any internal account-deletion job receives the same generic authentication failure and no new internal session. This does not return or forward ChatGPT credentials.",
         responses: {
           "200": {
             description: "Current local AittaDB identity",
@@ -482,7 +482,7 @@ export const openApiSpec = {
         summary:
           "OAuth 2.0 token endpoint for device, authorization_code, and refresh_token grants",
         description:
-          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject every grant before reading the body or accessing client and credential state. When enabled, a cross-origin preflight is allowed only for an exact origin registered on an active OAuth client. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject every grant before reading the body or accessing client and credential state. When enabled, a cross-origin preflight is allowed only for an exact origin registered on an active OAuth client. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential. Every token grant rejects an inactive local subject generically; refresh exchange creates no successor after that denial.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -1617,7 +1617,7 @@ export const openApiSpec = {
         scheme: "bearer",
         bearerFormat: "JWT",
         description:
-          "AittaDB access-token JWT only. ID tokens and refresh tokens are not bearer authorization credentials.",
+          "AittaDB access-token JWT only. ID tokens and refresh tokens are not bearer authorization credentials. Every consumer rejects a local subject with any internal account-deletion job using its generic invalid-credential response.",
       },
       clientSecretBasic: { type: "http", scheme: "basic" },
     },

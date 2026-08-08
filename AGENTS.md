@@ -90,7 +90,7 @@ Every server unit is a reusable primitive with a small vendor-neutral contract, 
 - Token repository owns hashed codes, device grants, refresh families/tokens, revocations, and expiration cleanup.
 - Consent, audit, and rate-limit repositories own their narrowly keyed durable records.
 - Storage repository owns records and file metadata keyed by local UUID plus OAuth client ID. R2 bytes use generated physical keys.
-- Account-deletion state is one subject-keyed internal job with finite leased claims and no HTTP surface.
+- Deletion job: any state blocks credentials/storage; `ADMIN_SUBJECTS` cannot start; no HTTP route exists.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
 - Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.

@@ -135,6 +135,10 @@ import {
   validateClientRegistrationInput,
   verifyAccessToken,
 } from "./oauth";
+import {
+  isSubjectAuthorizationDenied,
+  requireActiveSubject,
+} from "./subject-access";
 
 export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
@@ -1283,6 +1287,20 @@ async function localSessionEndpoint(
   }
 
   const user = await store.findOrCreateUser(identity, nowSeconds());
+  try {
+    await requireActiveSubject(store, user.id);
+  } catch (error) {
+    if (!isSubjectAuthorizationDenied(error)) throw error;
+    return acceptsHtml(request)
+      ? html(
+          errorPage("Session unavailable", "Authentication is required", {
+            status: 401,
+            error: "login_required",
+          }),
+          { status: 401 },
+        )
+      : oauthError("login_required", "Authentication is required", 401);
+  }
   const showAdmin =
     config.features.oauthApps && config.adminSubjects.includes(user.id);
   const csrf = csrfTokenForRequest(request);
@@ -2391,6 +2409,25 @@ async function requireAdminIdentity(
     );
   }
   const user = await store.findOrCreateUser(identity, nowSeconds());
+  try {
+    await requireActiveSubject(store, user.id);
+  } catch (error) {
+    if (!isSubjectAuthorizationDenied(error)) throw error;
+    return acceptsHtml(request)
+      ? html(
+          errorPage("Forbidden", "Administrative access is not allowed", {
+            status: 403,
+            error: "forbidden",
+          }),
+          { status: 403 },
+        )
+      : hypermediaError(
+          request,
+          "forbidden",
+          "Administrative access is not allowed",
+          403,
+        );
+  }
   if (!config.adminSubjects.includes(user.id)) {
     return acceptsHtml(request)
       ? html(

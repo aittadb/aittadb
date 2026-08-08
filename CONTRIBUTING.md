@@ -14,6 +14,8 @@ Dependencies are lockfile-pinned where runtime compatibility or vendored browser
 
 The project uses handwritten, prepared D1 SQL rather than Drizzle ORM. Update `db/migrations/`, `db/schema.ts`, the `AuthStore` contract, both repository implementations, and focused migration/parity tests together when a persisted primitive changes. Prove consistency with `npm run db:check`. There is intentionally no `db:generate` command.
 
+Subject authorization after account-deletion start belongs only in `src/subject-access.ts`. Token issuance, access-token consumers, refresh rotation, current sessions, and storage must reuse that gate and translate its denial to generic protocol errors. Do not infer behavior from job states in route handlers or let `ADMIN_SUBJECTS` reach the deletion repository through another start path.
+
 Swagger UI is pinned in `package.json` and self-hosted from `public/vendor/swagger-ui/`. After changing `swagger-ui-dist`, run `npm run swagger:sync`; CI verifies the checked-in assets with `npm run swagger:check`.
 
 When adding a state-changing browser form adapter, add its route to the centralized pre-body origin classification and the table-driven route proof in the same task. Do not defer origin detection until after reading a hidden form field; machine OAuth and raw bearer storage protocols must remain independently usable.
