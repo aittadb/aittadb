@@ -183,10 +183,158 @@ test("consent approval and denial cannot be replayed through HTTP", async () => 
       );
     assert.equal((await submit())?.status, 302);
     const replay = await submit();
-    assert.equal(replay?.status, 400);
-    assert.match(await replay!.text(), /no longer pending|expired/i);
+    await assertSafeTerminalLoser(replay, [client.redirectUris[0], decision]);
   }
   assert.equal(store.authCodes.size, 1);
+});
+
+test("remembered-consent GET has one redirect winner under concurrent and sequential replay", async () => {
+  const env = await testEnv();
+  const store = new MemoryAuthStore();
+  const identity = {
+    email: "remembered@example.test",
+    fullName: "Remembered User",
+    displayName: "Remembered User",
+  };
+  const app = createTestAittaDB(env, store, identity);
+  const now = nowSeconds();
+  const user = await store.findOrCreateUser(identity, now);
+  const { client } = await createClientRegistration(
+    {
+      type: "public",
+      name: "Remembered Consent Client",
+      redirectUris: ["https://client.example.test/remembered-callback"],
+      scopes: ["openid"],
+      origins: [],
+    },
+    store,
+    now,
+  );
+  await store.saveConsent(user.id, client.id, "openid");
+
+  const state = "remembered-consent-state";
+  const authorize = await app.fetch(
+    new Request(
+      `https://aittadb.example.test/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: client.id,
+        redirect_uri: client.redirectUris[0],
+        scope: "openid",
+        state,
+        code_challenge: await sha256(
+          "remembered-consent-verifier-value-with-43-characters",
+        ),
+        code_challenge_method: "S256",
+      })}`,
+    ),
+  );
+  assert.equal(authorize?.status, 302);
+  const consentUrl = authorize?.headers.get("location") ?? "";
+
+  const attempts = await Promise.all([
+    app.fetch(new Request(consentUrl, { headers: { accept: "text/html" } })),
+    app.fetch(new Request(consentUrl, { headers: { accept: "text/html" } })),
+  ]);
+  const winner = attempts.find((response) => response?.status === 302);
+  const loser = attempts.find((response) => response?.status === 400);
+  assert.ok(winner);
+  assert.ok(loser);
+  const winnerLocation = new URL(winner.headers.get("location") ?? "");
+  assert.equal(winnerLocation.origin, "https://client.example.test");
+  assert.equal(winnerLocation.pathname, "/remembered-callback");
+  assert.ok(winnerLocation.searchParams.get("code"));
+  assert.equal(winnerLocation.searchParams.get("state"), state);
+  await assertSafeTerminalLoser(loser, [client.redirectUris[0], state]);
+  assert.equal(store.authCodes.size, 1);
+
+  const sequentialReplay = await app.fetch(
+    new Request(consentUrl, { headers: { accept: "application/json" } }),
+  );
+  await assertSafeTerminalLoser(sequentialReplay, [
+    client.redirectUris[0],
+    state,
+  ]);
+});
+
+test("concurrent explicit approval and denial have one redirect winner", async () => {
+  const env = await testEnv();
+  const store = new MemoryAuthStore();
+  const app = createTestAittaDB(env, store);
+  const { client } = await createClientRegistration(
+    {
+      type: "public",
+      name: "Concurrent Decision Client",
+      redirectUris: ["https://client.example.test/decision-callback"],
+      scopes: ["openid"],
+      origins: [],
+    },
+    store,
+    nowSeconds(),
+  );
+  const state = "concurrent-decision-state";
+  const authorize = await app.fetch(
+    new Request(
+      `https://aittadb.example.test/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: client.id,
+        redirect_uri: client.redirectUris[0],
+        scope: "openid",
+        state,
+        code_challenge: await sha256(
+          "concurrent-decision-verifier-value-with-43-characters",
+        ),
+        code_challenge_method: "S256",
+      })}`,
+    ),
+  );
+  const consentUrl = authorize?.headers.get("location") ?? "";
+  const consent = await app.fetch(
+    new Request(consentUrl, { headers: { accept: "text/html" } }),
+  );
+  const csrf = cookieValue(consent!, "aittadb_csrf");
+  const requestId = new URL(consentUrl).searchParams.get("request_id") ?? "";
+  const submit = (decision: "approve" | "deny") =>
+    app.fetch(
+      new Request("https://aittadb.example.test/consent", {
+        method: "POST",
+        headers: {
+          accept: "text/html",
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `aittadb_csrf=${csrf}`,
+          origin: "https://aittadb.example.test",
+        },
+        body: form({
+          csrf_token: csrf,
+          request_id: requestId,
+          decision,
+        }),
+      }),
+    );
+
+  const attempts = await Promise.all([submit("approve"), submit("deny")]);
+  const winners = attempts.filter((response) => response?.status === 302);
+  const losers = attempts.filter((response) => response?.status === 400);
+  assert.equal(winners.length, 1);
+  assert.equal(losers.length, 1);
+  const winnerLocation = new URL(winners[0]!.headers.get("location") ?? "");
+  assert.equal(winnerLocation.origin, "https://client.example.test");
+  assert.equal(winnerLocation.pathname, "/decision-callback");
+  assert.equal(winnerLocation.searchParams.get("state"), state);
+  assert.ok(
+    winnerLocation.searchParams.has("code") ||
+      winnerLocation.searchParams.get("error") === "access_denied",
+  );
+  await assertSafeTerminalLoser(losers[0], [client.redirectUris[0], state]);
+  assert.ok(store.authCodes.size <= 1);
+
+  await assertSafeTerminalLoser(await submit("approve"), [
+    client.redirectUris[0],
+    state,
+  ]);
+  await assertSafeTerminalLoser(await submit("deny"), [
+    client.redirectUris[0],
+    state,
+  ]);
 });
 
 test("every browser mutation family rejects a missing Origin independently of CSRF", async () => {
@@ -509,6 +657,20 @@ async function bearerGet(
       },
     }),
   );
+}
+
+async function assertSafeTerminalLoser(
+  response: Response | null | undefined,
+  forbiddenValues: readonly string[],
+): Promise<void> {
+  assert.ok(response);
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("location"), null);
+  const body = await response.text();
+  assert.match(body, /invalid_request|no longer pending|expired/i);
+  for (const value of forbiddenValues) {
+    assert.equal(body.includes(value), false);
+  }
 }
 
 async function introspect(

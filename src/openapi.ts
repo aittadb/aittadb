@@ -1285,7 +1285,8 @@ export const openApiSpec = {
               "Sites-owned sign-in continuation or standard OAuth redirect after remembered consent",
           },
           "400": {
-            description: "Expired or invalid authorization request",
+            description:
+              "Expired, terminal, invalid, or replayed authorization request; the error is returned locally without redirecting to the client",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "401": {
@@ -1323,7 +1324,8 @@ export const openApiSpec = {
               "Redirect to the exact registered client URI with a one-time code, state, or standard OAuth denial",
           },
           "400": {
-            description: "Expired or invalid authorization request",
+            description:
+              "Expired, terminal, invalid, or replayed authorization request; a concurrent loser is returned locally without redirecting to the client",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "401": {
