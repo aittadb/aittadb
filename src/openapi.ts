@@ -1316,8 +1316,7 @@ export const openApiSpec = {
       get: {
         summary: "List and manage registered OAuth clients",
         description:
-          "Administrative client data requires both trusted ChatGPT sign-in inside ChatGPT Sites and an authorized local administrator identity from the configured local-subject allowlist or narrow exact-email bootstrap, plus an independent deployment access key. API callers send the key in x-aittadb-admin-key. A browser without that additional credential receives only an unlock form; a correct key creates a short-lived HttpOnly admin session cookie bound to the local subject. The key or cookie is never sufficient without the trusted Sites identity and administrator authorization. The response advertises only actions valid for each current client state and never repeats a confidential secret.",
-        security: [{ adminAccessKey: [] }, { adminSession: [] }, {}],
+          "Administrative client data requires a trusted ChatGPT sign-in inside ChatGPT Sites whose AittaDB local UUID is present in the deployment's configured local-subject allowlist. Sites owns the browser sign-in mechanism, so this requirement is described by the x-aittadb-sites-identity-required extension instead of a caller-supplied OpenAPI credential. The response advertises only actions valid for each current client state and never repeats a confidential secret.",
         "x-aittadb-sites-identity-required": true,
         responses: {
           "200": {
@@ -1328,8 +1327,7 @@ export const openApiSpec = {
           },
           "302": { description: "Continue through Sites-owned sign-in" },
           "401": {
-            description:
-              "Trusted Sites identity or independent administrator authentication is missing or invalid",
+            description: "Trusted Sites identity is missing",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "403": {
@@ -1337,18 +1335,12 @@ export const openApiSpec = {
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "429": rateLimitedResponse(true),
-          "503": {
-            description:
-              "Independent administrator authentication is not configured",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
         },
       },
       post: {
         summary: "Create or operate on an OAuth client",
         description:
-          "CSRF-protected same-origin administration for independent-key unlock, creation, enable/disable, confidential-secret rotation, and active-grant revocation. The unlock variant submits the deployment access key in the request body and establishes the short-lived admin session cookie. Every other variant requires that cookie or x-aittadb-admin-key in addition to trusted Sites identity and local administrator authorization. Generated confidential secrets are returned exactly once and stored only as SHA-256 hashes.",
-        security: [{ adminAccessKey: [] }, { adminSession: [] }, {}],
+          "CSRF-protected same-origin administration for creation, enable/disable, confidential-secret rotation, and active-grant revocation. Every operation requires trusted ChatGPT sign-in inside ChatGPT Sites and an AittaDB local UUID present in the configured local-subject allowlist. Generated confidential secrets are returned exactly once and stored only as SHA-256 hashes.",
         "x-aittadb-sites-identity-required": true,
         requestBody: {
           required: true,
@@ -1356,7 +1348,6 @@ export const openApiSpec = {
             "application/x-www-form-urlencoded": {
               schema: {
                 oneOf: [
-                  { $ref: "#/components/schemas/OAuthAdminUnlockInput" },
                   { $ref: "#/components/schemas/OAuthClientCreateInput" },
                   { $ref: "#/components/schemas/OAuthClientOperationInput" },
                 ],
@@ -1373,17 +1364,12 @@ export const openApiSpec = {
             ),
           },
           "302": { description: "Continue through Sites-owned sign-in" },
-          "303": {
-            description:
-              "Independent access key accepted; continue with the subject-bound admin session cookie",
-          },
           "400": {
             description: "Invalid registration or operation input",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "401": {
-            description:
-              "Trusted Sites identity or independent administrator authentication is missing or invalid",
+            description: "Trusted Sites identity is missing",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "403": {
@@ -1395,11 +1381,6 @@ export const openApiSpec = {
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "429": rateLimitedResponse(true),
-          "503": {
-            description:
-              "Independent administrator authentication is not configured",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
         },
       },
     },
@@ -1437,20 +1418,6 @@ export const openApiSpec = {
     securitySchemes: {
       bearer: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
       clientSecretBasic: { type: "http", scheme: "basic" },
-      adminAccessKey: {
-        type: "apiKey",
-        in: "header",
-        name: "x-aittadb-admin-key",
-        description:
-          "Independent deployment administrator key. It is an additional factor and is accepted only with trusted ChatGPT sign-in inside ChatGPT Sites and an authorized local administrator identity.",
-      },
-      adminSession: {
-        type: "apiKey",
-        in: "cookie",
-        name: "aittadb_admin_session",
-        description:
-          "Short-lived HttpOnly browser session issued after the independent administrator key is verified. It is bound to the authorized local subject and is never sufficient without the trusted Sites identity.",
-      },
     },
     schemas: {
       HypermediaLink: {
@@ -2139,21 +2106,6 @@ export const openApiSpec = {
             },
           },
         ],
-      },
-      OAuthAdminUnlockInput: {
-        type: "object",
-        required: ["csrf_token", "action", "admin_access_key"],
-        properties: {
-          csrf_token: { type: "string" },
-          action: { type: "string", const: "unlock" },
-          admin_access_key: {
-            type: "string",
-            writeOnly: true,
-            description:
-              "Independent deployment administrator key. Accepted only with the trusted Sites identity and local administrator authorization, and never returned by the service.",
-          },
-        },
-        additionalProperties: false,
       },
       OAuthClientCreateInput: {
         type: "object",

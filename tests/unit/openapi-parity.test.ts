@@ -250,21 +250,15 @@ test("OpenAPI documents implemented security controls", () => {
     asObject(openApiSpec.components, "components").securitySchemes,
     "securitySchemes",
   );
-  const adminKey = asObject(schemes.adminAccessKey, "adminAccessKey");
-  assert.equal(adminKey.type, "apiKey");
-  assert.equal(adminKey.in, "header");
-  assert.equal(adminKey.name, "x-aittadb-admin-key");
-  const adminSession = asObject(schemes.adminSession, "adminSession");
-  assert.equal(adminSession.in, "cookie");
-  assert.equal(adminSession.name, "aittadb_admin_session");
-  const adminUnlock = openApiSchema("OAuthAdminUnlockInput");
-  const unlockProperties = asObject(
-    adminUnlock.properties,
-    "OAuthAdminUnlockInput.properties",
-  );
+  assert.equal("adminAccessKey" in schemes, false);
+  assert.equal("adminSession" in schemes, false);
   assert.equal(
-    asObject(unlockProperties.admin_access_key, "admin_access_key").writeOnly,
-    true,
+    "OAuthAdminUnlockInput" in
+      asObject(
+        asObject(openApiSpec.components, "components").schemas,
+        "schemas",
+      ),
+    false,
   );
   for (const method of ["get", "post"] as const) {
     assert.equal(

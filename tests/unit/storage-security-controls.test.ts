@@ -3,11 +3,6 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 
-import {
-  hasValidAdminSession,
-  issueAdminSession,
-  verifyAdminAccessKey,
-} from "../../src/admin-session";
 import { loadConfig } from "../../src/config";
 import {
   decodeStorageCursor,
@@ -494,26 +489,23 @@ test("the security migration scrubs persisted device user-code displays", async 
   sqlite.close();
 });
 
-test("admin sessions require the independent key, bind the subject, and expire", async () => {
+test("administrator subjects require canonical UUIDv4 configuration", async () => {
   const env = await testEnv();
-  const config = loadConfig(env, env.ISSUER_URL!);
-  assert.equal(await verifyAdminAccessKey("wrong", config), false);
-  assert.equal(await verifyAdminAccessKey("test-admin-key", config), true);
-  const session = await issueAdminSession("subject-a", config, 100);
-  const request = new Request("https://aittadb.example.test/admin/clients", {
-    headers: { cookie: session.cookie.split(";", 1)[0]! },
-  });
-  assert.equal(
-    await hasValidAdminSession(request, "subject-a", config, 101),
-    true,
+  const subject = crypto.randomUUID();
+  assert.deepEqual(
+    loadConfig(
+      { ...env, ADMIN_SUBJECTS: `${subject}, ${subject}` },
+      env.ISSUER_URL!,
+    ).adminSubjects,
+    [subject],
   );
-  assert.equal(
-    await hasValidAdminSession(request, "subject-b", config, 101),
-    false,
-  );
-  assert.equal(
-    await hasValidAdminSession(request, "subject-a", config, 1000),
-    false,
+  assert.throws(
+    () =>
+      loadConfig(
+        { ...env, ADMIN_SUBJECTS: "admin@example.test" },
+        env.ISSUER_URL!,
+      ),
+    /ADMIN_SUBJECTS must contain canonical UUIDv4 values/,
   );
 });
 

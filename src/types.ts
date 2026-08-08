@@ -29,7 +29,6 @@ export interface RuntimeEnv {
   ISSUER_URL?: string;
   JWT_PRIVATE_JWK?: string;
   JWT_KEY_ID?: string;
-  ADMIN_EMAILS?: string;
   ACCESS_TOKEN_TTL_SECONDS?: string;
   AUTH_CODE_TTL_SECONDS?: string;
   DEVICE_CODE_TTL_SECONDS?: string;
@@ -48,7 +47,6 @@ export interface RuntimeEnv {
   STORAGE_READ_RATE_LIMIT?: string;
   STORAGE_WRITE_RATE_LIMIT?: string;
   ADMIN_SUBJECTS?: string;
-  ADMIN_ACCESS_KEY_HASH?: string;
   NODE_ENV?: string;
 }
 
@@ -66,7 +64,6 @@ export interface AppConfig {
   issuerUrl: string;
   jwtPrivateJwk: JsonWebKey;
   jwtKeyId: string;
-  adminEmails: readonly string[];
   accessTokenTtlSeconds: number;
   authCodeTtlSeconds: number;
   deviceCodeTtlSeconds: number;
@@ -79,7 +76,6 @@ export interface AppConfig {
   storageReadRateLimit: number;
   storageWriteRateLimit: number;
   adminSubjects: readonly string[];
-  adminAccessKeyHash: string | null;
   isTest: boolean;
   isProduction: boolean;
 }

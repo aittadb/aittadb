@@ -190,13 +190,16 @@ test("consent approval and denial cannot be replayed through HTTP", async () => 
 });
 
 test("every browser mutation family rejects a missing Origin independently of CSRF", async () => {
-  const env = await testEnv({ ADMIN_EMAILS: "admin@example.test" });
+  const baseEnv = await testEnv();
   const store = new MemoryAuthStore();
-  const app = createTestAittaDB(env, store, {
+  const adminIdentity = {
     email: "admin@example.test",
     fullName: "Admin User",
     displayName: "Admin User",
-  });
+  };
+  const adminUser = await store.findOrCreateUser(adminIdentity, nowSeconds());
+  const env = { ...baseEnv, ADMIN_SUBJECTS: adminUser.id };
+  const app = createTestAittaDB(env, store, adminIdentity);
   const { client } = await createClientRegistration(
     {
       type: "public",

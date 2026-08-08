@@ -272,22 +272,6 @@ export function adminClientsPage(
   });
 }
 
-export function adminUnlockPage(csrf: string): string {
-  return pageDocument({
-    title: "Unlock administration",
-    eyebrow: "Protected operations",
-    heading: "Unlock AittaDB administration",
-    summary:
-      "Administrative access requires both the current ChatGPT Sites sign-in and a separate deployment-owned access key.",
-    visualEyebrow: "Two independent factors",
-    visualHeading: "Identity alone cannot change the deployment.",
-    visualSummary:
-      "The access key is checked only on the server and becomes a short-lived secure browser session.",
-    body: `<form method="post" action="/admin/clients" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="action" value="unlock"><label for="admin_access_key">Administrator access key</label><input id="admin_access_key" name="admin_access_key" type="password" autocomplete="current-password" required><div class="actions"><button type="submit">Unlock administration</button></div></form><p class="note">The key is deployment-specific, is never placed in a URL, and is not stored by this page.</p>`,
-    actions: [{ href: "/", label: "Back to AittaDB", secondary: true }],
-  });
-}
-
 export function deviceOutcomePage(
   status: Exclude<DeviceGrantStatus, "pending">,
 ): string {

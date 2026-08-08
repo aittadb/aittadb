@@ -433,79 +433,27 @@ test("production HTTPS responses include HSTS while test HTTP responses do not",
   assert.equal(localResponse?.headers.get("strict-transport-security"), null);
 });
 
-test("administration requires the independent key and audits successful unlock", async () => {
-  const env = await testEnv();
+test("administration uses the signed-in allowlisted subject and audits mutations", async () => {
+  const baseEnv = await testEnv();
   const store = new MemoryAuthStore();
-  const app = createTestAittaDB(env, store, {
+  const identity = {
     email: "admin@example.test",
     fullName: "Admin User",
     displayName: "Admin User",
-  });
-  const locked = await app.fetch(
+  };
+  const user = await store.findOrCreateUser(identity, nowSeconds());
+  const env = { ...baseEnv, ADMIN_SUBJECTS: user.id };
+  const app = createTestAittaDB(env, store, identity);
+  const clients = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
       headers: { accept: "text/html" },
     }),
   );
-  assert.equal(locked?.status, 200);
-  const lockedHtml = await locked!.text();
-  assert.match(lockedHtml, /Unlock AittaDB administration/);
-  assert.doesNotMatch(lockedHtml, /Create client/);
-  const csrf = cookieValue(locked!, "aittadb_csrf");
-
-  const wrong = await app.fetch(
-    new Request("https://aittadb.example.test/admin/clients", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_csrf=${csrf}`,
-        origin: "https://aittadb.example.test",
-      },
-      body: form({
-        csrf_token: csrf,
-        action: "unlock",
-        admin_access_key: "wrong",
-      }),
-    }),
-  );
-  assert.equal(wrong?.status, 401);
-  assert.equal(store.audits.at(-1)?.type, "admin.session.rejected");
-  assert.deepEqual(store.audits.at(-1)?.data, {
-    identity_source: "email-bootstrap",
-  });
-
-  const unlocked = await app.fetch(
-    new Request("https://aittadb.example.test/admin/clients", {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_csrf=${csrf}`,
-        origin: "https://aittadb.example.test",
-      },
-      body: form({
-        csrf_token: csrf,
-        action: "unlock",
-        admin_access_key: "test-admin-key",
-      }),
-    }),
-  );
-  assert.equal(unlocked?.status, 303);
-  const adminSession = cookieValue(unlocked!, "aittadb_admin_session");
-  const clients = await app.fetch(
-    new Request("https://aittadb.example.test/admin/clients", {
-      headers: {
-        accept: "text/html",
-        cookie: `aittadb_admin_session=${adminSession}`,
-      },
-    }),
-  );
   assert.equal(clients?.status, 200);
-  assert.match(await clients!.text(), /Create client/);
-  assert.equal(store.audits.at(-1)?.type, "admin.session.created");
-  assert.deepEqual(store.audits.at(-1)?.data, {
-    identity_source: "email-bootstrap",
-  });
+  const clientsHtml = await clients!.text();
+  assert.match(clientsHtml, /Create client/);
+  assert.doesNotMatch(clientsHtml, /Unlock AittaDB administration/);
+  assert.doesNotMatch(clientsHtml, /Administrator access key/);
 
   const clientsCsrf = cookieValue(clients!, "aittadb_csrf");
   const created = await app.fetch(
@@ -514,7 +462,7 @@ test("administration requires the independent key and audits successful unlock",
       headers: {
         accept: "text/html",
         "content-type": "application/x-www-form-urlencoded",
-        cookie: `aittadb_admin_session=${adminSession}; aittadb_csrf=${clientsCsrf}`,
+        cookie: `aittadb_csrf=${clientsCsrf}`,
         origin: "https://aittadb.example.test",
       },
       body: form({
@@ -533,11 +481,18 @@ test("administration requires the independent key and audits successful unlock",
   assert.equal(mutationAudit?.data.action, "create");
   assert.match(String(mutationAudit?.data.client_reference), /^[\w-]{43}$/);
   assert.match(String(mutationAudit?.data.actor_subject_hash), /^[\w-]{43}$/);
-  assert.equal(mutationAudit?.data.identity_source, "email-bootstrap");
+  assert.equal(mutationAudit?.data.identity_source, "subject");
+
+  const home = await app.fetch(
+    new Request("https://aittadb.example.test/", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  assert.match(await home!.text(), /Application clients/);
 });
 
-test("administration supports local-subject allowlisting and fails closed without its independent key", async () => {
-  const baseEnv = await testEnv({ ADMIN_EMAILS: "" });
+test("administration denies anonymous and unlisted identities without exposing controls", async () => {
+  const baseEnv = await testEnv();
   const store = new MemoryAuthStore();
   const identity = {
     email: "subject-admin@example.test",
@@ -549,10 +504,7 @@ test("administration supports local-subject allowlisting and fails closed withou
   const app = createTestAittaDB(env, store, identity);
   const allowed = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
-      headers: {
-        accept: "text/html",
-        "x-aittadb-admin-key": "test-admin-key",
-      },
+      headers: { accept: "text/html" },
     }),
   );
   assert.equal(allowed?.status, 200);
@@ -566,26 +518,57 @@ test("administration supports local-subject allowlisting and fails closed withou
 
   const otherIdentity = {
     email: "other@example.test",
-    fullName: "Other User",
-    displayName: "Other User",
+    fullName: "Subject Admin",
+    displayName: "Subject Admin",
   };
   const denied = await createTestAittaDB(env, store, otherIdentity).fetch(
-    new Request("https://aittadb.example.test/admin/clients", {
-      headers: { "x-aittadb-admin-key": "test-admin-key" },
-    }),
+    new Request("https://aittadb.example.test/admin/clients"),
   );
   assert.equal(denied?.status, 403);
+  const deniedBody = await denied!.text();
+  assert.doesNotMatch(
+    deniedBody,
+    /Create OAuth client|redirect_uris|client_id/,
+  );
 
-  const unavailable = await createTestAittaDB(
-    { ...env, ADMIN_ACCESS_KEY_HASH: "" },
-    store,
-    identity,
-  ).fetch(
+  const anonymous = await createTestAittaDB(env, store, null).fetch(
     new Request("https://aittadb.example.test/admin/clients", {
-      headers: { "x-aittadb-admin-key": "test-admin-key" },
+      headers: { accept: "text/html" },
     }),
   );
-  assert.equal(unavailable?.status, 503);
+  assert.equal(anonymous?.status, 302);
+  assert.match(
+    anonymous?.headers.get("location") ?? "",
+    /\/signin-with-chatgpt\?return_to=/,
+  );
+});
+
+test("administrator allowlisting retains the documented upstream email reassignment risk", async () => {
+  const baseEnv = await testEnv();
+  const store = new MemoryAuthStore();
+  const originalIdentity = {
+    email: "reassigned@example.test",
+    fullName: "Original Person",
+    displayName: "Original Person",
+  };
+  const original = await store.findOrCreateUser(originalIdentity, nowSeconds());
+  const env = { ...baseEnv, ADMIN_SUBJECTS: original.id };
+  const reassignedIdentity = {
+    email: originalIdentity.email,
+    fullName: "Different Person",
+    displayName: "Different Person",
+  };
+  const reassigned = await store.findOrCreateUser(
+    reassignedIdentity,
+    nowSeconds(),
+  );
+  assert.equal(reassigned.id, original.id);
+  const response = await createTestAittaDB(
+    env,
+    store,
+    reassignedIdentity,
+  ).fetch(new Request("https://aittadb.example.test/admin/clients"));
+  assert.equal(response?.status, 200);
 });
 
 test("anonymous authorization request creation is rate limited and cleaned up", async () => {
