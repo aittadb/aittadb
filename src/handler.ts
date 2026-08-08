@@ -31,6 +31,8 @@ import {
   json,
   oauthError,
   parseBasicAuth,
+  DEFAULT_FORM_MAX_BYTES,
+  readBoundedRequestBody,
   readForm,
   redirect,
   requireSameOrigin,
@@ -49,8 +51,11 @@ import {
   type HypermediaAction,
 } from "./hypermedia";
 import { oidcConfiguration, openApiSpec } from "./openapi";
-import { storageEndpoint } from "./storage";
-import { storageBrowserEndpoint } from "./storage-browser";
+import { MAX_RECORD_BYTES, storageEndpoint } from "./storage";
+import {
+  MAX_STORAGE_FORM_BYTES,
+  storageBrowserEndpoint,
+} from "./storage-browser";
 import {
   hasBrowserSession,
   issueBrowserSessionAccessToken,
@@ -190,6 +195,11 @@ export function createAittaDBWithStore(
           config,
         );
       }
+      const prebuffered = await prebufferAcceptedRequestBody(request, url);
+      if (prebuffered instanceof Response) {
+        return finalizeResponse(request, prebuffered, config);
+      }
+      request = prebuffered;
       const corsHeaders = isCorsControlledRoute(url.pathname)
         ? await corsHeadersForRequest(request, url, config, store)
         : new Headers();
@@ -322,6 +332,75 @@ export function createAittaDBWithStore(
       }
     },
   };
+}
+
+interface RequestBodyPolicy {
+  maxBytes: number;
+  tooLargeDescription: string;
+}
+
+const URL_ENCODED_POST_PATHS = new Set([
+  "/oauth/device_authorization",
+  "/oauth/token",
+  "/oauth/revoke",
+  "/oauth/introspect",
+  "/userinfo",
+  "/device",
+  "/device/decision",
+  "/consent",
+  "/admin/clients",
+]);
+
+async function prebufferAcceptedRequestBody(
+  request: Request,
+  url: URL,
+): Promise<Request | Response> {
+  const policy = acceptedRequestBodyPolicy(request, url);
+  if (!policy) return request;
+  try {
+    const body = await readBoundedRequestBody(request, policy.maxBytes);
+    return new Request(request, { body });
+  } catch (error) {
+    if (error instanceof Error && error.message === "request_too_large") {
+      return oauthError("invalid_request", policy.tooLargeDescription, 413);
+    }
+    return oauthError("invalid_request", "Malformed request body", 400);
+  }
+}
+
+function acceptedRequestBodyPolicy(
+  request: Request,
+  url: URL,
+): RequestBodyPolicy | null {
+  const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+  if (
+    request.method === "POST" &&
+    contentType.includes("application/x-www-form-urlencoded")
+  ) {
+    if (isRecordsRoute(url.pathname) || isFilesRoute(url.pathname)) {
+      return {
+        maxBytes: MAX_STORAGE_FORM_BYTES,
+        tooLargeDescription: "Storage browser form is too large",
+      };
+    }
+    if (URL_ENCODED_POST_PATHS.has(url.pathname)) {
+      return {
+        maxBytes: DEFAULT_FORM_MAX_BYTES,
+        tooLargeDescription: "Request is too large",
+      };
+    }
+  }
+  if (
+    request.method === "PUT" &&
+    isRecordsRoute(url.pathname) &&
+    contentType.includes("application/json")
+  ) {
+    return {
+      maxBytes: MAX_RECORD_BYTES,
+      tooLargeDescription: "Storage record is too large",
+    };
+  }
+  return null;
 }
 
 async function route(

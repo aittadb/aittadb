@@ -124,6 +124,18 @@ const storageConflictResponse = {
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
+const boundedFormTooLargeResponse = {
+  description:
+    "The URL-encoded request body exceeds its finite route limit. A valid declared overflow is rejected without reading the stream; missing, malformed, or undersized Content-Length values do not bypass the streaming byte bound.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
+const boundedRecordTooLargeResponse = {
+  description:
+    "The JSON record body exceeds 64 KiB. Declared and streamed overflow returns invalid_request before JSON parsing, client lookup, rate limiting, or storage repository access.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -375,6 +387,7 @@ export const openApiSpec = {
           },
           "400": { description: "OAuth error" },
           "403": { description: "Browser CSRF or same-origin rejection" },
+          "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
         },
       },
@@ -446,6 +459,7 @@ export const openApiSpec = {
           "400": { description: "OAuth error" },
           "401": { description: "Client authentication failed" },
           "403": { description: "Browser CSRF or same-origin rejection" },
+          "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
         },
       },
@@ -493,6 +507,8 @@ export const openApiSpec = {
               "text/html": { schema: { type: "string" } },
             },
           },
+          "400": { description: "Malformed request body or OAuth error" },
+          "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
         },
       },
@@ -544,6 +560,8 @@ export const openApiSpec = {
             },
           },
           "401": { description: "Confidential client authentication failed" },
+          "400": { description: "Malformed request body or OAuth error" },
+          "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
         },
       },
@@ -628,6 +646,8 @@ export const openApiSpec = {
           },
           "403": { description: "CSRF or same-origin rejection" },
           "405": { description: "Browser representation marker missing" },
+          "400": { description: "Malformed request body" },
+          "413": boundedFormTooLargeResponse,
         },
       },
     },
@@ -697,8 +717,9 @@ export const openApiSpec = {
               "Redirect to the Sites-owned ChatGPT sign-in route when session mode is selected anonymously",
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
+          "400": { description: "Malformed request body" },
           "405": { description: "Browser representation marker missing" },
-          "413": { description: "Form or JSON record exceeds the limit" },
+          "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(true),
           "503": recordsUnavailableResponse,
           "507": storageQuotaExceededResponse,
@@ -785,10 +806,11 @@ export const openApiSpec = {
           },
           "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
           "400": {
-            description: "Method override does not match this resource",
+            description:
+              "Malformed request body or method override does not match this resource",
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
-          "413": { description: "Form or JSON record exceeds the limit" },
+          "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(true),
           "503": recordsUnavailableResponse,
           "507": storageQuotaExceededResponse,
@@ -811,7 +833,9 @@ export const openApiSpec = {
               false,
             ),
           },
-          "413": { description: "Record exceeds the AittaDB limit" },
+          "400": { description: "Malformed JSON request body" },
+          "413": boundedRecordTooLargeResponse,
+          "415": { description: "JSON content type is required" },
           "429": rateLimitedResponse(true),
           "503": recordsUnavailableResponse,
           "507": storageQuotaExceededResponse,
@@ -936,10 +960,14 @@ export const openApiSpec = {
             description:
               "Redirect to the Sites-owned ChatGPT sign-in route when session mode is selected anonymously",
           },
+          "400": { description: "Malformed request body" },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
           "409": storageConflictResponse,
           "405": { description: "Browser representation marker missing" },
-          "413": { description: "Multipart form or file exceeds the limit" },
+          "413": {
+            description:
+              "URL-encoded or multipart form, or canonical file bytes, exceed the applicable finite limit",
+          },
           "429": rateLimitedResponse(true),
           "503": filesUnavailableResponse,
           "507": storageQuotaExceededResponse,
@@ -1063,11 +1091,15 @@ export const openApiSpec = {
           },
           "302": { description: "Continue to Sites-owned ChatGPT sign-in" },
           "400": {
-            description: "Method override does not match this resource",
+            description:
+              "Malformed request body or method override does not match this resource",
           },
           "403": { description: "Scope, CSRF, or same-origin rejection" },
           "409": storageConflictResponse,
-          "413": { description: "Multipart form or file exceeds the limit" },
+          "413": {
+            description:
+              "URL-encoded or multipart form, or canonical file bytes, exceed the applicable finite limit",
+          },
           "415": { description: "Upload was not submitted as multipart data" },
           "429": rateLimitedResponse(true),
           "503": filesUnavailableResponse,
@@ -1210,6 +1242,7 @@ export const openApiSpec = {
             description: "CSRF or same-origin rejection",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
+          "413": boundedFormTooLargeResponse,
         },
       },
     },
@@ -1257,6 +1290,7 @@ export const openApiSpec = {
             description: "CSRF or same-origin rejection",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
+          "413": boundedFormTooLargeResponse,
         },
       },
     },
@@ -1336,6 +1370,7 @@ export const openApiSpec = {
             description: "CSRF or same-origin rejection",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
+          "413": boundedFormTooLargeResponse,
         },
       },
     },
@@ -1429,10 +1464,7 @@ export const openApiSpec = {
               "The requested operation is unavailable for the client's current state or type, or the one-time submission was already used",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
-          "413": {
-            description: "Administrative form body exceeds the bounded limit",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
+          "413": boundedFormTooLargeResponse,
           "415": {
             description: "Administrative form media type is unsupported",
             content: hypermediaContent("#/components/schemas/HypermediaError"),

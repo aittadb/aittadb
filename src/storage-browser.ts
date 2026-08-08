@@ -44,7 +44,7 @@ import {
 } from "./storage-pages";
 import type { AppConfig, AuthStore, RuntimeEnv } from "./types";
 
-const MAX_RECORD_FORM_BYTES = MAX_RECORD_BYTES * 3 + 16_384;
+export const MAX_STORAGE_FORM_BYTES = MAX_RECORD_BYTES * 3 + 16_384;
 const MAX_FILE_FORM_BYTES = MAX_FILE_BYTES + 256 * 1024;
 
 type StorageKind = "records" | "files";
@@ -254,7 +254,7 @@ async function handleRecordForm(
   }
   let form: URLSearchParams;
   try {
-    form = await readForm(request, MAX_RECORD_FORM_BYTES);
+    form = await readForm(request, MAX_STORAGE_FORM_BYTES);
   } catch (error) {
     return storageFormReadError(
       error,
@@ -353,7 +353,7 @@ async function handleFileForm(
   try {
     form = multipart
       ? await readBoundedMultipartForm(request, MAX_FILE_FORM_BYTES)
-      : await readForm(request, MAX_RECORD_FORM_BYTES);
+      : await readForm(request, MAX_STORAGE_FORM_BYTES);
   } catch (error) {
     return storageFormReadError(
       error,

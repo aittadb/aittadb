@@ -192,7 +192,7 @@ Generate local ES256 keys only through the documented script/Make target. Secret
 
 Redact PII and every credential from logs. Use generic auth errors that do not reveal account existence. Minimal audit events may contain event type, local UUID, client ID, request ID, carefully bounded coarse request metadata, and timestamps. OAuth, identity, storage, and token responses use `Cache-Control: no-store` where sensitive.
 
-Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer policy, permissions policy, and production HTTPS HSTS. Bearer CORS is bound to the token audience's active client and exact origin. Token-endpoint CORS binds the submitted active client before consuming a credential. Never use wildcard credentialed CORS or user-controlled issuer/audience. Stream-enforce bounds and rate-limit OAuth, storage, client-authentication, and administration. See `docs/threat-model.md` and `SECURITY.md`.
+Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer policy, permissions policy, and production HTTPS HSTS. Bearer CORS is bound to the token audience's active client and exact origin. Token-endpoint CORS binds the submitted active client before consuming a credential. Never use wildcard credentialed CORS or user-controlled issuer/audience. Prebuffer accepted URL-encoded/JSON bodies through shared stream limits before parsing or repository calls; declared lengths never relax limits. Stream-enforce other body bounds and rate-limit OAuth, storage, client authentication, and administration. See `docs/threat-model.md` and `SECURITY.md`.
 
 ## Documentation Set
 

@@ -5,6 +5,7 @@ import {
   isJsonMediaType,
   oauthError,
   readBoundedBody,
+  readBoundedRequestBody,
 } from "./http";
 import {
   HYPERMEDIA_MEDIA_TYPE,
@@ -776,10 +777,12 @@ async function readJsonBody(
   let text: string;
   try {
     text = new TextDecoder().decode(
-      await readBoundedBody(request.body, maxBytes),
+      await readBoundedRequestBody(request, maxBytes),
     );
-  } catch {
-    return oauthError("invalid_request", "Storage record is too large", 413);
+  } catch (error) {
+    return error instanceof Error && error.message === "request_too_large"
+      ? oauthError("invalid_request", "Storage record is too large", 413)
+      : oauthError("invalid_request", "Malformed JSON body");
   }
   try {
     return JSON.parse(text) as unknown;

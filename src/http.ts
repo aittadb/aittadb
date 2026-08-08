@@ -13,6 +13,7 @@ import {
 } from "./hypermedia";
 
 const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
+export const DEFAULT_FORM_MAX_BYTES = 16_384;
 
 export function json(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
@@ -140,16 +141,31 @@ export function addSecurityHeaders(headers: Headers): void {
 
 export async function readForm(
   request: Request,
-  maxBytes = 16_384,
+  maxBytes = DEFAULT_FORM_MAX_BYTES,
 ): Promise<URLSearchParams> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/x-www-form-urlencoded")) {
     throw new Error("unsupported_media_type");
   }
   const text = new TextDecoder().decode(
-    await readBoundedBody(request.body, maxBytes),
+    await readBoundedRequestBody(request, maxBytes),
   );
   return new URLSearchParams(text);
+}
+
+export async function readBoundedRequestBody(
+  request: Request,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  const declaredLength = request.headers.get("content-length")?.trim();
+  if (declaredLength && /^\d+$/.test(declaredLength)) {
+    const parsedLength = Number(declaredLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength > maxBytes) {
+      await request.body?.cancel().catch(() => undefined);
+      throw new Error("request_too_large");
+    }
+  }
+  return readBoundedBody(request.body, maxBytes);
 }
 
 export async function readBoundedBody(
