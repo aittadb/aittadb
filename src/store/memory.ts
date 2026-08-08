@@ -1,4 +1,5 @@
 import { uuid } from "../crypto";
+import { assertAccountFilePurgeInput } from "../account-file-purge";
 import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
   accountDeletionClaimExpiry,
@@ -23,6 +24,7 @@ import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
   AccountCredentialPurgeBatchResult,
+  AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
   AuthStore,
   AuthorizationCode,
@@ -420,6 +422,62 @@ export class MemoryAuthStore implements AuthStore {
       .map(([key]) => key);
     for (const key of keys) this.storageRecords.delete(key);
     return accountRecordPurgeBatch(keys.length, limit);
+  }
+
+  async stageAccountFilePurgeBatch(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountFilePurgeStageResult> {
+    assertAccountFilePurgeInput(subject, attempt, now, limit);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return { selected: 0, staged: 0 };
+    }
+    const selected = Array.from(this.storageFiles.entries())
+      .filter(([, file]) => file.userId === subject)
+      .sort(
+        ([, left], [, right]) =>
+          left.clientId.localeCompare(right.clientId) ||
+          left.key.localeCompare(right.key) ||
+          left.r2Key.localeCompare(right.r2Key),
+      )
+      .slice(0, limit);
+
+    for (const [, file] of selected) {
+      const repair = this.storageFileOrphanRepairs.get(file.r2Key);
+      if (
+        repair &&
+        (repair.userId !== file.userId || repair.clientId !== file.clientId)
+      ) {
+        throw new Error("account_file_purge_repair_owner_conflict");
+      }
+    }
+    for (const [key, file] of selected) {
+      const repair = this.storageFileOrphanRepairs.get(file.r2Key);
+      this.storageFileOrphanRepairs.set(file.r2Key, {
+        userId: file.userId,
+        clientId: file.clientId,
+        r2Key: file.r2Key,
+        createdAt: repair?.createdAt ?? now,
+        updatedAt: Math.max(repair?.updatedAt ?? 0, now),
+      });
+      this.storageFiles.delete(key);
+    }
+    return { selected: selected.length, staged: selected.length };
+  }
+
+  async hasStorageFilesForSubject(subject: string): Promise<boolean> {
+    return Array.from(this.storageFiles.values()).some(
+      (file) => file.userId === subject,
+    );
   }
 
   async createClient(
@@ -907,6 +965,29 @@ export class MemoryAuthStore implements AuthStore {
           a.r2Key.localeCompare(b.r2Key),
       )
       .slice(0, limit);
+  }
+
+  async listStorageFileOrphanRepairsForSubject(
+    subject: string,
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]> {
+    return Array.from(this.storageFileOrphanRepairs.values())
+      .filter((repair) => repair.userId === subject)
+      .sort(
+        (a, b) =>
+          a.updatedAt - b.updatedAt ||
+          a.createdAt - b.createdAt ||
+          a.r2Key.localeCompare(b.r2Key),
+      )
+      .slice(0, limit);
+  }
+
+  async hasStorageFileOrphanRepairsForSubject(
+    subject: string,
+  ): Promise<boolean> {
+    return Array.from(this.storageFileOrphanRepairs.values()).some(
+      (repair) => repair.userId === subject,
+    );
   }
 
   async classifyStorageFileOrphanRepair(

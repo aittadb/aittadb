@@ -1,4 +1,5 @@
 import { uuid } from "../crypto";
+import { assertAccountFilePurgeInput } from "../account-file-purge";
 import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
   accountDeletionClaimExpiry,
@@ -22,6 +23,7 @@ import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
   AccountCredentialPurgeBatchResult,
+  AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
   AuthStore,
   AuthorizationCode,
@@ -430,6 +432,73 @@ export class D1AuthStore implements AuthStore {
       requiredMutationChanges(result, "account_record_purge_failed"),
       limit,
     );
+  }
+
+  async stageAccountFilePurgeBatch(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountFilePurgeStageResult> {
+    assertAccountFilePurgeInput(subject, attempt, now, limit);
+    const files = await this.db
+      .prepare(
+        "SELECT sf.* FROM storage_files sf WHERE sf.user_id = ? AND EXISTS (SELECT 1 FROM account_deletion_jobs adj WHERE adj.subject = ? AND adj.state = 'running' AND adj.attempt = ? AND adj.available_at > ?) ORDER BY sf.client_id ASC, sf.key ASC, sf.r2_key ASC LIMIT ?",
+      )
+      .bind(subject, subject, attempt, now, limit)
+      .all<Row>();
+    const selected = (files.results ?? []).map(rowToStorageFile);
+    if (selected.length === 0) return { selected: 0, staged: 0 };
+
+    if (!this.db.batch) throw new Error("account_file_purge_batch_unavailable");
+    const statements: D1PreparedStatement[] = [];
+    for (const file of selected) {
+      statements.push(
+        this.db
+          .prepare(
+            "INSERT INTO storage_file_orphan_repairs (r2_key, user_id, client_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(r2_key) DO UPDATE SET updated_at = MAX(storage_file_orphan_repairs.updated_at, excluded.updated_at) WHERE storage_file_orphan_repairs.user_id = excluded.user_id AND storage_file_orphan_repairs.client_id = excluded.client_id",
+          )
+          .bind(file.r2Key, file.userId, file.clientId, now, now),
+        this.db
+          .prepare(
+            "DELETE FROM storage_files WHERE user_id = ? AND client_id = ? AND key = ? AND r2_key = ? AND EXISTS (SELECT 1 FROM storage_file_orphan_repairs repair WHERE repair.r2_key = ? AND repair.user_id = ? AND repair.client_id = ?) AND EXISTS (SELECT 1 FROM account_deletion_jobs adj WHERE adj.subject = ? AND adj.state = 'running' AND adj.attempt = ? AND adj.available_at > ?)",
+          )
+          .bind(
+            file.userId,
+            file.clientId,
+            file.key,
+            file.r2Key,
+            file.r2Key,
+            file.userId,
+            file.clientId,
+            subject,
+            attempt,
+            now,
+          ),
+      );
+    }
+    const results = await this.db.batch(statements);
+    if (
+      results.length !== statements.length ||
+      results.some((result) => !result.success)
+    ) {
+      throw new Error("account_file_purge_batch_failed");
+    }
+    let staged = 0;
+    for (let index = 1; index < results.length; index += 2) {
+      staged += mutationChanges(results[index]!);
+    }
+    return { selected: selected.length, staged };
+  }
+
+  async hasStorageFilesForSubject(subject: string): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        "SELECT 1 AS present FROM storage_files WHERE user_id = ? LIMIT 1",
+      )
+      .bind(subject)
+      .first<Row>();
+    return Boolean(row);
   }
 
   async createClient(
@@ -1103,6 +1172,31 @@ export class D1AuthStore implements AuthStore {
       .bind(limit)
       .all<Row>();
     return (rows.results ?? []).map(rowToStorageFileOrphanRepair);
+  }
+
+  async listStorageFileOrphanRepairsForSubject(
+    subject: string,
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]> {
+    const rows = await this.db
+      .prepare(
+        "SELECT * FROM storage_file_orphan_repairs WHERE user_id = ? ORDER BY updated_at ASC, created_at ASC, r2_key ASC LIMIT ?",
+      )
+      .bind(subject, limit)
+      .all<Row>();
+    return (rows.results ?? []).map(rowToStorageFileOrphanRepair);
+  }
+
+  async hasStorageFileOrphanRepairsForSubject(
+    subject: string,
+  ): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        "SELECT 1 AS present FROM storage_file_orphan_repairs WHERE user_id = ? LIMIT 1",
+      )
+      .bind(subject)
+      .first<Row>();
+    return Boolean(row);
   }
 
   async classifyStorageFileOrphanRepair(

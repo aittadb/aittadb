@@ -262,6 +262,11 @@ export interface StorageUsage {
   byteCount: number;
 }
 
+export interface AccountFilePurgeStageResult {
+  selected: number;
+  staged: number;
+}
+
 export type AccountDeletionJobState =
   | "pending"
   | "running"
@@ -349,6 +354,13 @@ export interface AuthStore
     attempt: number,
     now: number,
   ): Promise<boolean>;
+  stageAccountFilePurgeBatch(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountFilePurgeStageResult>;
+  hasStorageFilesForSubject(subject: string): Promise<boolean>;
 
   createClient(
     input: ClientRegistrationInput,
@@ -489,6 +501,11 @@ export interface AuthStore
   listStorageFileOrphanRepairs(
     limit: number,
   ): Promise<StorageFileOrphanRepair[]>;
+  listStorageFileOrphanRepairsForSubject(
+    subject: string,
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]>;
+  hasStorageFileOrphanRepairsForSubject(subject: string): Promise<boolean>;
   classifyStorageFileOrphanRepair(
     repair: StorageFileOrphanRepair,
   ): Promise<StorageFileOrphanRepairDisposition>;

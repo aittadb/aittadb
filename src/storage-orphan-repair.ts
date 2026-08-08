@@ -1,4 +1,8 @@
-import type { AuthStore } from "./types";
+import type {
+  AuthStore,
+  StorageFileOrphanRepair,
+  StorageFileOrphanRepairDisposition,
+} from "./types";
 
 export const STORAGE_FILE_ORPHAN_REPAIR_BATCH_SIZE = 25;
 
@@ -8,14 +12,40 @@ export interface StorageFileOrphanRepairResult {
   deferred: number;
 }
 
+export interface StorageFileOrphanRepairRepository {
+  classifyStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<StorageFileOrphanRepairDisposition>;
+  completeStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean>;
+  deferStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+    now: number,
+  ): Promise<boolean>;
+}
+
+export interface StorageFileObjectStore {
+  delete(key: string): Promise<void>;
+}
+
 export async function repairStorageFileOrphans(
   store: AuthStore,
-  bucket: R2Bucket,
+  bucket: StorageFileObjectStore,
   now: number,
 ): Promise<StorageFileOrphanRepairResult> {
   const repairs = await store.listStorageFileOrphanRepairs(
     STORAGE_FILE_ORPHAN_REPAIR_BATCH_SIZE,
   );
+  return repairStorageFileOrphanBatch(store, bucket, repairs, now);
+}
+
+export async function repairStorageFileOrphanBatch(
+  store: StorageFileOrphanRepairRepository,
+  bucket: StorageFileObjectStore,
+  repairs: readonly StorageFileOrphanRepair[],
+  now: number,
+): Promise<StorageFileOrphanRepairResult> {
   let resolved = 0;
   let deferred = 0;
 

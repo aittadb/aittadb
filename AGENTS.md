@@ -37,8 +37,8 @@ Runtime requirements:
 - Web Crypto for production cryptography.
 - Environment variables and Sites secrets for configuration.
 - No authoritative state in `localStorage`, `sessionStorage`, process memory, or browser cookies. Cookies may carry protected transaction state only.
-- Process memory may hold non-authoritative performance hints; correctness cannot depend on survival or uniqueness.
-- Public metadata, health, discovery, JWKS, OpenAPI, docs, CSS, and JavaScript routes must not initialize D1. Static assets pass to Vinext. Durable cleanup/repair is bounded and scheduled with `waitUntil`.
+- Process memory may cache hints only; correctness cannot depend on it.
+- Root metadata, health, discovery, JWKS, OpenAPI, docs, and assets avoid D1. Vinext serves assets; cleanup/repair is bounded via `waitUntil`.
 - `.openai/hosting.json` is ignored checkout-local metadata and may contain the active project ID and logical bindings. Never commit a real reusable `project_id`. Keep `.openai/hosting.example.json` safe for forks.
 
 ## Upstream Identity Trust Boundary
@@ -90,7 +90,7 @@ Every server unit is a reusable primitive with a small vendor-neutral contract, 
 - Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own their narrowly keyed durable records.
 - Storage repository owns records and file metadata keyed by local UUID plus OAuth client ID. R2 bytes use generated physical keys.
-- Account deletion: any job blocks access; admins cannot start; credential/record purges require its job and are finite, subject-only, retry-safe, and internal; no route/coordinator.
+- Account deletion: any job blocks access; admins cannot start. Credential/record purges require its job; file purge requires its exact active claim, atomically queues at most 25 metadata deletes through TASK-119, and permits completed jobs only as clean no-ops. All are finite, subject-only, retry-safe, aggregate-only, internal, and have no route/coordinator.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
 - Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.
@@ -103,7 +103,7 @@ Use dependency injection where useful. Separate protocol-independent logic from 
 
 Use TypeScript `strict`; avoid `any`. Parse unknown input with explicit guards and structured APIs. Prefer small modules, pure domain functions, existing local patterns, and conservative changes. Use succinct comments only for non-obvious blocks.
 
-Before adding work, answer: (1) is it a database-server or application-backend primitive; (2) does it solve one demonstrated problem; (3) can unrelated applications use it without application- or provider-specific behavior; (4) can an existing primitive be extended; (5) is its contract smaller than the motivating application feature; (6) can that external application build the use case entirely through public AittaDB protocols; and (7) is every new abstraction needed now? If the proposal is mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation, identify the conflict, propose the smallest general-purpose enabling primitive, and request an explicit architecture decision only when no suitable primitive exists.
+Before adding work, answer: (1) server/backend primitive; (2) demonstrated problem; (3) useful across unrelated apps without provider rules; (4) extend an existing primitive; (5) contract smaller than the motivating feature; (6) external app can compose it through public protocols; and (7) is every new abstraction needed now? If mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation and propose the smallest general-purpose enabling primitive; request a decision only if none fits.
 
 Prefer the smallest design that completely solves the demonstrated server requirement. Reuse a primitive before adding an abstraction. Add no framework, plugin/extension system, generic query language, workflow engine, or configuration layer without a concrete requirement that cannot be handled simply. Do not generalize one example without an independent server contract, merely rename or relocate complexity, or add infrastructure outside the database-server role. Prefer explicit data models, narrow interfaces, and short sequences of composable operations. Keep runtime behavior deterministic, bounded, observable, and testable; preserve public contracts unless a necessary change is explicitly versioned. Simplicity never weakens correctness, durability, security, privacy, authorization, or failure handling.
 
