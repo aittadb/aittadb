@@ -31,13 +31,32 @@ test("AGENTS.md requires repository work to be captured in PLAN.md first", async
 
   assert.match(
     policy,
-    /Before implementing any repository-affecting user request, first capture it in root `PLAN\.md`/,
+    /Before repository-affecting work, first add or amend an unchecked root `PLAN\.md` task/,
     "AGENTS.md must require recording repository work in PLAN.md before implementation",
   );
-  assert.match(policy, /PLAN is the unfinished-work queue/);
+  assert.match(policy, /PLAN is one flat unfinished `TASK-NNN` queue/);
   assert.match(
     policy,
-    /atomically remove the task from PLAN and append its stable identifier and unchanged full description/,
+    /After DoD, remove the task from PLAN and append its unchanged description to CHANGELOG/,
+  );
+});
+
+test("AGENTS.md prohibits umbrella plan tasks", async () => {
+  const policy = await readFile(AGENTS_PATH, "utf8");
+
+  assert.match(
+    policy,
+    /Each item MUST own exactly one server primitive or one narrowly bounded operational proof/,
+  );
+  assert.match(
+    policy,
+    /Never combine independent resources, methods, controls, migrations, or live matrices in one task/,
+  );
+  assert.match(policy, /Broad requests first create a decomposition task/);
+  assert.match(policy, /retire the umbrella[\s\S]+without claiming delivery/);
+  assert.match(
+    policy,
+    /A Sites-only acceptance task proves one named behavior against one exact deployment/,
   );
 });
 
@@ -70,6 +89,23 @@ test("PLAN contains only unfinished tasks and CHANGELOG preserves completed task
     identifiers,
     identifiers.map((_, index) => index + 1),
     "task identifiers across PLAN and CHANGELOG must remain unique and sequential",
+  );
+});
+
+test("PLAN tasks have explicit bounded definitions of done", async () => {
+  const plan = await readFile(PLAN_PATH, "utf8");
+  const tasks = plan
+    .split("\n")
+    .filter((line) => /^- \[ \] TASK-\d{3}: /.test(line));
+
+  assert.ok(tasks.length > 0);
+  assert.ok(
+    tasks.every((line) => line.includes(". DoD:")),
+    "every PLAN task must state an explicit DoD",
+  );
+  assert.ok(
+    tasks.every((line) => line.length < 1_200),
+    "PLAN task lines must stay small enough to remain independently reviewable",
   );
 });
 

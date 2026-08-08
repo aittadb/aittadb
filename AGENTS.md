@@ -93,7 +93,7 @@ Every server unit is a reusable primitive with a small vendor-neutral contract, 
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
 - Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.
-- Configuration owns parsing, defaults, required-secret checks, and production/test separation.
+- Configuration owns parsing, defaults, required-secret checks, production/test separation, and typed feature availability. Disabled features fail before domain or repository work and disappear from HTML, hypermedia, and discovery.
 - Representation negotiation chooses HTML or JSON/binary; pages execute real route/domain logic, never demos.
 
 Use dependency injection where useful. Separate protocol-independent logic from HTTP and keep storage behind repository interfaces.
@@ -119,7 +119,9 @@ Use prepared SQL with one statement per `prepare()` and bound untrusted values. 
 - Generated client secrets appear once, are SHA-256 hashed, and are compared without timing-dependent early exit.
 - Never log or put access, refresh, device, authorization, client, CSRF, cookie, or signing credentials in URLs or client bundles.
 
-OAuth rules:
+Downstream OAuth Apps default off. Gate them before client auth, credential lookup/consumption, or writes; omit their routes/actions. The reserved browser client and Sites session remain separate.
+
+OAuth rules when enabled:
 
 - Implement RFC 8628 and Authorization Code with PKCE `S256`; never implicit or password grants. Public clients use no secret; confidential clients authenticate.
 - Enforce exact redirects/scopes; authorization codes are high-entropy, short-lived, and one-time.
@@ -129,7 +131,7 @@ OAuth rules:
 - Use standard OAuth content types and errors. Token success remains protocol-standard.
 - Introspection is confidential-client-only and reports active access tokens. Revocation authenticates the owner, handles access/refresh tokens despite missing/wrong hints, revokes families, records access-token `jti`, and remains non-disclosing.
 
-Admin operations require the current trusted ChatGPT Sites session mapped to a canonical local UUIDv4 in `ADMIN_SUBJECTS`. There is no email allowlist, admin key/unlock, or admin-auth cookie. Non-admin representations expose no client data/actions; mutations require same-origin and CSRF. HTML, hypermedia, and POST validation share state/type-aware list/create, enable/disable, confidential-secret rotation, and grant-revocation controls; reject omitted operations. Atomically claim one-time submission hashes. HTML uses Post/Redirect/Get plus an encrypted, subject-bound, expiring, `HttpOnly`, `SameSite=Strict` result cookie consumed once; JSON returns the immediate no-store result. Client-bind secrets and never put them in URLs or durable plaintext or repeat them. Keep redacted audits and no unrestricted dynamic registration. Subject allowlisting inherits upstream email-reassignment risk.
+When enabled, OAuth administration requires the Sites session mapped to a UUIDv4 in `ADMIN_SUBJECTS`, never email or another admin credential. Hide client data/actions from non-admins; require origin and CSRF; share one state/type policy across representations. Claim submissions atomically; use PRG with an encrypted, subject-bound, expiring one-use result cookie. Show client secrets once, client-bind and hash them, audit redacted, and provide no dynamic registration. Subject allowlisting inherits email-reassignment risk.
 
 ## Storage Isolation
 
@@ -182,7 +184,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` lists names and documentation, never values. Important configuration includes issuer/signing data, token lifetimes, exact client origins, finite storage ceilings/page/rate settings, a storage write switch, and canonical administrator subjects. Production fails closed when required secrets are absent. The canonical `ISSUER_URL` is exactly `https://aittadb.com` with no path or trailing slash; issuer changes invalidate the old token boundary and require explicit acceptance notes.
+`.env.example` lists names, never values. Configure issuer/signing data, lifetimes, exact origins, finite storage/page/rate limits, write switch, admin subjects, and feature flags. Fail closed for missing secrets or malformed flags. Records, Files, and Statistics default on; OAuth Apps default off. `ISSUER_URL` is exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and require acceptance notes.
 
 Generate local ES256 keys only through the documented script/Make target. Secret key files are ignored. Never print a generated private key in agent conversation, commit it, or place it in public hosting metadata. Bootstrap administration by signing in at `/session`, then configuring that deployment-local UUID in `ADMIN_SUBJECTS`; never substitute email addresses or display names. The upstream email-reassignment risk remains explicit.
 
@@ -219,11 +221,11 @@ Keep commands synchronized with `package.json`, CI, README, and contributor docs
 
 ## PLAN.md Workflow
 
-Before implementing any repository-affecting user request, first capture it in root `PLAN.md` by adding or amending an unchecked task. Follow-ups precede action; questions needing no repository change need no task. PLAN is the unfinished-work queue: one flat unchecked `TASK-NNN` list with identifiers stable across PLAN and `CHANGELOG.md`. Each dependency-ordered focused-commit item delivers one server primitive with contract, implementation, tests, docs, failures, configuration/migration/OpenAPI/AGENTS changes, and evidence. Describe the primitive, not its motivating application; apply the boundary rule across plans, architecture, OpenAPI, migrations, tests, and implementation.
+Before repository-affecting work, first add or amend an unchecked root `PLAN.md` task; questions needing no repository change need none. PLAN is one flat unfinished `TASK-NNN` queue with identifiers stable across PLAN and `CHANGELOG.md`. Each item MUST own exactly one server primitive or one narrowly bounded operational proof, fit one focused commit, and state an objective pass/fail definition of done. Never combine independent resources, methods, controls, migrations, or live matrices in one task. Broad requests first create a decomposition task; add dependency-ordered replacements before implementation, then retire the umbrella with its unchanged text and replacement mapping in CHANGELOG without claiming delivery. Describe the primitive, not its motivating application.
 
-Process in order unless a documented dependency requires otherwise. Add missing work before doing it. After the full definition of done passes, atomically remove the task from PLAN and append its stable identifier and unchanged full description to the current `CHANGELOG.md` completed-task archive. Never archive partial work or keep completed checkboxes in PLAN.
+Implementation tasks deliver their contract, code, negative-path tests, docs, failures, applicable configuration/migration/OpenAPI/AGENTS changes, and evidence together. A Sites-only acceptance task proves one named behavior against one exact deployment and does not invent source work. Process dependencies in order; parallelize independent items. Add missing work before doing it. After DoD, remove the task from PLAN and append its unchanged description to CHANGELOG. Never archive partial implementation or keep completed checkboxes in PLAN.
 
-Parallelize independent work when practical. Implementation subagents MUST edit only isolated Git worktrees. The primary worktree integrates only reviewed, complete, validated agent commits; never import partial work. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly there.
+Implementation subagents MUST edit only isolated Git worktrees. The primary worktree integrates only reviewed, complete, validated agent commits; never import partial work. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly there.
 
 Prefer the smallest coherent risk-reducing implementation. For feature/task/deployment/release readiness, report evidence-based readiness confidence from `0/100` to `100/100`, decisive evidence, and residual uncertainty; rarely use `100/100`. It never replaces security gates or the definition of done. Capture every material residual finding in `PLAN.md`, `ROADMAP.md`, or `BACKLOG.md` before handoff.
 

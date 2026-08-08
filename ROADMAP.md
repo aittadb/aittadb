@@ -8,10 +8,10 @@ ChatGPT Sites D1/R2 capacity remains subject to unknown plan-specific aggregate 
 
 - [ ] ROADMAP-001: Add record collection creation with `POST /storage/records`, a server-generated logical key, `201 Created`, `Location`, equivalent HTML and hypermedia controls, and the existing user/client isolation boundary.
 - [ ] ROADMAP-002: Add atomic partial JSON record updates at `PATCH /storage/records/{key}` with one documented patch media type, validation, failure semantics, HTML equivalence, and scoped authorization.
-- [ ] ROADMAP-003: Add bounded record collection pagination, opaque cursors, and explicitly supported key or update-time filters without exposing owner/client columns or internal query structure.
+- [ ] ROADMAP-003: Add previous-page recovery and explicitly supported key or update-time filters to the existing bounded record pagination without exposing owner/client columns or internal query structure.
 - [ ] ROADMAP-004: Add record entity tags and conditional reads/writes so clients can detect stale state and prevent lost updates without weakening authorization.
 - [ ] ROADMAP-005: Add file metadata mutation at `PATCH /storage/files/{key}` for a narrowly defined set of public metadata without replacing bytes or exposing the physical R2 key.
-- [ ] ROADMAP-006: Add bounded file collection pagination, opaque cursors, and explicitly supported logical-key, content-type, or update-time filters without exposing R2 internals.
+- [ ] ROADMAP-006: Add previous-page recovery and explicitly supported logical-key, content-type, or update-time filters to the existing bounded file pagination without exposing R2 internals.
 - [ ] ROADMAP-007: Add file entity tags and conditional reads/writes so clients can validate cached metadata and prevent lost byte or metadata updates.
 - [ ] ROADMAP-008: Add authorized HTTP byte-range retrieval for files with correct range validation, content headers, and unchanged user/client isolation.
 - [ ] ROADMAP-009: Define and migrate durable D1 event persistence with immutable event IDs, ordered timestamps, payload bounds, idempotency rules, and user/client ownership keys.
