@@ -429,7 +429,7 @@ async function route(
             title: "OpenID configuration",
             eyebrow: "Issuer discovery",
             summary:
-              "Published OpenID Provider metadata for this independent AittaDB issuer.",
+              "Published OpenID Provider metadata for this AittaDB issuer.",
             payload: configuration,
             rawHref: "/.well-known/openid-configuration?format=json",
             visualHeading: "Every endpoint begins with one issuer.",

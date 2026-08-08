@@ -361,10 +361,13 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       { headers: { accept: "text/html" } },
     ),
   );
+  const browserDiscoveryHtml = await browserDiscovery!.text();
+  assert.match(browserDiscoveryHtml, /<h1>OpenID configuration<\/h1>/);
   assert.match(
-    await browserDiscovery!.text(),
-    /<h1>OpenID configuration<\/h1>/,
+    browserDiscoveryHtml,
+    /Published OpenID Provider metadata for this AittaDB issuer\./,
   );
+  assert.doesNotMatch(browserDiscoveryHtml, /independent AittaDB issuer/i);
   const rawDiscovery = await app.fetch(
     new Request(
       "https://aittadb.example.test/.well-known/openid-configuration?format=json",
@@ -1079,6 +1082,8 @@ test("browser protocol representations execute real device, token, UserInfo, int
   assert.equal(tokenResult?.status, 200);
   const tokenResultHtml = await tokenResult!.text();
   assert.match(tokenResultHtml, /<h1>Credentials issued<\/h1>/);
+  assert.match(tokenResultHtml, /AittaDB-issued credentials are ready\./);
+  assert.doesNotMatch(tokenResultHtml, /Independent AittaDB credentials/i);
   assert.doesNotMatch(tokenResultHtml, /access_token=/);
   const accessToken = textAreaValue(tokenResultHtml, "result_access_token");
   const refreshToken = textAreaValue(tokenResultHtml, "result_refresh_token");

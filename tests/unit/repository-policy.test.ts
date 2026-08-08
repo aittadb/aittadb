@@ -3,9 +3,15 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const AGENTS_PATH = new URL("../../AGENTS.md", import.meta.url);
+const APP_PAGE_PATH = new URL("../../app/page.tsx", import.meta.url);
 const BACKLOG_PATH = new URL("../../BACKLOG.md", import.meta.url);
 const CHANGELOG_PATH = new URL("../../CHANGELOG.md", import.meta.url);
+const HANDLER_PATH = new URL("../../src/handler.ts", import.meta.url);
 const PLAN_PATH = new URL("../../PLAN.md", import.meta.url);
+const PROTOCOL_PAGES_PATH = new URL(
+  "../../src/protocol-pages.ts",
+  import.meta.url,
+);
 const README_PATH = new URL("../../README.md", import.meta.url);
 const ROADMAP_PATH = new URL("../../ROADMAP.md", import.meta.url);
 const STYLE_GUIDE_PATH = new URL("../../docs/style-guide.md", import.meta.url);
@@ -128,11 +134,15 @@ test("AGENTS.md requires evidence-based readiness confidence", async () => {
 });
 
 test("public copy distinguishes project status from the current Sites dependency", async () => {
-  const [agents, readme, styleGuide] = await Promise.all([
-    readFile(AGENTS_PATH, "utf8"),
-    readFile(README_PATH, "utf8"),
-    readFile(STYLE_GUIDE_PATH, "utf8"),
-  ]);
+  const [agents, appPage, handler, protocolPages, readme, styleGuide] =
+    await Promise.all([
+      readFile(AGENTS_PATH, "utf8"),
+      readFile(APP_PAGE_PATH, "utf8"),
+      readFile(HANDLER_PATH, "utf8"),
+      readFile(PROTOCOL_PAGES_PATH, "utf8"),
+      readFile(README_PATH, "utf8"),
+      readFile(STYLE_GUIDE_PATH, "utf8"),
+    ]);
 
   for (const [name, contents] of [
     ["AGENTS.md", agents],
@@ -148,6 +158,24 @@ test("public copy distinguishes project status from the current Sites dependency
     assert.doesNotMatch(contents, /remains independent from OpenAI/i);
     assert.doesNotMatch(contents, /AittaDB is independent/i);
   }
+
+  assert.match(appPage, /third-party application/);
+  assert.match(
+    appPage,
+    /current implementation depends on OpenAI-hosted ChatGPT Sites/,
+  );
+  assert.doesNotMatch(appPage, /independent application/i);
+  assert.doesNotMatch(appPage, /Persistent Events are planned/i);
+
+  assert.match(protocolPages, /AittaDB-issued credentials are ready\./);
+  assert.doesNotMatch(protocolPages, /Independent AittaDB credentials/i);
+  assert.match(handler, /metadata for this AittaDB issuer\./);
+  assert.doesNotMatch(handler, /independent AittaDB issuer/i);
+  assert.match(
+    agents,
+    /belong to that AittaDB deployment, not OpenAI or ChatGPT/,
+  );
+  assert.doesNotMatch(agents, /AittaDB alone owns/i);
 
   assert.match(
     readme,

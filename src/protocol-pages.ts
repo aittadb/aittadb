@@ -146,7 +146,7 @@ export function tokenResultPage(payload: Record<string, unknown>): string {
       "AittaDB issued credentials for the validated local user, client, and scope set.",
     tone: "success",
     visualEyebrow: "Exchange complete",
-    visualHeading: "Independent AittaDB credentials are ready.",
+    visualHeading: "AittaDB-issued credentials are ready.",
     visualSummary:
       "These credentials belong only to this AittaDB issuer. They are not OpenAI or ChatGPT tokens.",
     body: `<section class="info-grid" aria-label="Token response metadata"><div><span>Token type</span><strong>${escapeHtml(stringValue(payload.token_type))}</strong></div><div><span>Expires in</span><strong>${escapeHtml(stringValue(payload.expires_in))} seconds</strong></div><div><span>Local scopes</span><code>${escapeHtml(stringValue(payload.scope))}</code></div></section>${outputs}<p class="notice"><strong>Store these credentials securely.</strong> This no-store page displays them only as the direct result of the production token exchange. AittaDB does not retain access or ID token plaintext.</p>`,

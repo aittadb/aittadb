@@ -14,16 +14,16 @@ export default function Page() {
       <p className="eyebrow">Hosted application backend</p>
       <h1>Identity, data, and files for third-party applications.</h1>
       <p>
-        Developers can deploy AittaDB as an independent application on
-        OpenAI-hosted ChatGPT Sites. It maps ChatGPT sign-in to a separate
-        AittaDB user, issues its own OAuth 2.0 and OpenID Connect sessions, and
-        provides persistent JSON records and file storage isolated by user and
-        client.
+        AittaDB is a third-party application, not an official OpenAI product.
+        Its current implementation depends on OpenAI-hosted ChatGPT Sites for
+        runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within
+        that platform boundary, AittaDB maps ChatGPT sign-in to a separate user,
+        issues its own OAuth 2.0 and OpenID Connect sessions, and provides
+        persistent JSON records and file storage isolated by user and client.
       </p>
       <p>
         Third-party apps, services, and agents use AittaDB through its REST and
-        hypermedia APIs. Persistent Events are planned and are not part of the
-        current MVP. See <Link href="/docs">API docs</Link>,{" "}
+        hypermedia APIs. See <Link href="/docs">API docs</Link>,{" "}
         <Link href="/health">health metadata</Link>, or the{" "}
         <Link href="https://github.com/aittadb/aittadb">
           project repository
