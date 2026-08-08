@@ -2,7 +2,7 @@
 
 Read `AGENTS.md` before changing code. Every implementation change must include the public contract, implementation, automated tests, documentation, validation evidence, and any necessary `AGENTS.md`, OpenAPI, schema, migration, or architecture updates in the same task.
 
-Use [PLAN.md](PLAN.md) for accepted, dependency-ordered implementation work, [ROADMAP.md](ROADMAP.md) for stable future product direction, and [BACKLOG.md](BACKLOG.md) for uncommitted ideas with no delivery commitment. Roadmap and backlog checkboxes describe unavailable work. Before implementing either, create a complete unchecked PLAN task; do not treat a checkbox in those files as authorization to begin.
+Use [PLAN.md](PLAN.md) for accepted, dependency-ordered unfinished implementation work, [CHANGELOG.md](CHANGELOG.md) for completed task history, [ROADMAP.md](ROADMAP.md) for stable future product direction, and [BACKLOG.md](BACKLOG.md) for uncommitted ideas with no delivery commitment. Before implementation, create a complete unchecked PLAN task using the next identifier across PLAN and CHANGELOG. After its complete definition of done passes, move its stable identifier and unchanged description from PLAN into the changelog atomically. Roadmap and backlog checkboxes describe unavailable work and do not authorize implementation.
 
 When declaring work ready, include a `0/100` evidence-based readiness confidence, the decisive validation evidence, and material residual uncertainty. The score does not waive security controls or the definition of done. Record remaining findings in PLAN, ROADMAP, or BACKLOG before handoff, and prefer a small verified risk reduction to speculative complexity.
 

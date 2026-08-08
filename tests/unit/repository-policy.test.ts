@@ -4,6 +4,8 @@ import test from "node:test";
 
 const AGENTS_PATH = new URL("../../AGENTS.md", import.meta.url);
 const BACKLOG_PATH = new URL("../../BACKLOG.md", import.meta.url);
+const CHANGELOG_PATH = new URL("../../CHANGELOG.md", import.meta.url);
+const PLAN_PATH = new URL("../../PLAN.md", import.meta.url);
 const README_PATH = new URL("../../README.md", import.meta.url);
 const ROADMAP_PATH = new URL("../../ROADMAP.md", import.meta.url);
 const MAX_AGENTS_BYTES = 32_000;
@@ -24,6 +26,43 @@ test("AGENTS.md requires repository work to be captured in PLAN.md first", async
     policy,
     /Before implementing any repository-affecting user request, first capture it in root `PLAN\.md`/,
     "AGENTS.md must require recording repository work in PLAN.md before implementation",
+  );
+  assert.match(policy, /PLAN is the unfinished-work queue/);
+  assert.match(
+    policy,
+    /atomically remove the task from PLAN and append its stable identifier and unchanged full description/,
+  );
+});
+
+test("PLAN contains only unfinished tasks and CHANGELOG preserves completed task history", async () => {
+  const [plan, changelog] = await Promise.all([
+    readFile(PLAN_PATH, "utf8"),
+    readFile(CHANGELOG_PATH, "utf8"),
+  ]);
+  const planTasks = plan
+    .split("\n")
+    .filter((line) => /^- \[[ x]\] TASK-\d{3}: /i.test(line));
+  const completedTasks = changelog
+    .split("\n")
+    .filter((line) => /^- \*\*TASK-\d{3}:\*\* /.test(line));
+
+  assert.ok(planTasks.length > 0, "PLAN.md must contain unfinished work");
+  assert.ok(
+    planTasks.every((line) => /^- \[ \] TASK-\d{3}: /.test(line)),
+    "PLAN.md tasks must remain unchecked until they move to CHANGELOG.md",
+  );
+  assert.ok(
+    completedTasks.length > 0,
+    "CHANGELOG.md must retain completed task history",
+  );
+
+  const identifiers = [...planTasks, ...completedTasks]
+    .map((line) => Number(line.match(/TASK-(\d{3})/)?.[1]))
+    .sort((left, right) => left - right);
+  assert.deepEqual(
+    identifiers,
+    identifiers.map((_, index) => index + 1),
+    "task identifiers across PLAN and CHANGELOG must remain unique and sequential",
   );
 });
 
@@ -118,9 +157,11 @@ test("BACKLOG.md is one stable flat list of unchecked uncommitted ideas", async 
   assert.match(backlog, /BACKLOG-004: Define opt-in live synchronization/);
 });
 
-test("README distinguishes delivery, roadmap, and backlog documents", async () => {
+test("README distinguishes active delivery, completed history, roadmap, and backlog", async () => {
   const readme = await readFile(README_PATH, "utf8");
 
+  assert.match(readme, /\[PLAN\.md\]\(PLAN\.md\)/);
+  assert.match(readme, /\[CHANGELOG\.md\]\(CHANGELOG\.md\)/);
   assert.match(readme, /\[ROADMAP\.md\]\(ROADMAP\.md\)/);
   assert.match(readme, /\[BACKLOG\.md\]\(BACKLOG\.md\)/);
   assert.match(readme, /backup and live synchronization/);
