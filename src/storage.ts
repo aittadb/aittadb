@@ -475,7 +475,7 @@ async function writeStorageFile(
         config.storageLimits,
       ))
     ) {
-      await deleteR2Object(env.BUCKET, r2Key);
+      await retireUncommittedStorageObject(env.BUCKET, store, file);
       const current = await store.getStorageFileMetadata(
         principal.userId,
         principal.client.id,
@@ -519,6 +519,18 @@ async function writeStorageFile(
         }
       : undefined,
   );
+}
+
+async function retireUncommittedStorageObject(
+  bucket: R2Bucket,
+  store: AuthStore,
+  file: StorageFileMetadata,
+): Promise<void> {
+  try {
+    await deleteR2Object(bucket, file.r2Key);
+  } catch {
+    await recordStorageFileOrphanRepairs(store, file);
+  }
 }
 
 async function deleteStorageFileConsistently(
