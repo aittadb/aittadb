@@ -214,6 +214,7 @@ export function requireSameOrigin(
   request: Request,
   canonicalOrigin?: string,
 ): boolean {
+  // This classifies only the browser origin signal; callers enforce CSRF separately.
   return isSameOrigin(request, canonicalOrigin);
 }
 
