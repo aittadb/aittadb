@@ -339,7 +339,7 @@ test("concurrent explicit approval and denial have one redirect winner", async (
 });
 
 test("every browser mutation family rejects a missing Origin independently of CSRF", async () => {
-  const baseEnv = await testEnv();
+  const baseEnv = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const adminIdentity = {
     email: "admin@example.test",

@@ -459,7 +459,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserMissingHtml, /This request stopped here/);
   assert.match(browserMissingHtml, /src="\/aittadb-boundary\.jpg"/);
 
-  const forbiddenAdmin = await app.fetch(
+  const unavailableAdmin = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
       headers: {
         accept:
@@ -467,10 +467,10 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       },
     }),
   );
-  assert.equal(forbiddenAdmin?.status, 403);
-  const forbiddenAdminHtml = await forbiddenAdmin!.text();
-  assert.match(forbiddenAdminHtml, /<h1>Forbidden<\/h1>/);
-  assert.match(forbiddenAdminHtml, /Access stops at the boundary/);
+  assert.equal(unavailableAdmin?.status, 503);
+  const unavailableAdminHtml = await unavailableAdmin!.text();
+  assert.match(unavailableAdminHtml, /<h1>Service unavailable<\/h1>/);
+  assert.match(unavailableAdminHtml, /OAuth Apps is disabled/);
 });
 
 test("public home enters the real protected local AittaDB session", async () => {
@@ -2917,7 +2917,11 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
     displayName: "AittaDB Admin",
   };
   const adminUser = await store.findOrCreateUser(adminIdentity, nowSeconds());
-  const env = { ...baseEnv, ADMIN_SUBJECTS: adminUser.id };
+  const env = {
+    ...baseEnv,
+    ADMIN_SUBJECTS: adminUser.id,
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  };
   const app = createTestAittaDB(env, store, adminIdentity);
   const internalClient = await store.getClient(BROWSER_SESSION_CLIENT_ID);
   assert.ok(internalClient);

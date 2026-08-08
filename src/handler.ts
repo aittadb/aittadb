@@ -158,6 +158,16 @@ export function createAittaDBWithStore(
   return {
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
+      if (!config.features.oauthApps && url.pathname === "/admin/clients") {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
       if (!config.features.records && isRecordsRoute(url.pathname)) {
         const negotiationError = hypermediaNegotiationError(request);
         return finalizeResponse(
@@ -330,7 +340,9 @@ async function route(
         ? await store.findOrCreateUser(identity, nowSeconds())
         : null;
     const showAdmin = Boolean(
-      signedInUser && config.adminSubjects.includes(signedInUser.id),
+      config.features.oauthApps &&
+      signedInUser &&
+      config.adminSubjects.includes(signedInUser.id),
     );
     const metadata = {
       service: "AittaDB",
@@ -1108,7 +1120,8 @@ async function localSessionEndpoint(
   }
 
   const user = await store.findOrCreateUser(identity, nowSeconds());
-  const isAdmin = config.adminSubjects.includes(user.id);
+  const showAdmin =
+    config.features.oauthApps && config.adminSubjects.includes(user.id);
   const csrf = csrfTokenForRequest(request);
   const session = {
     authenticated: true,
@@ -1152,7 +1165,7 @@ async function localSessionEndpoint(
             }),
           ]
         : []),
-      ...(isAdmin
+      ...(showAdmin
         ? [
             link("client-administration", `${config.issuerUrl}/admin/clients`, {
               type: HYPERMEDIA_MEDIA_TYPE,
@@ -1216,7 +1229,7 @@ async function localSessionEndpoint(
             ),
           ]
         : []),
-      ...(isAdmin
+      ...(showAdmin
         ? [
             action(
               "manage-clients",
@@ -1240,7 +1253,7 @@ async function localSessionEndpoint(
     ? html(
         sessionPage(
           user,
-          isAdmin,
+          showAdmin,
           config.features.records,
           config.features.files,
         ),

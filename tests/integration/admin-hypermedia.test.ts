@@ -641,7 +641,7 @@ test("admin failures remain versioned, non-disclosing, and non-mutating", async 
 });
 
 async function adminFixture(): Promise<AdminFixture> {
-  const baseEnv = await testEnv();
+  const baseEnv = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const identity: UpstreamIdentity = {
     email: "admin@example.test",

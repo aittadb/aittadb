@@ -463,7 +463,7 @@ test("production HTTPS responses include HSTS while test HTTP responses do not",
 });
 
 test("administration uses the signed-in allowlisted subject and audits mutations", async () => {
-  const baseEnv = await testEnv();
+  const baseEnv = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const identity = {
     email: "admin@example.test",
@@ -527,7 +527,7 @@ test("administration uses the signed-in allowlisted subject and audits mutations
 });
 
 test("administration denies anonymous and unlisted identities without exposing controls", async () => {
-  const baseEnv = await testEnv();
+  const baseEnv = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const identity = {
     email: "subject-admin@example.test",
@@ -579,7 +579,7 @@ test("administration denies anonymous and unlisted identities without exposing c
 });
 
 test("administrator allowlisting retains the documented upstream email reassignment risk", async () => {
-  const baseEnv = await testEnv();
+  const baseEnv = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const originalIdentity = {
     email: "reassigned@example.test",
@@ -669,7 +669,14 @@ test("every endpoint rate family rejects at its global ceiling before protected 
       const store = new ControlledRateStore(
         (key) => key !== `${endpointCase.family}:global`,
       );
-      const app = createTestAittaDB(await testEnv(), store);
+      const app = createTestAittaDB(
+        await testEnv(
+          endpointCase.family === "admin"
+            ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
+            : {},
+        ),
+        store,
+      );
       const response = await app.fetch(endpointCase.request());
 
       assert.equal(response?.status, 429);
@@ -703,9 +710,14 @@ test("rate-counter failures stay generic for every endpoint family", async (t) =
           ? new Error(failureMarker)
           : true,
       );
-      const response = await createTestAittaDB(await testEnv(), store).fetch(
-        endpointCase.request(),
-      );
+      const response = await createTestAittaDB(
+        await testEnv(
+          endpointCase.family === "admin"
+            ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
+            : {},
+        ),
+        store,
+      ).fetch(endpointCase.request());
 
       assert.equal(response?.status, 500);
       const body = await response!.text();

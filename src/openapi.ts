@@ -106,6 +106,12 @@ const filesUnavailableResponse = {
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
+const oauthAppsAdministrationUnavailableResponse = {
+  description:
+    "Downstream OAuth Apps are disabled by deployment configuration. Client administration is rejected before Sites identity lookup, client repository access, rate limiting, request-body parsing, cleanup scheduling, or mutation. AittaDB's reserved current-session client remains private and available only to the internal signed-in-session adapter.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
 const storageQuotaExceededResponse = {
   description:
     "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
@@ -1337,7 +1343,7 @@ export const openApiSpec = {
       get: {
         summary: "List and manage registered OAuth clients",
         description:
-          "Administrative client data requires a trusted ChatGPT sign-in inside ChatGPT Sites whose AittaDB local UUID is present in the deployment's configured local-subject allowlist. Sites owns the browser sign-in mechanism, so this requirement is described by the x-aittadb-sites-identity-required extension instead of a caller-supplied OpenAPI credential. HTML forms and versioned hypermedia actions are derived from the same availability policy: active clients advertise disable, disabled clients advertise enable, only confidential clients advertise secret rotation, and every listed client advertises grant revocation. A successful HTML mutation redirects here and may display its encrypted, atomically consumed result once; direct and later reads never repeat a confidential secret.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Administrative client data requires a trusted ChatGPT sign-in inside ChatGPT Sites whose AittaDB local UUID is present in the deployment's configured local-subject allowlist. Sites owns the browser sign-in mechanism, so this requirement is described by the x-aittadb-sites-identity-required extension instead of a caller-supplied OpenAPI credential. HTML forms and versioned hypermedia actions are derived from the same availability policy: active clients advertise disable, disabled clients advertise enable, only confidential clients advertise secret rotation, and every listed client advertises grant revocation. A successful HTML mutation redirects here and may display its encrypted, atomically consumed result once; direct and later reads never repeat a confidential secret.",
         "x-aittadb-sites-identity-required": true,
         responses: {
           "200": {
@@ -1356,13 +1362,14 @@ export const openApiSpec = {
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "429": rateLimitedResponse(true),
+          "503": oauthAppsAdministrationUnavailableResponse,
           "406": notAcceptableResponse,
         },
       },
       post: {
         summary: "Create or operate on an OAuth client",
         description:
-          "CSRF-protected same-origin administration for creation, enable/disable, confidential-secret rotation, and active-grant revocation. Every operation requires trusted ChatGPT sign-in inside ChatGPT Sites and an AittaDB local UUID present in the configured local-subject allowlist. The server enforces the same state/type policy advertised by HTML and hypermedia controls. Every advertised action carries a one-time submission token; its hash is claimed atomically before mutation so replay cannot repeat the operation. JSON receives an immediate no-store result. HTML uses Post/Redirect/Get and a short-lived encrypted HttpOnly result cookie whose token hash is consumed atomically on the redirected GET. Generated confidential secrets are tied to the affected client, never enter a URL or durable plaintext storage, and disappear after that result is consumed.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. CSRF-protected same-origin administration for creation, enable/disable, confidential-secret rotation, and active-grant revocation. Every operation requires trusted ChatGPT sign-in inside ChatGPT Sites and an AittaDB local UUID present in the configured local-subject allowlist. The server enforces the same state/type policy advertised by HTML and hypermedia controls. Every advertised action carries a one-time submission token; its hash is claimed atomically before mutation so replay cannot repeat the operation. JSON receives an immediate no-store result. HTML uses Post/Redirect/Get and a short-lived encrypted HttpOnly result cookie whose token hash is consumed atomically on the redirected GET. Generated confidential secrets are tied to the affected client, never enter a URL or durable plaintext storage, and disappear after that result is consumed.",
         "x-aittadb-sites-identity-required": true,
         requestBody: {
           required: true,
@@ -1431,6 +1438,7 @@ export const openApiSpec = {
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "429": rateLimitedResponse(true),
+          "503": oauthAppsAdministrationUnavailableResponse,
           "406": notAcceptableResponse,
         },
       },
