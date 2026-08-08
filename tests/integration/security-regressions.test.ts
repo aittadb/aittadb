@@ -444,7 +444,7 @@ test("every browser mutation family rejects a missing Origin independently of CS
 });
 
 test("ID tokens cannot act as access tokens and UserInfo requires openid", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);

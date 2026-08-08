@@ -675,9 +675,14 @@ test("every endpoint rate family rejects at its global ceiling before protected 
       );
       const app = createTestAittaDB(
         await testEnv(
-          ["admin", "authorize", "device", "token"].includes(
-            endpointCase.family,
-          )
+          [
+            "admin",
+            "authorize",
+            "device",
+            "token",
+            "revoke",
+            "introspect",
+          ].includes(endpointCase.family)
             ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
             : {},
         ),
@@ -718,9 +723,14 @@ test("rate-counter failures stay generic for every endpoint family", async (t) =
       );
       const response = await createTestAittaDB(
         await testEnv(
-          ["admin", "authorize", "device", "token"].includes(
-            endpointCase.family,
-          )
+          [
+            "admin",
+            "authorize",
+            "device",
+            "token",
+            "revoke",
+            "introspect",
+          ].includes(endpointCase.family)
             ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
             : {},
         ),

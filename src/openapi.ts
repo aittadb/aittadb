@@ -140,6 +140,25 @@ const oauthAppsTokenUnavailableResponse = {
   },
 } as const;
 
+const oauthAppsLifecycleUnavailableResponse = {
+  description:
+    "Downstream OAuth Apps are disabled by deployment configuration. Revocation and introspection GET and POST operations are rejected before request-body reading, rate limiting, client authentication, token lookup, revocation, audit or cleanup mutation, or other durable work. POST returns a no-store OAuth temporarily_unavailable error, and issuer discovery omits both endpoints.",
+  content: {
+    "application/json": {
+      schema: {
+        oneOf: [
+          { $ref: "#/components/schemas/OAuthError" },
+          { $ref: "#/components/schemas/HypermediaError" },
+        ],
+      },
+    },
+    [hypermediaVendorType]: {
+      schema: { $ref: "#/components/schemas/HypermediaError" },
+    },
+    "text/html": { schema: { type: "string" } },
+  },
+} as const;
+
 const storageQuotaExceededResponse = {
   description:
     "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
@@ -512,6 +531,8 @@ export const openApiSpec = {
     "/oauth/revoke": {
       get: {
         summary: "Token revocation operation resource",
+        description:
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments omit this endpoint from issuer discovery and expose no revocation form or action.",
         responses: {
           "200": {
             description: "Revocation operation",
@@ -519,12 +540,13 @@ export const openApiSpec = {
               "#/components/schemas/ProtocolEndpointDocument",
             ),
           },
+          "503": oauthAppsLifecycleUnavailableResponse,
         },
       },
       post: {
         summary: "Token revocation",
         description:
-          "The owning public or confidential client authenticates as at the token endpoint. Access tokens are revoked by verified jti; opaque refresh tokens revoke their family. An omitted or incorrect token_type_hint is treated only as a lookup hint, and success never discloses prior token state.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject before reading or mutating client, token, revocation, or audit state. When enabled, the owning public or confidential client authenticates as at the token endpoint. Access tokens are revoked by verified jti; opaque refresh tokens revoke their family. An omitted or incorrect token_type_hint is treated only as a lookup hint, and success never discloses prior token state.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -556,12 +578,15 @@ export const openApiSpec = {
           "400": { description: "Malformed request body or OAuth error" },
           "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
+          "503": oauthAppsLifecycleUnavailableResponse,
         },
       },
     },
     "/oauth/introspect": {
       get: {
         summary: "Token introspection operation resource",
+        description:
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments omit this endpoint from issuer discovery and expose no introspection form or action.",
         responses: {
           "200": {
             description: "Introspection operation",
@@ -569,12 +594,13 @@ export const openApiSpec = {
               "#/components/schemas/ProtocolEndpointDocument",
             ),
           },
+          "503": oauthAppsLifecycleUnavailableResponse,
         },
       },
       post: {
         summary: "Token introspection for confidential clients",
         description:
-          "Only a signed, unexpired AittaDB access-token JWT whose token_use is access and whose audience is the authenticated confidential client can be active. ID tokens, opaque refresh tokens, tokens for another client, revoked tokens, and invalid JWTs return active false without disclosing why.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject before reading or authenticating a client or looking up token state. When enabled, only a signed, unexpired AittaDB access-token JWT whose token_use is access and whose audience is the authenticated confidential client can be active. ID tokens, opaque refresh tokens, tokens for another client, revoked tokens, and invalid JWTs return active false without disclosing why.",
         security: [{ clientSecretBasic: [] }],
         requestBody: {
           description: browserMutationOriginDescription,
@@ -610,6 +636,7 @@ export const openApiSpec = {
           "400": { description: "Malformed request body or OAuth error" },
           "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
+          "503": oauthAppsLifecycleUnavailableResponse,
         },
       },
     },
@@ -2543,14 +2570,23 @@ export const openApiSpec = {
   },
 } as const;
 
-export function oidcConfiguration(issuer: string) {
+export function oidcConfiguration(
+  issuer: string,
+  options: { includeTokenLifecycleEndpoints?: boolean } = {},
+) {
+  const includeTokenLifecycleEndpoints =
+    options.includeTokenLifecycleEndpoints ?? true;
   return {
     issuer,
     authorization_endpoint: `${issuer}/authorize`,
     device_authorization_endpoint: `${issuer}/oauth/device_authorization`,
     token_endpoint: `${issuer}/oauth/token`,
-    revocation_endpoint: `${issuer}/oauth/revoke`,
-    introspection_endpoint: `${issuer}/oauth/introspect`,
+    ...(includeTokenLifecycleEndpoints
+      ? {
+          revocation_endpoint: `${issuer}/oauth/revoke`,
+          introspection_endpoint: `${issuer}/oauth/introspect`,
+        }
+      : {}),
     userinfo_endpoint: `${issuer}/userinfo`,
     jwks_uri: `${issuer}/.well-known/jwks.json`,
     response_types_supported: ["code"],
