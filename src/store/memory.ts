@@ -10,6 +10,11 @@ import {
   assertAccountCredentialPurgeLimit,
 } from "./account-credential-purge";
 import {
+  accountRecordPurgeBatch,
+  accountRecordPurgeUnavailable,
+  assertAccountRecordPurgeInput,
+} from "./account-record-purge";
+import {
   BROWSER_SESSION_CLIENT,
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
@@ -18,6 +23,7 @@ import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
   AccountCredentialPurgeBatchResult,
+  AccountRecordPurgeBatch,
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
@@ -393,6 +399,27 @@ export class MemoryAuthStore implements AuthStore {
       deletedCount,
       done: !this.hasAccountCredentialsAndGrants(subject),
     };
+  }
+
+  async purgeAccountRecords(
+    subject: string,
+    limit: number,
+  ): Promise<AccountRecordPurgeBatch> {
+    assertAccountRecordPurgeInput(subject, limit);
+    if (!this.accountDeletionJobs.has(subject)) {
+      throw accountRecordPurgeUnavailable();
+    }
+    const keys = Array.from(this.storageRecords.entries())
+      .filter(([, record]) => record.userId === subject)
+      .sort(
+        ([, left], [, right]) =>
+          left.clientId.localeCompare(right.clientId) ||
+          left.key.localeCompare(right.key),
+      )
+      .slice(0, limit)
+      .map(([key]) => key);
+    for (const key of keys) this.storageRecords.delete(key);
+    return accountRecordPurgeBatch(keys.length, limit);
   }
 
   async createClient(

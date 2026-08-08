@@ -1,6 +1,6 @@
 # Account-Deletion Job Repository
 
-This document defines the internal durable state, subject-authorization, and credential/grant purge primitives for the future self-service account-deletion flow. They add no HTTP route, record/file purge, coordinator, status resource, or browser interface.
+This document defines the internal durable state, subject-authorization, credential/grant purge, and record-purge primitives for the future self-service account-deletion flow. They add no HTTP route, file/R2 purge, coordinator, status resource, browser interface, or user removal.
 
 ## State model
 
@@ -27,6 +27,7 @@ The completed row deliberately has no foreign key to `users`: later deletion wor
 - `retryAccountDeletionJob(subject, attempt, now, retryAt)` conditionally defers one live claim; `retryAt` must be later than `now`.
 - `completeAccountDeletionJob(subject, attempt, now)` conditionally moves one live claim to its terminal state.
 - `purgeAccountCredentialsAndGrants(subject, limit)` deletes at most 100 owned credential/grant rows and returns only aggregate `deletedCount` and `done` progress. It refuses a subject without a deletion job.
+- `purgeAccountRecords(subject, limit)` deletes at most 100 owned JSON records across client namespaces and returns only aggregate `deletedCount` and `done` progress. It refuses a subject without the exact deletion job.
 
 Claim selection is finite and oldest-eligible-first by availability time, creation time, and subject. The repository returns only the selected internal job fields. It never returns a D1 `rowid` or another deployment/physical identifier.
 
@@ -54,10 +55,20 @@ The shared check runs before all AittaDB token issuance and in the common access
 
 `startSubjectAccountDeletion` is the internal start boundary for future adapters. It rejects an exact subject configured in `ADMIN_SUBJECTS` before calling the repository, preventing an operator from deleting the identity needed to administer that deployment. For other subjects it preserves the repository's idempotent start result. It does not authorize an HTTP caller; TASK-152 owns that separate boundary.
 
+## Record purge
+
+`AccountRecordPurgeRepository.purgeAccountRecords(subject, limit)` deletes only D1 JSON records whose `user_id` is the exact local subject, across all of that subject's client namespaces. The subject must already have an account-deletion job in any state, including the completed tombstone; a missing exact-subject job fails before the delete statement. The method has no HTTP or OpenAPI representation and returns only an internal deleted count and completion flag, never record keys, client IDs, values, email, or database identifiers.
+
+Each call deletes at most 100 rows in deterministic `client_id`, then logical-key order. Committed row removal is the durable progress marker, so no cursor or separate progress table is needed. A result is complete when fewer rows than requested were removed. An exact multiple deliberately requires one final empty call, which makes interruption and retries idempotent without storing a last key.
+
+D1 performs the bounded removal in one prepared `DELETE` statement. A statement failure commits no partial batch and is propagated as an internal failure rather than a false completed result. The memory adapter applies the same ordering and bounds for tests. Record and file usage is calculated from live rows, so each successful deletion immediately releases the corresponding deployment, subject, and namespace record item/byte capacity while preserving file usage. Files, R2 bytes, users, clients, credentials, grants, deletion jobs, repair state, audit state, rate counters, every other subject, and all other tables are outside this primitive.
+
 ## Failure behavior
 
-An expired running lease becomes eligible for another bounded claim. A stale claimant then loses its compare-and-set transition. Retry scheduling is explicit and durable. `completed` is terminal and repeated starts return it without changing timestamps or resurrecting work.
+An expired running lease becomes eligible for another bounded claim. A stale claimant then loses its compare-and-set transition. Retry scheduling is explicit and durable. `completed` is terminal and repeated starts return it without changing timestamps or resurrecting work. Record-purge retries start from the first remaining owned row; a repeated completed batch changes nothing.
 
 Purge phases are separate prepared D1 statements because D1 provides no cross-table transaction here. If one fails, earlier subject-owned deletions remain committed and a retry resumes idempotently. Parent rows stay while any child remains, including a corrupt cross-subject child reference; this can block convergence but cannot authorize cross-subject deletion. Credential creation racing the final aggregate check remains possible at statement boundaries, while the deletion gate prevents ordinary new issuance; the future coordinator must run the batch to `done` before finalization.
 
-Record/file purge, R2 compensation, final user removal, request authorization, and status representation remain separate PLAN tasks.
+The record purge is one atomic prepared statement per batch; a statement failure removes no partial batch. A request that passed the subject gate immediately before deletion started can still race one storage write, so the future coordinator must repeat the idempotent phase to `done` in its ordered workflow.
+
+File/R2 purge and compensation, final user removal, request authorization, coordination, and status representation remain separate PLAN tasks. Neither completed credential nor record purge proves the whole account is deleted.

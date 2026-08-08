@@ -10,6 +10,11 @@ import {
   assertAccountCredentialPurgeLimit,
 } from "./account-credential-purge";
 import {
+  accountRecordPurgeBatch,
+  accountRecordPurgeUnavailable,
+  assertAccountRecordPurgeInput,
+} from "./account-record-purge";
+import {
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
 } from "../system-client";
@@ -17,6 +22,7 @@ import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
   AccountCredentialPurgeBatchResult,
+  AccountRecordPurgeBatch,
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
@@ -404,6 +410,26 @@ export class D1AuthStore implements AuthStore {
       .bind(subject)
       .first<Row>();
     return { deletedCount, done: !remaining };
+  }
+
+  async purgeAccountRecords(
+    subject: string,
+    limit: number,
+  ): Promise<AccountRecordPurgeBatch> {
+    assertAccountRecordPurgeInput(subject, limit);
+    if (!(await this.getAccountDeletionJob(subject))) {
+      throw accountRecordPurgeUnavailable();
+    }
+    const result = await this.db
+      .prepare(
+        "DELETE FROM storage_records WHERE rowid IN (SELECT rowid FROM storage_records WHERE user_id = ? ORDER BY client_id ASC, key ASC LIMIT ?)",
+      )
+      .bind(subject, limit)
+      .run();
+    return accountRecordPurgeBatch(
+      requiredMutationChanges(result, "account_record_purge_failed"),
+      limit,
+    );
   }
 
   async createClient(
@@ -1334,6 +1360,17 @@ function mutationChanges(result: D1Result): number {
     return 0;
   const changes = (result.meta as { changes?: unknown }).changes;
   return typeof changes === "number" ? changes : 0;
+}
+
+function requiredMutationChanges(result: D1Result, error: string): number {
+  if (!result.success || !result.meta || typeof result.meta !== "object") {
+    throw new Error(error);
+  }
+  const changes = (result.meta as { changes?: unknown }).changes;
+  if (typeof changes !== "number" || !Number.isSafeInteger(changes)) {
+    throw new Error(error);
+  }
+  return changes;
 }
 
 function redact(data: Record<string, unknown>): Record<string, unknown> {

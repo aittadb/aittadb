@@ -290,6 +290,11 @@ export interface AccountCredentialPurgeBatchResult {
   done: boolean;
 }
 
+export interface AccountRecordPurgeBatch {
+  deletedCount: number;
+  done: boolean;
+}
+
 export interface AccountCredentialPurgeRepository {
   purgeAccountCredentialsAndGrants(
     subject: string,
@@ -297,7 +302,15 @@ export interface AccountCredentialPurgeRepository {
   ): Promise<AccountCredentialPurgeBatchResult>;
 }
 
-export interface AuthStore extends AccountCredentialPurgeRepository {
+export interface AccountRecordPurgeRepository {
+  purgeAccountRecords(
+    subject: string,
+    limit: number,
+  ): Promise<AccountRecordPurgeBatch>;
+}
+
+export interface AuthStore
+  extends AccountCredentialPurgeRepository, AccountRecordPurgeRepository {
   cleanup(now: number): Promise<void>;
   rateLimit(
     key: string,

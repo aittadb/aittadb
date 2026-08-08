@@ -4,9 +4,9 @@ Authoritative for humans and AI agents; read before changing code. Keep below 32
 
 ## Purpose and Product Boundary
 
-AittaDB is a general-purpose hosted database server and application-backend service for third-party applications, services, and agents. Develop it as a focused server product of small, independent, reusable primitives exposed through stable HTTP protocols. On OpenAI-hosted ChatGPT Sites it maps trusted server-side sign-in to a local AittaDB user, issues its own OAuth/OIDC/JWT credentials, and provides isolated data.
+AittaDB is a general-purpose hosted database server and application-backend service. It serves third-party applications, services, and agents through small, independent, reusable primitives and stable HTTP protocols. On OpenAI-hosted ChatGPT Sites it maps trusted server-side sign-in to a local AittaDB user, issues its own OAuth/OIDC/JWT credentials, and provides isolated data.
 
-Current capabilities are identity mapping, OAuth/OIDC/JWT sessions, D1-backed JSON records, and R2-backed files with D1 metadata. Persistent events and long-polling are planned, not implemented. Do not describe planned behavior as available.
+Current capabilities: identity mapping, OAuth/OIDC/JWT sessions, D1 JSON records, and R2 files with D1 metadata. Persistent events and long-polling are planned, not implemented. Do not describe planned behavior as available.
 
 The server boundary includes identity/authentication; user, client, application, and namespace isolation; records and objects; events and delivery; conditional writes, versions, cursors, idempotency, bounded atomic operations, quotas, rate limits, expiry, retention, cleanup, hypermedia, OpenAPI, and protocol/operational documentation. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories. This repository may document protocol use, but must not own those implementations.
 
@@ -28,7 +28,7 @@ Use feature branches. Never push directly to `main`, merge, deploy, publish, sav
 
 ## Runtime Contract
 
-Use strict TypeScript, Vinext, and Cloudflare Worker-compatible ESM. Deployed modules must not require Node-only APIs, filesystem writes, server processes, or durable process memory. Node APIs are allowed only in isolated build scripts, local administration, and tests.
+Use strict TypeScript, Vinext, and Cloudflare Worker ESM. Deployed modules must not require Node APIs, filesystem writes, server processes, or durable process memory. Node APIs are confined to build scripts, local administration, and tests.
 
 Runtime requirements:
 
@@ -90,7 +90,7 @@ Every server unit is a reusable primitive with a small vendor-neutral contract, 
 - Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own their narrowly keyed durable records.
 - Storage repository owns records and file metadata keyed by local UUID plus OAuth client ID. R2 bytes use generated physical keys.
-- Account deletion: any job blocks access; admins cannot start; purge is bounded, subject-only, idempotent, and internal.
+- Account deletion: any job blocks access; admins cannot start; credential/record purges require its job and are finite, subject-only, retry-safe, and internal; no route/coordinator.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
 - Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.
