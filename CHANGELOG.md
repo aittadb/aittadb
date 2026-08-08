@@ -35,6 +35,7 @@
 - Added physical-key compare-and-set file mutations with deterministic concurrent losers, encrypted namespace-bound storage cursors, grace-safe indexed refresh-family cleanup, pre-authenticated multipart parsing, and client-bound token-endpoint CORS before credential consumption.
 - Added a content-negotiated deployment Privacy Policy with accessible HTML, versioned hypermedia JSON, shared page links, public environment-based operator details, a first-administrator contact fallback, generic unavailable behavior, and policy/retention guidance for independent Sites operators.
 - Reviewed all five open Dependabot updates without merging: approved the green, isolated `@next/eslint-plugin-next` 16.3.0 and `globals` 17.9.0 updates; requested changes on TypeScript 7 and ESLint 10 because their current peer stacks fail clean installation; and requested a coordinated `tailwindcss` plus `@tailwindcss/postcss` 4.3.3 update instead of the proposed mixed 4.2/4.3 compiler graph. The deferred major upgrades remain tooling work rather than release-security exceptions; the current lockfile audit remains clean.
+- Expanded encrypted storage-cursor evidence to scan both the token and decoded envelope for positions, namespace identifiers, and private signing material, and documented immediate invalidation when private signing-key material rotates.
 
 ### Completed plan tasks
 

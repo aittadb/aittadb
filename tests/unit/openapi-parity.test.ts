@@ -176,7 +176,13 @@ test("OpenAPI documents implemented security controls", () => {
     const cursor = (parameters as UnknownObject[]).find(
       (parameter) => String(parameter.name) === "cursor",
     );
-    assert.match(String(cursor?.description), /encrypted continuation cursor/);
+    const description = String(cursor?.description);
+    assert.match(description, /encrypted continuation cursor/);
+    assert.match(
+      description,
+      /logical key, timestamp, local-user identifier, OAuth-client identifier, or signing secret/,
+    );
+    assert.match(description, /private signing-key material/);
   }
 
   const collectionData = openApiSchema("StorageCollectionData");

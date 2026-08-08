@@ -144,7 +144,7 @@ Admin operations require the current trusted ChatGPT Sites session mapped to a c
 - File replacement uses copy-on-write physical keys and D1 compare-and-set against the observed R2 key. Stale mutations fail `409` and retire their objects. D1/R2 failures use bounded cleanup or rollback; persistent cross-service failures fail generically and never disclose keys.
 - Attachment filenames are safe and logical-key based.
 - Enforce finite deployment, local-user, and local-user/client item and byte ceilings atomically in D1. The write kill switch blocks create/replace but leaves authorized deletion available. Responses disclose only the current user/client namespace usage and limits.
-- Collection reads use bounded deterministic keyset pages. Continuation cursors use canonical AES-GCM authenticated encryption bound to resource kind, local subject, and client; expose no position or cross-namespace inventory. Signing-key rotation invalidates cursors.
+- Collection reads use bounded deterministic keyset pages. Continuation cursors use canonical AES-GCM authenticated encryption derived from private signing-key material and bound to resource kind, local subject, and client; expose no position, user/client identifier, signing material, or secret. Private signing-key rotation invalidates them immediately.
 
 Current-session storage uses the reserved browser client, so it is durable but isolated from every normal OAuth client, even for the same user. Token mode uses the token's client namespace. Submitted and internal tokens never reach HTML, URLs, cookies, logs, or browser storage.
 
