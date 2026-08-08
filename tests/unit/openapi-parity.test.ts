@@ -314,6 +314,22 @@ test("OpenAPI documents implemented security controls", () => {
   }
 
   for (const [path, method] of [
+    ["/storage/records", "get"],
+    ["/storage/records", "post"],
+    ["/storage/records/{key}", "get"],
+    ["/storage/records/{key}", "post"],
+    ["/storage/records/{key}", "put"],
+    ["/storage/records/{key}", "delete"],
+  ] as const) {
+    const unavailable = asObject(
+      operationResponses(path, method)["503"],
+      `${method.toUpperCase()} ${path} 503 response`,
+    );
+    assert.match(String(unavailable.description), /JSON Records feature/);
+    assert.match(String(unavailable.description), /before client lookup/);
+  }
+
+  for (const [path, method] of [
     ["/userinfo", "get"],
     ["/storage/records", "get"],
     ["/storage/records/{key}", "get"],

@@ -108,6 +108,7 @@ export async function storageBrowserEndpoint(
           collectionPath(kind),
           request,
           signedIn,
+          config.features.records,
         );
       }
       return redirect(`${collectionPath(kind)}/${encodeStorageKey(key)}`, 303);
@@ -136,6 +137,7 @@ export async function storageBrowserEndpoint(
               url.pathname,
               request,
               true,
+              config.features.records,
             )
           : accessToken;
       }
@@ -159,6 +161,7 @@ export async function storageBrowserEndpoint(
           target.pathname,
           request,
           true,
+          config.features.records,
         );
       }
       response.headers.set("set-cookie", csrfCookie(csrf));
@@ -170,6 +173,7 @@ export async function storageBrowserEndpoint(
         kind,
         resource.type === "item" ? resource.key : "",
         false,
+        config.features.records,
       );
     }
   }
@@ -181,6 +185,7 @@ export async function storageBrowserEndpoint(
         kind,
         resource.type === "item" ? resource.key : "",
         hasBrowserSession(request, identityProvider),
+        config.features.records,
       );
     }
     const operation = browserOperation(kind, resource, "GET");
@@ -192,6 +197,7 @@ export async function storageBrowserEndpoint(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
+      config.features.records,
     );
   }
 
@@ -250,7 +256,13 @@ async function handleRecordForm(
   try {
     form = await readForm(request, MAX_RECORD_FORM_BYTES);
   } catch (error) {
-    return storageFormReadError(error, "records", url.pathname, request);
+    return storageFormReadError(
+      error,
+      "records",
+      url.pathname,
+      request,
+      config.features.records,
+    );
   }
   if (form.get("ui") !== "1")
     return methodNotAllowed(resourceMethods("records", resource));
@@ -269,6 +281,7 @@ async function handleRecordForm(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
+      config.features.records,
     );
   }
   const authorized = await browserStorageHeaders(
@@ -288,6 +301,7 @@ async function handleRecordForm(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
+      config.features.records,
     );
   }
   const { headers } = authorized;
@@ -312,6 +326,7 @@ async function handleRecordForm(
     target.pathname,
     request,
     hasBrowserSession(request, identityProvider),
+    config.features.records,
   );
 }
 
@@ -340,7 +355,13 @@ async function handleFileForm(
       ? await readBoundedMultipartForm(request, MAX_FILE_FORM_BYTES)
       : await readForm(request, MAX_RECORD_FORM_BYTES);
   } catch (error) {
-    return storageFormReadError(error, "files", url.pathname, request);
+    return storageFormReadError(
+      error,
+      "files",
+      url.pathname,
+      request,
+      config.features.records,
+    );
   }
   if (stringEntry(form.get("ui")) !== "1") {
     return methodNotAllowed(resourceMethods("files", resource));
@@ -365,6 +386,7 @@ async function handleFileForm(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
+      config.features.records,
     );
   }
   if (
@@ -382,6 +404,7 @@ async function handleFileForm(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
+      config.features.records,
     );
   }
 
@@ -402,6 +425,7 @@ async function handleFileForm(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
+      config.features.records,
     );
   }
   const { headers } = authorized;
@@ -416,6 +440,7 @@ async function handleFileForm(
         url.pathname,
         request,
         hasBrowserSession(request, identityProvider),
+        config.features.records,
       );
     }
     if (file.size > MAX_FILE_BYTES) {
@@ -426,6 +451,7 @@ async function handleFileForm(
         url.pathname,
         request,
         hasBrowserSession(request, identityProvider),
+        config.features.records,
       );
     }
     headers.set("content-type", file.type || "application/octet-stream");
@@ -466,6 +492,7 @@ async function handleFileForm(
     target.pathname,
     request,
     hasBrowserSession(request, identityProvider),
+    config.features.records,
   );
 }
 
@@ -495,6 +522,7 @@ async function renderStorageResponse(
   retryHref: string,
   request?: Request,
   signedIn = false,
+  recordsEnabled = true,
 ): Promise<Response> {
   if (request && !acceptsHtml(request)) return response;
   if (!isJsonMediaType(response.headers.get("content-type") ?? "")) {
@@ -513,6 +541,7 @@ async function renderStorageResponse(
     resourceHref: retryHref,
     csrf,
     signedIn,
+    recordsEnabled,
   });
   const headers = new Headers(response.headers);
   if (request) headers.set("set-cookie", csrfCookie(csrf));
@@ -562,12 +591,13 @@ function storageFormResponse(
   kind: StorageKind,
   key: string,
   signedIn: boolean,
+  recordsEnabled: boolean,
 ): Response {
   const csrf = csrfTokenForRequest(request);
   const page =
     kind === "records"
       ? recordStorageFormPage(csrf, key, signedIn)
-      : fileStorageFormPage(csrf, key, signedIn);
+      : fileStorageFormPage(csrf, key, signedIn, undefined, recordsEnabled);
   return html(page, { headers: { "set-cookie": csrfCookie(csrf) } });
 }
 
@@ -676,6 +706,7 @@ function storageFormReadError(
   kind: StorageKind,
   retryHref: string,
   request: Request,
+  recordsEnabled: boolean,
 ): Promise<Response> {
   const tooLarge =
     error instanceof Error && error.message === "request_too_large";
@@ -692,6 +723,7 @@ function storageFormReadError(
     retryHref,
     request,
     false,
+    recordsEnabled,
   );
 }
 

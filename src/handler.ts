@@ -157,6 +157,16 @@ export function createAittaDBWithStore(
   return {
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
+      if (!config.features.records && isRecordsRoute(url.pathname)) {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "JSON Records"),
+          config,
+        );
+      }
       const corsHeaders = isCorsControlledRoute(url.pathname)
         ? await corsHeadersForRequest(request, url, config, store)
         : new Headers();
@@ -315,7 +325,9 @@ async function route(
       capabilities: [
         "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
         "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
-        "D1-backed JSON records isolated by AittaDB user and client",
+        ...(config.features.records
+          ? ["D1-backed JSON records isolated by AittaDB user and client"]
+          : []),
         "R2-backed files with D1 metadata isolated by AittaDB user and client",
       ],
       plannedCapabilities: ["Persistent events and long-polling delivery"],
@@ -339,9 +351,13 @@ async function route(
       link("session", `${config.issuerUrl}/session`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
-      link("storage-records", `${config.issuerUrl}/storage/records`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.records
+        ? [
+            link("storage-records", `${config.issuerUrl}/storage/records`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       link("storage-files", `${config.issuerUrl}/storage/files`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
@@ -402,7 +418,7 @@ async function route(
         `${config.issuerUrl}/privacy`,
         { authorization: { scheme: "none" }, fields: [] },
       ),
-      ...(signedIn
+      ...(signedIn && config.features.records
         ? [
             action(
               "open-records",
@@ -411,6 +427,10 @@ async function route(
               `${config.issuerUrl}/storage/records`,
               { authorization: { scheme: "sites-session" }, fields: [] },
             ),
+          ]
+        : []),
+      ...(signedIn
+        ? [
             action(
               "open-files",
               "Open file storage",
@@ -1083,9 +1103,13 @@ async function localSessionEndpoint(
       link("userinfo", `${config.issuerUrl}/userinfo`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
-      link("storage-records", `${config.issuerUrl}/storage/records`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.records
+        ? [
+            link("storage-records", `${config.issuerUrl}/storage/records`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       link("storage-files", `${config.issuerUrl}/storage/files`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
@@ -1131,13 +1155,17 @@ async function localSessionEndpoint(
           ],
         },
       ),
-      action(
-        "manage-session-records",
-        "Manage JSON records",
-        "GET",
-        `${config.issuerUrl}/storage/records`,
-        { authorization: { scheme: "sites-session" }, fields: [] },
-      ),
+      ...(config.features.records
+        ? [
+            action(
+              "manage-session-records",
+              "Manage JSON records",
+              "GET",
+              `${config.issuerUrl}/storage/records`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
       action(
         "manage-session-files",
         "Manage files",
@@ -1166,7 +1194,7 @@ async function localSessionEndpoint(
     ],
   });
   return acceptsHtml(request)
-    ? html(sessionPage(user, isAdmin))
+    ? html(sessionPage(user, isAdmin, config.features.records))
     : hypermediaJson(request, document, {
         headers: { "set-cookie": csrfCookie(csrf) },
       });
@@ -1194,6 +1222,35 @@ async function finalizeResponse(
     statusText: negotiated.statusText,
     headers,
   });
+}
+
+function featureUnavailableResponse(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  feature: string,
+): Response {
+  return hypermediaError(
+    request,
+    "feature_unavailable",
+    `${feature} is disabled for this deployment`,
+    503,
+    {
+      links: [
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("privacy-policy", `${config.issuerUrl}/privacy`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+        link("documentation", `${config.issuerUrl}/docs`, {
+          type: "text/html",
+        }),
+      ],
+      actions: [
+        action("open-service", "Open service", "GET", config.issuerUrl, {
+          fields: [],
+        }),
+      ],
+    },
+  );
 }
 
 function negotiateApplicationError(
@@ -2509,6 +2566,12 @@ export function isAittaDBRoute(pathname: string): boolean {
     pathname === "/device/decision" ||
     pathname === "/consent" ||
     pathname.startsWith("/admin/")
+  );
+}
+
+function isRecordsRoute(pathname: string): boolean {
+  return (
+    pathname === "/storage/records" || pathname.startsWith("/storage/records/")
   );
 }
 

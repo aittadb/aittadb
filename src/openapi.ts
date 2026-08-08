@@ -94,9 +94,9 @@ function rateLimitedResponse(includeHypermedia = false) {
   } as const;
 }
 
-const storageWriteDisabledResponse = {
+const recordsUnavailableResponse = {
   description:
-    "Storage writes are disabled by deployment configuration. Read and delete operations remain available subject to their own authorization and limits.",
+    "The JSON Records feature is disabled by deployment configuration. The request is rejected before client lookup, authentication, rate limiting, request-body parsing, or record persistence. For create or replace operations, this status can also mean that storage writes are disabled.",
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
@@ -642,6 +642,7 @@ export const openApiSpec = {
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
           "429": rateLimitedResponse(true),
+          "503": recordsUnavailableResponse,
         },
       },
       post: {
@@ -687,7 +688,7 @@ export const openApiSpec = {
           "405": { description: "Browser representation marker missing" },
           "413": { description: "Form or JSON record exceeds the limit" },
           "429": rateLimitedResponse(true),
-          "503": storageWriteDisabledResponse,
+          "503": recordsUnavailableResponse,
           "507": storageQuotaExceededResponse,
         },
       },
@@ -708,6 +709,7 @@ export const openApiSpec = {
           },
           "404": { description: "Record not found" },
           "429": rateLimitedResponse(true),
+          "503": recordsUnavailableResponse,
         },
       },
       post: {
@@ -776,7 +778,7 @@ export const openApiSpec = {
           "403": { description: "Scope, CSRF, or same-origin rejection" },
           "413": { description: "Form or JSON record exceeds the limit" },
           "429": rateLimitedResponse(true),
-          "503": storageWriteDisabledResponse,
+          "503": recordsUnavailableResponse,
           "507": storageQuotaExceededResponse,
         },
       },
@@ -799,7 +801,7 @@ export const openApiSpec = {
           },
           "413": { description: "Record exceeds the AittaDB limit" },
           "429": rateLimitedResponse(true),
-          "503": storageWriteDisabledResponse,
+          "503": recordsUnavailableResponse,
           "507": storageQuotaExceededResponse,
         },
       },
@@ -817,6 +819,7 @@ export const openApiSpec = {
             ),
           },
           "429": rateLimitedResponse(true),
+          "503": recordsUnavailableResponse,
         },
       },
     },
@@ -1677,7 +1680,12 @@ export const openApiSpec = {
               "Effective deployment feature availability. These booleans are server-controlled and never reveal configuration values or secrets.",
             required: ["records", "files", "statistics", "oauthApps"],
             properties: {
-              records: { type: "boolean", default: true },
+              records: {
+                type: "boolean",
+                default: true,
+                description:
+                  "When false, record routes return 503 feature_unavailable before repository work and record controls are omitted from runtime discovery.",
+              },
               files: { type: "boolean", default: true },
               statistics: {
                 type: "boolean",

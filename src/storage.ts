@@ -945,9 +945,13 @@ function storageCollectionLinks(
           ),
         ]
       : []),
-    link(`storage-${other}`, `${config.issuerUrl}/storage/${other}`, {
-      type: HYPERMEDIA_MEDIA_TYPE,
-    }),
+    ...(kind === "files" && !config.features.records
+      ? []
+      : [
+          link(`storage-${other}`, `${config.issuerUrl}/storage/${other}`, {
+            type: HYPERMEDIA_MEDIA_TYPE,
+          }),
+        ]),
     link("item", `${config.issuerUrl}/storage/${kind}/{key}`, {
       type: HYPERMEDIA_MEDIA_TYPE,
       templated: true,

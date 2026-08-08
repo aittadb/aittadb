@@ -69,8 +69,15 @@ export function serviceHomePage(
   options: { showAdmin?: boolean; signedIn?: boolean } = {},
 ): string {
   const sessionOperationCopy = options.signedIn
-    ? "View your AittaDB identity and open your private records and files."
-    : "Sign in to view your AittaDB identity and reach your private records and files.";
+    ? metadata.features.records
+      ? "View your AittaDB identity and open your private records and files."
+      : "View your AittaDB identity and open your private files."
+    : metadata.features.records
+      ? "Sign in to view your AittaDB identity and reach your private records and files."
+      : "Sign in to view your AittaDB identity and reach your private files.";
+  const recordOperation = metadata.features.records
+    ? `<a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a>`
+    : "";
   const featureStatus = [
     ["Records", metadata.features.records],
     ["Files", metadata.features.files],
@@ -87,18 +94,22 @@ export function serviceHomePage(
     title: metadata.service,
     eyebrow: "Hosted application backend",
     heading: metadata.service,
-    summary:
-      "Identity, sessions, JSON data, and files for connected applications.",
+    summary: metadata.features.records
+      ? "Identity, sessions, JSON data, and files for connected applications."
+      : "Identity, sessions, and files for connected applications.",
     visualEyebrow: "ChatGPT sign-in boundary",
-    visualHeading: "One hosted backend for sign-in, data, and files.",
-    visualSummary:
-      "Third-party apps use AittaDB for identity, sessions, isolated JSON records, and file storage while ChatGPT credentials stay inside Sites.",
+    visualHeading: metadata.features.records
+      ? "One hosted backend for sign-in, data, and files."
+      : "One hosted backend for sign-in and files.",
+    visualSummary: metadata.features.records
+      ? "Third-party apps use AittaDB for identity, sessions, isolated JSON records, and file storage while ChatGPT credentials stay inside Sites."
+      : "Third-party apps use AittaDB for identity, sessions, and isolated file storage while ChatGPT credentials stay inside Sites.",
     social: {
       description: metadata.description,
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> ChatGPT provides browser sign-in inside ChatGPT Sites; AittaDB creates a separate local identity, issues its own credentials, and never receives or forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a>${statisticsOperation}<a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> ChatGPT provides browser sign-in inside ChatGPT Sites; AittaDB creates a separate local identity, issues its own credentials, and never receives or forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a>${recordOperation}<a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a>${statisticsOperation}<a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
       options.signedIn
         ? {
@@ -117,7 +128,14 @@ export function serviceHomePage(
   });
 }
 
-export function sessionPage(user: LocalUser, showAdmin = false): string {
+export function sessionPage(
+  user: LocalUser,
+  showAdmin = false,
+  recordsEnabled = true,
+): string {
+  const recordOperation = recordsEnabled
+    ? `<a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a>`
+    : "";
   return pageDocument({
     title: "My AittaDB session",
     eyebrow: "Authenticated identity",
@@ -125,12 +143,16 @@ export function sessionPage(user: LocalUser, showAdmin = false): string {
     summary:
       "Use the AittaDB identity created from your ChatGPT sign-in to access private data or approve a registered application's request.",
     visualEyebrow: "Identity boundary",
-    visualHeading: "Your AittaDB identity, records, and files.",
+    visualHeading: recordsEnabled
+      ? "Your AittaDB identity, records, and files."
+      : "Your AittaDB identity and files.",
     visualSummary:
       "ChatGPT establishes the upstream sign-in. AittaDB uses its own immutable user ID for sessions and persistent storage.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}<a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
-      { href: "/storage/records", label: "Open my records" },
+      ...(recordsEnabled
+        ? [{ href: "/storage/records", label: "Open my records" }]
+        : []),
       { href: "/storage/files", label: "Open my files", secondary: true },
       {
         href: "/signout-with-chatgpt?return_to=%2F",
