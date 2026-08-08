@@ -1795,6 +1795,7 @@ async function revokeEndpoint(
       const verified = await verifyAccessToken(token, config, store, client.id);
       await store.revokeAccessTokenJti(
         verified.claims.jti,
+        verified.claims.sub,
         verified.claims.exp,
         now,
       );

@@ -211,7 +211,7 @@ test("remembered-consent GET has one redirect winner under concurrent and sequen
     store,
     now,
   );
-  await store.saveConsent(user.id, client.id, "openid");
+  await store.saveConsent(user.id, client.id, "openid", now);
 
   const state = "remembered-consent-state";
   const authorize = await app.fetch(

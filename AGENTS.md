@@ -87,10 +87,10 @@ Every server unit is a reusable primitive with a small vendor-neutral contract, 
 - Client repository owns client type, name, exact redirects, origins, scopes, disablement, secret hashes, and rotation.
 - OAuth owns RFC 8628, Authorization Code/PKCE, exchange, scopes, consent, revocation, and introspection.
 - OIDC owns discovery, JWKS, ID claims, nonce, UserInfo, issuer metadata, and verification.
-- Token repository owns hashed codes, device grants, refresh families/tokens, revocations, and expiration cleanup.
+- Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own their narrowly keyed durable records.
 - Storage repository owns records and file metadata keyed by local UUID plus OAuth client ID. R2 bytes use generated physical keys.
-- Deletion job: any state blocks credentials/storage; `ADMIN_SUBJECTS` cannot start; no HTTP route exists.
+- Account deletion: any job blocks access; admins cannot start; purge is bounded, subject-only, idempotent, and internal.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
 - Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.

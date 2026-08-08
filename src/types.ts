@@ -284,7 +284,20 @@ export interface AccountDeletionJobStartResult {
   job: AccountDeletionJob;
 }
 
-export interface AuthStore {
+/** Internal bounded progress; it is never an HTTP representation. */
+export interface AccountCredentialPurgeBatchResult {
+  deletedCount: number;
+  done: boolean;
+}
+
+export interface AccountCredentialPurgeRepository {
+  purgeAccountCredentialsAndGrants(
+    subject: string,
+    limit: number,
+  ): Promise<AccountCredentialPurgeBatchResult>;
+}
+
+export interface AuthStore extends AccountCredentialPurgeRepository {
   cleanup(now: number): Promise<void>;
   rateLimit(
     key: string,
@@ -408,6 +421,7 @@ export interface AuthStore {
 
   revokeAccessTokenJti(
     jti: string,
+    subject: string,
     expiresAt: number,
     now: number,
   ): Promise<void>;

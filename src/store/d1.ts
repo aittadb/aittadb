@@ -6,12 +6,17 @@ import {
   assertAccountDeletionRetryAt,
 } from "./account-deletion";
 import {
+  accountCredentialPurgeUnavailable,
+  assertAccountCredentialPurgeLimit,
+} from "./account-credential-purge";
+import {
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
 } from "../system-client";
 import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
+  AccountCredentialPurgeBatchResult,
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
@@ -38,6 +43,19 @@ const CLEANUP_BATCH_SIZE = 500;
 const AUDIT_RETENTION_SECONDS = 90 * 24 * 60 * 60;
 const RATE_COUNTER_RETENTION_SECONDS = 5 * 60;
 const MAX_RATE_COUNTERS = 10_000;
+
+const ACCOUNT_CREDENTIAL_PURGE_DELETIONS = [
+  "DELETE FROM authorization_codes WHERE code_hash IN (SELECT code_hash FROM authorization_codes WHERE user_id = ? ORDER BY expires_at ASC, code_hash ASC LIMIT ?)",
+  "DELETE FROM authorization_requests WHERE id IN (SELECT ar.id FROM authorization_requests ar WHERE ar.user_id = ? AND NOT EXISTS (SELECT 1 FROM authorization_codes ac WHERE ac.auth_request_id = ar.id) ORDER BY ar.expires_at ASC, ar.id ASC LIMIT ?)",
+  "DELETE FROM device_grants WHERE id IN (SELECT id FROM device_grants WHERE user_id = ? ORDER BY expires_at ASC, id ASC LIMIT ?)",
+  "DELETE FROM consents WHERE rowid IN (SELECT rowid FROM consents WHERE user_id = ? ORDER BY created_at ASC, client_id ASC, scope ASC LIMIT ?)",
+  "DELETE FROM refresh_tokens WHERE id IN (SELECT id FROM refresh_tokens WHERE user_id = ? ORDER BY expires_at ASC, id ASC LIMIT ?)",
+  "DELETE FROM refresh_token_families WHERE id IN (SELECT family.id FROM refresh_token_families family WHERE family.user_id = ? AND NOT EXISTS (SELECT 1 FROM refresh_tokens token WHERE token.family_id = family.id) ORDER BY family.created_at ASC, family.id ASC LIMIT ?)",
+  "DELETE FROM revoked_access_tokens WHERE jti IN (SELECT jti FROM revoked_access_tokens WHERE user_id = ? ORDER BY revoked_at ASC, jti ASC LIMIT ?)",
+] as const;
+
+const ACCOUNT_CREDENTIAL_PURGE_REMAINS =
+  "SELECT 1 AS remaining FROM authorization_codes WHERE user_id = ?1 UNION ALL SELECT 1 FROM authorization_requests WHERE user_id = ?1 UNION ALL SELECT 1 FROM device_grants WHERE user_id = ?1 UNION ALL SELECT 1 FROM consents WHERE user_id = ?1 UNION ALL SELECT 1 FROM refresh_tokens WHERE user_id = ?1 UNION ALL SELECT 1 FROM refresh_token_families WHERE user_id = ?1 UNION ALL SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1 LIMIT 1";
 
 const UPSERT_STORAGE_RECORD_WITH_LIMITS = `
 INSERT INTO storage_records (user_id, client_id, key, value_json, created_at, updated_at)
@@ -358,6 +376,34 @@ export class D1AuthStore implements AuthStore {
       .bind(now, now, subject, attempt, now)
       .run();
     return mutationChanges(result) === 1;
+  }
+
+  async purgeAccountCredentialsAndGrants(
+    subject: string,
+    limit: number,
+  ): Promise<AccountCredentialPurgeBatchResult> {
+    assertAccountCredentialPurgeLimit(limit);
+    if (!(await this.getAccountDeletionJob(subject))) {
+      throw accountCredentialPurgeUnavailable();
+    }
+
+    let deletedCount = 0;
+    for (const sql of ACCOUNT_CREDENTIAL_PURGE_DELETIONS) {
+      const remaining = limit - deletedCount;
+      if (remaining === 0) break;
+      const result = await this.db.prepare(sql).bind(subject, remaining).run();
+      const changes = mutationChanges(result);
+      if (changes < 0 || changes > remaining) {
+        throw new Error("account_credential_purge_failed");
+      }
+      deletedCount += changes;
+    }
+
+    const remaining = await this.db
+      .prepare(ACCOUNT_CREDENTIAL_PURGE_REMAINS)
+      .bind(subject)
+      .first<Row>();
+    return { deletedCount, done: !remaining };
   }
 
   async createClient(
@@ -808,14 +854,15 @@ export class D1AuthStore implements AuthStore {
 
   async revokeAccessTokenJti(
     jti: string,
+    subject: string,
     expiresAt: number,
     now: number,
   ): Promise<void> {
     await this.db
       .prepare(
-        "INSERT INTO revoked_access_tokens (jti, expires_at, revoked_at) VALUES (?, ?, ?) ON CONFLICT(jti) DO UPDATE SET expires_at = excluded.expires_at, revoked_at = excluded.revoked_at",
+        "INSERT INTO revoked_access_tokens (jti, user_id, expires_at, revoked_at) VALUES (?, ?, ?, ?) ON CONFLICT(jti) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at, revoked_at = excluded.revoked_at WHERE revoked_access_tokens.user_id IS NULL OR revoked_access_tokens.user_id = excluded.user_id",
       )
-      .bind(jti, expiresAt, now)
+      .bind(jti, subject, expiresAt, now)
       .run();
   }
 

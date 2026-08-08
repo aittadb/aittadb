@@ -6,6 +6,10 @@ import {
   assertAccountDeletionRetryAt,
 } from "./account-deletion";
 import {
+  accountCredentialPurgeUnavailable,
+  assertAccountCredentialPurgeLimit,
+} from "./account-credential-purge";
+import {
   BROWSER_SESSION_CLIENT,
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
@@ -13,6 +17,7 @@ import {
 import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
+  AccountCredentialPurgeBatchResult,
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
@@ -41,10 +46,13 @@ export class MemoryAuthStore implements AuthStore {
   devicesByUserCodeHash = new Map<string, string>();
   authRequests = new Map<string, AuthorizationRequest>();
   authCodes = new Map<string, AuthorizationCode>();
-  consents = new Set<string>();
+  consents = new Map<string, number>();
   families = new Map<string, RefreshTokenFamily>();
   refreshTokens = new Map<string, RefreshTokenRecord>();
-  revokedJtis = new Map<string, number>();
+  revokedJtis = new Map<
+    string,
+    { subject: string; expiresAt: number; revokedAt: number }
+  >();
   accountDeletionJobs = new Map<string, AccountDeletionJob>();
   storageRecords = new Map<string, StorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
@@ -73,7 +81,7 @@ export class MemoryAuthStore implements AuthStore {
 
   async cleanup(now: number): Promise<void> {
     for (const [key, value] of this.revokedJtis) {
-      if (value <= now) this.revokedJtis.delete(key);
+      if (value.expiresAt <= now) this.revokedJtis.delete(key);
     }
     for (const [key, code] of this.authCodes) {
       if (code.expiresAt <= now) this.authCodes.delete(key);
@@ -292,6 +300,99 @@ export class MemoryAuthStore implements AuthStore {
       completedAt: now,
     });
     return true;
+  }
+
+  async purgeAccountCredentialsAndGrants(
+    subject: string,
+    limit: number,
+  ): Promise<AccountCredentialPurgeBatchResult> {
+    assertAccountCredentialPurgeLimit(limit);
+    if (!this.accountDeletionJobs.has(subject)) {
+      throw accountCredentialPurgeUnavailable();
+    }
+
+    let deletedCount = 0;
+    const remaining = () => limit - deletedCount;
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.authCodes.entries()).filter(
+        ([, code]) => code.userId === subject,
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt ||
+        left.codeHash.localeCompare(right.codeHash),
+      ([key]) => this.authCodes.delete(key),
+    );
+    const referencedRequests = new Set(
+      Array.from(this.authCodes.values()).map((code) => code.authRequestId),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.authRequests.entries()).filter(
+        ([, request]) =>
+          request.userId === subject && !referencedRequests.has(request.id),
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt || left.id.localeCompare(right.id),
+      ([key]) => this.authRequests.delete(key),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.devices.entries()).filter(
+        ([, grant]) => grant.userId === subject,
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt || left.id.localeCompare(right.id),
+      ([key, grant]) => {
+        this.devices.delete(key);
+        this.devicesByUserCodeHash.delete(grant.userCodeHash);
+      },
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.consents.entries()).filter(([key]) =>
+        key.startsWith(`${subject}:`),
+      ),
+      remaining(),
+      ([leftKey, leftAt], [rightKey, rightAt]) =>
+        leftAt - rightAt || leftKey.localeCompare(rightKey),
+      ([key]) => this.consents.delete(key),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.refreshTokens.entries()).filter(
+        ([, token]) => token.userId === subject,
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt || left.id.localeCompare(right.id),
+      ([key]) => this.refreshTokens.delete(key),
+    );
+    const referencedFamilies = new Set(
+      Array.from(this.refreshTokens.values()).map((token) => token.familyId),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.families.entries()).filter(
+        ([, family]) =>
+          family.userId === subject && !referencedFamilies.has(family.id),
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+      ([key]) => this.families.delete(key),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.revokedJtis.entries()).filter(
+        ([, revocation]) => revocation.subject === subject,
+      ),
+      remaining(),
+      ([leftJti, left], [rightJti, right]) =>
+        left.revokedAt - right.revokedAt || leftJti.localeCompare(rightJti),
+      ([jti]) => this.revokedJtis.delete(jti),
+    );
+
+    return {
+      deletedCount,
+      done: !this.hasAccountCredentialsAndGrants(subject),
+    };
   }
 
   async createClient(
@@ -518,8 +619,9 @@ export class MemoryAuthStore implements AuthStore {
     userId: string,
     clientId: string,
     scope: string,
+    now: number,
   ): Promise<void> {
-    this.consents.add(`${userId}:${clientId}:${scope}`);
+    this.consents.set(`${userId}:${clientId}:${scope}`, now);
   }
 
   async createRefreshFamily(family: RefreshTokenFamily): Promise<void> {
@@ -575,12 +677,45 @@ export class MemoryAuthStore implements AuthStore {
     return true;
   }
 
-  async revokeAccessTokenJti(jti: string, expiresAt: number): Promise<void> {
-    this.revokedJtis.set(jti, expiresAt);
+  async revokeAccessTokenJti(
+    jti: string,
+    subject: string,
+    expiresAt: number,
+    now: number,
+  ): Promise<void> {
+    const existing = this.revokedJtis.get(jti);
+    if (existing && existing.subject !== subject) return;
+    this.revokedJtis.set(jti, { subject, expiresAt, revokedAt: now });
   }
 
   async isAccessTokenJtiRevoked(jti: string): Promise<boolean> {
     return this.revokedJtis.has(jti);
+  }
+
+  private hasAccountCredentialsAndGrants(subject: string): boolean {
+    return (
+      Array.from(this.authCodes.values()).some(
+        (code) => code.userId === subject,
+      ) ||
+      Array.from(this.authRequests.values()).some(
+        (request) => request.userId === subject,
+      ) ||
+      Array.from(this.devices.values()).some(
+        (grant) => grant.userId === subject,
+      ) ||
+      Array.from(this.consents.keys()).some((key) =>
+        key.startsWith(`${subject}:`),
+      ) ||
+      Array.from(this.refreshTokens.values()).some(
+        (token) => token.userId === subject,
+      ) ||
+      Array.from(this.families.values()).some(
+        (family) => family.userId === subject,
+      ) ||
+      Array.from(this.revokedJtis.values()).some(
+        (revocation) => revocation.subject === subject,
+      )
+    );
   }
 
   async listStorageRecords(
@@ -804,6 +939,18 @@ function stripSecret(
 
 function copyAccountDeletionJob(job: AccountDeletionJob): AccountDeletionJob {
   return { ...job };
+}
+
+function deletePurgeCandidates<T>(
+  candidates: Array<[string, T]>,
+  limit: number,
+  compare: (left: [string, T], right: [string, T]) => number,
+  remove: (candidate: [string, T]) => unknown,
+): number {
+  if (limit <= 0) return 0;
+  const selected = candidates.sort(compare).slice(0, limit);
+  for (const candidate of selected) remove(candidate);
+  return selected.length;
 }
 
 function sameStorageFileOrphanRepairOwner(

@@ -1,6 +1,6 @@
 # Account-Deletion Job Repository
 
-This document defines the internal durable state and subject-authorization primitives for the future self-service account-deletion flow. They add no HTTP route, data purge, coordinator, status resource, or browser interface.
+This document defines the internal durable state, subject-authorization, and credential/grant purge primitives for the future self-service account-deletion flow. They add no HTTP route, record/file purge, coordinator, status resource, or browser interface.
 
 ## State model
 
@@ -26,8 +26,19 @@ The completed row deliberately has no foreign key to `users`: later deletion wor
 - `claimAccountDeletionJobs(now, leaseSeconds, limit)` claims only eligible pending, retryable, or lease-expired running rows. The batch is limited to 25 and the lease to five minutes. Invalid bounds fail before mutation.
 - `retryAccountDeletionJob(subject, attempt, now, retryAt)` conditionally defers one live claim; `retryAt` must be later than `now`.
 - `completeAccountDeletionJob(subject, attempt, now)` conditionally moves one live claim to its terminal state.
+- `purgeAccountCredentialsAndGrants(subject, limit)` deletes at most 100 owned credential/grant rows and returns only aggregate `deletedCount` and `done` progress. It refuses a subject without a deletion job.
 
 Claim selection is finite and oldest-eligible-first by availability time, creation time, and subject. The repository returns only the selected internal job fields. It never returns a D1 `rowid` or another deployment/physical identifier.
+
+## Credential and grant purge
+
+One purge call spends a single finite row budget in this fixed child-before-parent order: authorization codes, authorization requests with no remaining code, device grants, consents, refresh tokens, empty refresh-token families, and revoked access-token identifiers. Rows within a phase use an eligibility timestamp and stable credential identifier as tie-breakers. Repeated calls converge without a caller cursor; a completed retry returns zero deletions and `done: true`.
+
+Every deletion predicate binds the exact local subject. OAuth clients, the reserved browser client, users, account-deletion jobs, records, file metadata/bytes, audit/rate/administrative state, configuration, and signing material are outside this primitive. Client IDs only partition owned grants and are never deletion targets.
+
+AittaDB browser access credentials remain stateless, short-lived, and unpersisted. The deletion-job authorization gate prevents new browser credentials and rejects already issued ones; the purge must not introduce a session table merely to delete it. The upstream ChatGPT Sites session remains Sites-owned and outside AittaDB's credential boundary.
+
+Migration `0009_account_credential_purge.sql` adds subject-and-order indexes for every phase and attributes new revocation rows to the verified JWT subject so they can be purged safely. Pre-migration revocations remain nullable and are retained because their owner cannot be proven. This favors replay protection and tenant isolation over speculative deletion.
 
 ## Isolation and exposure
 
@@ -47,4 +58,6 @@ The shared check runs before all AittaDB token issuance and in the common access
 
 An expired running lease becomes eligible for another bounded claim. A stale claimant then loses its compare-and-set transition. Retry scheduling is explicit and durable. `completed` is terminal and repeated starts return it without changing timestamps or resurrecting work.
 
-These primitives do not delete anything. Interruption-safe purging, R2 compensation, final user removal, request authorization, and status representation are separate PLAN tasks and must not be inferred from the presence of this table.
+Purge phases are separate prepared D1 statements because D1 provides no cross-table transaction here. If one fails, earlier subject-owned deletions remain committed and a retry resumes idempotently. Parent rows stay while any child remains, including a corrupt cross-subject child reference; this can block convergence but cannot authorize cross-subject deletion. Credential creation racing the final aggregate check remains possible at statement boundaries, while the deletion gate prevents ordinary new issuance; the future coordinator must run the batch to `done` before finalization.
+
+Record/file purge, R2 compensation, final user removal, request authorization, and status representation remain separate PLAN tasks.
