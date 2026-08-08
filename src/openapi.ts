@@ -167,7 +167,7 @@ const oauthAppsOidcUnavailableResponse = {
 
 const storageQuotaExceededResponse = {
   description:
-    "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
+    "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit. A rejected file write commits no metadata; any already-uploaded uncommitted R2 object is retired immediately or queued once for private bounded repair without exposing its physical key.",
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 

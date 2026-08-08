@@ -4,8 +4,13 @@ import { loadConfig } from "../../src/config";
 import { nowSeconds, sha256 } from "../../src/crypto";
 import type { AittaDBApp } from "../../src/handler";
 import { createClientRegistration, issueTokens } from "../../src/oauth";
+import { repairStorageFileOrphans } from "../../src/storage-orphan-repair";
 import { MemoryAuthStore } from "../../src/store/memory";
-import type { StorageFileMetadata, StorageLimits } from "../../src/types";
+import type {
+  RuntimeEnv,
+  StorageFileMetadata,
+  StorageLimits,
+} from "../../src/types";
 import { createTestAittaDB, MemoryR2Bucket, testEnv } from "../helpers";
 
 const INJECTED_FAILURE = "injected-storage-internal-secret";
@@ -157,8 +162,9 @@ interface Fixture {
 
 async function fixture(
   bucket: FaultInjectingBucket = new FaultInjectingBucket(),
+  envOverrides: Partial<RuntimeEnv> = {},
 ): Promise<Fixture> {
-  const env = await testEnv({ BUCKET: bucket });
+  const env = await testEnv({ BUCKET: bucket, ...envOverrides });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new FaultInjectingStore();
   const now = nowSeconds();
@@ -319,6 +325,85 @@ test("failed metadata write and failed R2 compensation record one internal repai
   assert.equal(unavailableBody.includes(physicalKey), false);
   assert.equal(unavailableBody.includes(context.userId), false);
   assert.equal(unavailableBody.includes(context.clientId), false);
+});
+
+test("quota rejection queues failed R2 retirement and bounded repair converges", async () => {
+  const bucket = new FaultInjectingBucket();
+  const context = await fixture(bucket, {
+    STORAGE_GLOBAL_MAX_ITEMS: "10",
+    STORAGE_GLOBAL_MAX_BYTES: "1048576",
+    STORAGE_USER_MAX_ITEMS: "10",
+    STORAGE_USER_MAX_BYTES: "1048576",
+    STORAGE_NAMESPACE_MAX_ITEMS: "1",
+    STORAGE_NAMESPACE_MAX_BYTES: "1048576",
+  });
+  assert.equal(
+    (
+      await fileRequest(
+        context,
+        "PUT",
+        "retained.txt",
+        "retained",
+        "text/plain",
+      )
+    ).status,
+    200,
+  );
+  const retained = await context.store.getStorageFileMetadata(
+    context.userId,
+    context.clientId,
+    "retained.txt",
+  );
+  assert.ok(retained);
+
+  bucket.failAllDeletes = true;
+  const rejected = await fileRequest(
+    context,
+    "PUT",
+    "quota-rejected.txt",
+    "uncommitted bytes",
+    "text/plain",
+  );
+  assert.equal(rejected.status, 507);
+  const rejectedBody = await rejected.text();
+  assert.match(rejectedBody, /"error":"storage_limit_exceeded"/);
+  assert.equal(rejectedBody.includes(context.userId), false);
+  assert.equal(rejectedBody.includes(context.clientId), false);
+  assert.doesNotMatch(rejectedBody, /users\//);
+  assert.equal(
+    await context.store.getStorageFileMetadata(
+      context.userId,
+      context.clientId,
+      "quota-rejected.txt",
+    ),
+    null,
+  );
+
+  const repairs = Array.from(context.store.storageFileOrphanRepairs.values());
+  assert.equal(repairs.length, 1);
+  const repair = repairs[0];
+  assert.ok(repair);
+  assert.equal(repair.userId, context.userId);
+  assert.equal(repair.clientId, context.clientId);
+  assert.equal(rejectedBody.includes(repair.r2Key), false);
+  assert.equal(bucket.objects.size, 2);
+  assert.equal(bucket.objects.has(retained.r2Key), true);
+  assert.equal(bucket.objects.has(repair.r2Key), true);
+
+  assert.deepEqual(
+    await repairStorageFileOrphans(context.store, bucket, nowSeconds() + 1),
+    { examined: 1, resolved: 0, deferred: 1 },
+  );
+  assert.equal(context.store.storageFileOrphanRepairs.size, 1);
+
+  bucket.failAllDeletes = false;
+  assert.deepEqual(
+    await repairStorageFileOrphans(context.store, bucket, nowSeconds() + 2),
+    { examined: 1, resolved: 1, deferred: 0 },
+  );
+  assert.equal(context.store.storageFileOrphanRepairs.size, 0);
+  assert.equal(bucket.objects.size, 1);
+  assert.equal(bucket.objects.has(retained.r2Key), true);
 });
 
 test("file replacement uses copy-on-write and never pairs new bytes with old metadata", async () => {
