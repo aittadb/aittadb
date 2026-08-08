@@ -57,6 +57,22 @@ import {
 } from "./browser-session";
 import { isBrowserSessionClientId } from "./system-client";
 import {
+  adminClientControls,
+  hasAdminClientControl,
+  parseAdminClientOperation,
+  type AdminMutationResult,
+} from "./admin-clients";
+import {
+  ADMIN_SUBMISSION_TTL_SECONDS,
+  adminResultCookie,
+  clearAdminResultCookie,
+  createAdminSubmissionToken,
+  isAdminSubmissionToken,
+  openAdminResult,
+  readAdminResultCookie,
+  sealAdminResult,
+} from "./admin-result";
+import {
   authorizationConsentDocument,
   deviceApprovalDocument,
   deviceDecisionDocument,
@@ -110,6 +126,7 @@ import {
   parseScopes,
   pollDeviceToken,
   rotateRefreshToken,
+  validateClientRegistrationInput,
   verifyAccessToken,
 } from "./oauth";
 
@@ -1790,13 +1807,20 @@ async function adminClientsGet(
     identityProvider,
   );
   if (admin instanceof Response) return admin;
+  const clients = await store.listClients();
+  const resultCookie = readAdminResultCookie(request);
+  const result = resultCookie
+    ? await consumeAdminResult(resultCookie, admin.user.id, config, store)
+    : null;
   const csrf = csrfTokenForRequest(request);
   return adminClientsResponse(
     request,
     config,
-    await store.listClients(),
+    clients,
     csrf,
-    null,
+    createAdminSubmissionToken(),
+    result,
+    Boolean(resultCookie),
   );
 }
 
@@ -1816,41 +1840,91 @@ async function adminClientsPost(
   );
   if (admin instanceof Response) return admin;
   if (!requireSameOrigin(request, config.issuerUrl)) {
-    return negotiatedFormError(
+    return adminClientsError(
       request,
+      config.issuerUrl,
       "invalid_request",
       "Same-origin form submission is required",
       403,
     );
   }
-  const form = await readForm(request);
+  let form: URLSearchParams;
+  try {
+    form = await readForm(request);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "unsupported_media_type") {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Unsupported content type",
+        415,
+      );
+    }
+    if (message === "request_too_large") {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Request is too large",
+        413,
+      );
+    }
+    throw error;
+  }
   if (!validCsrf(request, form)) {
-    return negotiatedFormError(
+    return adminClientsError(
       request,
+      config.issuerUrl,
       "invalid_request",
       "CSRF validation failed",
       403,
     );
   }
-  const action = form.get("action");
-  if (action) {
-    const clientId = form.get("client_id") || "";
-    if (isBrowserSessionClientId(clientId)) {
-      return negotiatedFormError(
+  if (form.has("action")) {
+    const action = parseAdminClientOperation(form.get("action"));
+    if (!action) {
+      return adminClientsError(
         request,
+        config.issuerUrl,
+        "invalid_request",
+        "Unsupported administrative action",
+        400,
+      );
+    }
+    const clientId = form.get("client_id") || "";
+    const client = await store.getClient(clientId);
+    if (!client || isBrowserSessionClientId(clientId)) {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
         "not_found",
         "Client is unavailable",
         404,
       );
     }
-    if (
-      !["disable", "enable", "revoke_grants", "rotate_secret"].includes(action)
-    ) {
-      return negotiatedFormError(
+    if (!hasAdminClientControl(client, action)) {
+      return adminClientsError(
         request,
+        config.issuerUrl,
         "invalid_request",
-        "Unsupported administrative action",
-        400,
+        "Client operation is unavailable in its current state",
+        409,
+      );
+    }
+    const submissionToken = await claimAdminSubmission(
+      form,
+      admin.user.id,
+      store,
+    );
+    if (!submissionToken) {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Administrative submission is unavailable or already used",
+        409,
       );
     }
     if (action === "disable")
@@ -1865,28 +1939,38 @@ async function adminClientsPost(
         await sha256(secret),
         nowSeconds(),
       );
-      const csrf = csrfTokenForRequest(request);
       await auditAdminMutation(store, action, clientId, admin);
-      return adminClientsResponse(
+      return adminMutationSuccess(
         request,
         config,
-        await store.listClients(),
-        csrf,
-        secret,
+        store,
+        admin.user.id,
+        submissionToken,
+        { operation: action, clientId, secret },
       );
     }
     await auditAdminMutation(store, action, clientId, admin);
-    const csrf = csrfTokenForRequest(request);
-    return adminClientsResponse(
+    return adminMutationSuccess(
       request,
       config,
-      await store.listClients(),
-      csrf,
-      null,
+      store,
+      admin.user.id,
+      submissionToken,
+      { operation: action, clientId },
+    );
+  }
+  const requestedType = form.get("type");
+  if (requestedType !== "public" && requestedType !== "confidential") {
+    return adminClientsError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "Invalid client type",
+      400,
     );
   }
   const input: ClientRegistrationInput = {
-    type: form.get("type") === "confidential" ? "confidential" : "public",
+    type: requestedType,
     name: form.get("name") || "",
     redirectUris: splitLines(form.get("redirect_uris") || ""),
     scopes: parseScopes(
@@ -1895,15 +1979,43 @@ async function adminClientsPost(
     ),
     origins: splitLines(form.get("origins") || ""),
   };
+  const validationError = validateClientRegistrationInput(input);
+  if (validationError) {
+    return adminClientsError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      validationError,
+      400,
+    );
+  }
+  const submissionToken = await claimAdminSubmission(
+    form,
+    admin.user.id,
+    store,
+  );
+  if (!submissionToken) {
+    return adminClientsError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "Administrative submission is unavailable or already used",
+      409,
+    );
+  }
   const result = await createClientRegistration(input, store, nowSeconds());
   await auditAdminMutation(store, "create", result.client.id, admin);
-  const csrf = csrfTokenForRequest(request);
-  return adminClientsResponse(
+  return adminMutationSuccess(
     request,
     config,
-    await store.listClients(),
-    csrf,
-    result.secret,
+    store,
+    admin.user.id,
+    submissionToken,
+    {
+      operation: "create",
+      clientId: result.client.id,
+      ...(result.secret ? { secret: result.secret } : {}),
+    },
   );
 }
 
@@ -1917,11 +2029,20 @@ async function requireAdminIdentity(
   if (!identity) {
     if (acceptsHtml(request))
       return requireSitesIdentity(request, identityProvider) as Response;
-    return oauthError(
+    return hypermediaError(
+      request,
       "login_required",
       "ChatGPT sign-in inside ChatGPT Sites is required",
       401,
       {
+        links: [
+          link("service", config.issuerUrl, {
+            type: HYPERMEDIA_MEDIA_TYPE,
+          }),
+          link("documentation", `${config.issuerUrl}/docs`, {
+            type: "text/html",
+          }),
+        ],
         actions: [
           action(
             "begin-session",
@@ -1945,10 +2066,21 @@ async function requireAdminIdentity(
           ),
           { status: 403 },
         )
-      : oauthError(
+      : hypermediaError(
+          request,
           "forbidden",
           "Administrative access is not allowed for this account",
           403,
+          {
+            links: [
+              link("service", config.issuerUrl, {
+                type: HYPERMEDIA_MEDIA_TYPE,
+              }),
+              link("documentation", `${config.issuerUrl}/docs`, {
+                type: "text/html",
+              }),
+            ],
+          },
         );
   }
   return {
@@ -1983,15 +2115,26 @@ function adminClientsResponse(
   config: ReturnType<typeof loadConfig>,
   clients: readonly ClientView[],
   csrf: string,
-  newSecret: string | null,
+  submissionToken: string,
+  result: AdminMutationResult | null,
+  clearResult = false,
 ): Response {
-  const headers = { "set-cookie": csrfCookie(csrf) };
+  const headers = new Headers({ "set-cookie": csrfCookie(csrf) });
+  if (clearResult) headers.append("set-cookie", clearAdminResultCookie());
   if (acceptsHtml(request)) {
-    return html(adminClientsPage(clients, csrf, newSecret), { headers });
+    return html(adminClientsPage(clients, csrf, submissionToken, result), {
+      headers,
+    });
   }
   return hypermediaJson(
     request,
-    adminClientsDocument(config.issuerUrl, clients, csrf, newSecret),
+    adminClientsDocument(
+      config.issuerUrl,
+      clients,
+      csrf,
+      submissionToken,
+      result,
+    ),
     { headers },
   );
 }
@@ -2000,13 +2143,20 @@ function adminClientsDocument(
   issuer: string,
   clients: readonly ClientView[],
   csrf: string,
-  newSecret: string | null,
+  submissionToken: string,
+  result: AdminMutationResult | null,
 ) {
   const operationFields = (clientId: string, operation: string) => [
     field("csrf_token", "CSRF token", "string", "body", {
       required: true,
       secret: true,
       value: csrf,
+    }),
+    field("submission_token", "One-time submission token", "string", "body", {
+      required: true,
+      secret: true,
+      value: submissionToken,
+      description: "Use this value once and refresh the collection after use.",
     }),
     field("action", "Action", "string", "body", {
       required: true,
@@ -2032,6 +2182,19 @@ function adminClientsDocument(
             secret: true,
             value: csrf,
           }),
+          field(
+            "submission_token",
+            "One-time submission token",
+            "string",
+            "body",
+            {
+              required: true,
+              secret: true,
+              value: submissionToken,
+              description:
+                "Use this value once and refresh the collection after use.",
+            },
+          ),
           field("name", "Client display name", "string", "body", {
             required: true,
             max_length: 120,
@@ -2061,44 +2224,17 @@ function adminClientsDocument(
     ),
   ];
   for (const client of clients) {
-    actions.push(
-      action(
-        client.disabledAt ? "enable-client" : "disable-client",
-        client.disabledAt ? `Enable ${client.name}` : `Disable ${client.name}`,
-        "POST",
-        `${issuer}/admin/clients`,
-        {
-          type: "application/x-www-form-urlencoded",
-          authorization: { scheme: "sites-session" },
-          fields: operationFields(
-            client.id,
-            client.disabledAt ? "enable" : "disable",
-          ),
-        },
-      ),
-      action(
-        "revoke-client-grants",
-        `Revoke grants for ${client.name}`,
-        "POST",
-        `${issuer}/admin/clients`,
-        {
-          type: "application/x-www-form-urlencoded",
-          authorization: { scheme: "sites-session" },
-          fields: operationFields(client.id, "revoke_grants"),
-        },
-      ),
-    );
-    if (client.type === "confidential") {
+    for (const control of adminClientControls(client)) {
       actions.push(
         action(
-          "rotate-client-secret",
-          `Rotate secret for ${client.name}`,
+          control.name,
+          `${control.label} ${client.name}`,
           "POST",
           `${issuer}/admin/clients`,
           {
             type: "application/x-www-form-urlencoded",
             authorization: { scheme: "sites-session" },
-            fields: operationFields(client.id, "rotate_secret"),
+            fields: operationFields(client.id, control.operation),
           },
         ),
       );
@@ -2118,8 +2254,20 @@ function adminClientsDocument(
         origins: [...client.origins],
         created_at: client.createdAt,
       })),
-      ...(newSecret
-        ? { new_client_secret: newSecret, secret_displayed_once: true }
+      ...(result
+        ? {
+            operation_result: {
+              operation: result.operation,
+              client_id: result.clientId,
+            },
+            ...(result.secret
+              ? {
+                  new_client_secret_client_id: result.clientId,
+                  new_client_secret: result.secret,
+                  secret_displayed_once: true,
+                }
+              : {}),
+          }
         : {}),
     },
     links: [
@@ -2130,6 +2278,96 @@ function adminClientsDocument(
       link("documentation", `${issuer}/docs`, { type: "text/html" }),
     ],
     actions,
+  });
+}
+
+async function adminMutationSuccess(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore,
+  adminSubject: string,
+  submissionToken: string,
+  result: AdminMutationResult,
+): Promise<Response> {
+  if (acceptsHtml(request)) {
+    const sealedResult = await sealAdminResult(
+      submissionToken,
+      result,
+      adminSubject,
+      config,
+      nowSeconds(),
+    );
+    const response = redirect("/admin/clients", 303);
+    response.headers.append("set-cookie", adminResultCookie(sealedResult));
+    return response;
+  }
+  return adminClientsResponse(
+    request,
+    config,
+    await store.listClients(),
+    csrfTokenForRequest(request),
+    createAdminSubmissionToken(),
+    result,
+  );
+}
+
+async function claimAdminSubmission(
+  form: URLSearchParams,
+  adminSubject: string,
+  store: AuthStore,
+): Promise<string | null> {
+  const submissionToken = form.get("submission_token");
+  if (!isAdminSubmissionToken(submissionToken)) return null;
+  const now = nowSeconds();
+  return (await store.claimAdminOperationSubmission(
+    await sha256(submissionToken),
+    adminSubject,
+    now,
+    now + ADMIN_SUBMISSION_TTL_SECONDS,
+  ))
+    ? submissionToken
+    : null;
+}
+
+async function consumeAdminResult(
+  cookie: string,
+  adminSubject: string,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore,
+): Promise<AdminMutationResult | null> {
+  const now = nowSeconds();
+  const opened = await openAdminResult(cookie, adminSubject, config, now);
+  if (!opened) return null;
+  return (await store.consumeAdminOperationResult(
+    await sha256(opened.submissionToken),
+    adminSubject,
+    now,
+  ))
+    ? opened.result
+    : null;
+}
+
+function adminClientsError(
+  request: Request,
+  issuer: string,
+  error: string,
+  description: string,
+  status: number,
+): Response {
+  if (acceptsHtml(request)) {
+    return html(
+      errorPage(titleForError(error, status), description, { status, error }),
+      { status },
+    );
+  }
+  return hypermediaError(request, error, description, status, {
+    links: [
+      link("service", issuer, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("client-collection", `${issuer}/admin/clients`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("documentation", `${issuer}/docs`, { type: "text/html" }),
+    ],
   });
 }
 

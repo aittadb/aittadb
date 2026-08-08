@@ -2921,10 +2921,12 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
     }),
   );
   const adminCsrf = cookieValue(admin!, "aittadb_csrf");
-  assert.equal(
-    (await admin!.text()).includes(BROWSER_SESSION_CLIENT_ID),
-    false,
-  );
+  const adminHtml = await admin!.text();
+  const adminSubmission = adminHtml.match(
+    /name="submission_token" value="([^"]+)"/,
+  )?.[1];
+  assert.match(adminSubmission ?? "", /^[A-Za-z0-9_-]{32}$/);
+  assert.equal(adminHtml.includes(BROWSER_SESSION_CLIENT_ID), false);
   const guessedMutation = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
       method: "POST",
@@ -2935,6 +2937,7 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
       },
       body: form({
         csrf_token: adminCsrf,
+        submission_token: adminSubmission!,
         action: "disable",
         client_id: BROWSER_SESSION_CLIENT_ID,
       }),

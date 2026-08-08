@@ -456,6 +456,10 @@ test("administration uses the signed-in allowlisted subject and audits mutations
   assert.doesNotMatch(clientsHtml, /Administrator access key/);
 
   const clientsCsrf = cookieValue(clients!, "aittadb_csrf");
+  const submissionToken = clientsHtml.match(
+    /name="submission_token" value="([^"]+)"/,
+  )?.[1];
+  assert.match(submissionToken ?? "", /^[A-Za-z0-9_-]{32}$/);
   const created = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
       method: "POST",
@@ -467,6 +471,7 @@ test("administration uses the signed-in allowlisted subject and audits mutations
       },
       body: form({
         csrf_token: clientsCsrf,
+        submission_token: submissionToken!,
         name: "Audited client",
         type: "public",
         redirect_uris: "https://client.example.test/callback",
@@ -475,7 +480,8 @@ test("administration uses the signed-in allowlisted subject and audits mutations
       }),
     }),
   );
-  assert.equal(created?.status, 200);
+  assert.equal(created?.status, 303);
+  assert.equal(created?.headers.get("location"), "/admin/clients");
   const mutationAudit = store.audits.at(-1);
   assert.equal(mutationAudit?.type, "admin.client.mutated");
   assert.equal(mutationAudit?.data.action, "create");

@@ -100,6 +100,7 @@ test("D1 authorization requests have one terminal winner against migrated SQL", 
       "0002_browser_session_client.sql",
       "0003_browser_session_openid.sql",
       "0004_security_indexes.sql",
+      "0005_admin_submission_results.sql",
     ]) {
       sqlite.exec(
         await readFile(
@@ -166,6 +167,73 @@ test("D1 authorization requests have one terminal winner against migrated SQL", 
         null,
         10,
       ),
+      false,
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("D1 admin submissions gate mutation and result replay atomically", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    for (const name of [
+      "0001_initial.sql",
+      "0002_browser_session_client.sql",
+      "0003_browser_session_openid.sql",
+      "0004_security_indexes.sql",
+      "0005_admin_submission_results.sql",
+    ]) {
+      sqlite.exec(
+        await readFile(
+          new URL(`../../db/migrations/${name}`, import.meta.url),
+          "utf8",
+        ),
+      );
+    }
+    sqlite.exec(
+      "INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES ('user', 'admin@example.test', 'Admin', 1, 1)",
+    );
+    const store = new D1AuthStore(sqliteD1(sqlite));
+    const claims = await Promise.all([
+      store.claimAdminOperationSubmission("submission-hash", "user", 10, 20),
+      store.claimAdminOperationSubmission("submission-hash", "user", 10, 20),
+    ]);
+    assert.equal(claims.filter(Boolean).length, 1);
+    assert.equal(
+      await store.consumeAdminOperationResult(
+        "submission-hash",
+        "different-user",
+        11,
+      ),
+      false,
+    );
+    const resultReads = await Promise.all([
+      store.consumeAdminOperationResult("submission-hash", "user", 11),
+      store.consumeAdminOperationResult("submission-hash", "user", 11),
+    ]);
+    assert.equal(resultReads.filter(Boolean).length, 1);
+    assert.deepEqual(
+      {
+        ...sqlite
+          .prepare(
+            "SELECT token_hash, user_id, expires_at, result_consumed_at FROM admin_operation_submissions",
+          )
+          .get(),
+      },
+      {
+        token_hash: "submission-hash",
+        user_id: "user",
+        expires_at: 20,
+        result_consumed_at: 11,
+      },
+    );
+    const columns = sqlite
+      .prepare("PRAGMA table_info(admin_operation_submissions)")
+      .all()
+      .map((column) => String(column.name));
+    assert.equal(
+      columns.some((name) => /secret|plaintext|value/.test(name)),
       false,
     );
   } finally {

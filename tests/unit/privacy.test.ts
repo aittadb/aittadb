@@ -54,6 +54,9 @@ test("explicit privacy configuration needs no user lookup and renders escaped ac
     html,
     /<nav class="footer-links" aria-label="Project information"><a href="\/privacy">Privacy<\/a>/,
   );
+  assert.match(html, /SameSite=Strict encrypted result cookie/);
+  assert.match(html, /never put in a URL or durable plaintext storage/);
+  assert.match(html, /submission hashes become eligible.*15 minutes/);
 });
 
 test("privacy policy omits optional controller and contact values that are unset", async () => {

@@ -6,6 +6,11 @@ import type {
   LocalUser,
 } from "./types";
 import type { PrivacyPolicyData } from "./privacy";
+import {
+  adminClientControls,
+  type AdminClientControl,
+  type AdminMutationResult,
+} from "./admin-clients";
 
 export interface PageAction {
   href: string;
@@ -307,12 +312,17 @@ export function consentPage(
 export function adminClientsPage(
   clients: readonly ClientView[],
   csrf: string,
-  secret: string | null,
+  submissionToken: string,
+  result: AdminMutationResult | null,
 ): string {
   const rows = clients
     .map((client) => {
       const status = client.disabledAt ? "disabled" : "active";
-      return `<tr><td><code>${escapeHtml(client.id)}</code></td><td>${escapeHtml(client.name)}</td><td>${escapeHtml(client.type)}</td><td>${escapeHtml(status)}</td><td><code>${escapeHtml(client.scopes.join(" "))}</code></td><td class="table-actions">${adminAction(client.id, csrf, client.disabledAt ? "enable" : "disable", client.disabledAt ? "Enable" : "Disable")}${client.type === "confidential" ? adminAction(client.id, csrf, "rotate_secret", "Rotate secret") : ""}${adminAction(client.id, csrf, "revoke_grants", "Revoke grants")}</td></tr>`;
+      return `<tr><td><code>${escapeHtml(client.id)}</code></td><td>${escapeHtml(client.name)}</td><td>${escapeHtml(client.type)}</td><td>${escapeHtml(status)}</td><td><code>${escapeHtml(client.scopes.join(" "))}</code></td><td class="table-actions">${adminClientControls(
+        client,
+      )
+        .map((control) => adminAction(client, csrf, submissionToken, control))
+        .join("")}</td></tr>`;
     })
     .join("");
   return pageDocument({
@@ -325,8 +335,8 @@ export function adminClientsPage(
     visualHeading: "Trust begins with narrow permissions.",
     visualSummary:
       "Redirects, scopes, origins, secrets, and active grants remain bounded per registered client.",
-    tone: secret ? "warning" : "default",
-    body: `${secret ? alertMessage(`New client secret, shown once: ${secret}`) : ""}<form method="post" action="/admin/clients" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="name">Client name</label><input id="name" name="name" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option></select><label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" required></textarea><label for="scopes">Allowed scopes</label><input id="scopes" name="scopes" value="openid email profile offline_access storage.read storage.write storage.delete"><label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea><div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
+    tone: result?.secret ? "warning" : result ? "success" : "default",
+    body: `${adminResultNotice(result)}<form method="post" action="/admin/clients" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="submission_token" value="${escapeHtml(submissionToken)}"><label for="name">Client name</label><input id="name" name="name" maxlength="120" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option></select><label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" required></textarea><label for="scopes">Allowed scopes</label><input id="scopes" name="scopes" value="openid email profile offline_access storage.read storage.write storage.delete"><label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea><div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
   });
 }
 
@@ -445,12 +455,32 @@ function brandWordmark(): string {
 }
 
 function adminAction(
-  clientId: string,
+  client: ClientView,
   csrf: string,
-  action: string,
-  label: string,
+  submissionToken: string,
+  control: AdminClientControl,
 ): string {
-  return `<form method="post" action="/admin/clients"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="client_id" value="${escapeHtml(clientId)}"><button class="secondary compact" name="action" value="${escapeHtml(action)}" type="submit">${escapeHtml(label)}</button></form>`;
+  const label = `${control.label} ${client.name}`;
+  return `<form method="post" action="/admin/clients" aria-label="${escapeHtml(label)}"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="submission_token" value="${escapeHtml(submissionToken)}"><input type="hidden" name="client_id" value="${escapeHtml(client.id)}"><button class="secondary compact" name="action" value="${escapeHtml(control.operation)}" type="submit">${escapeHtml(control.label)}</button></form>`;
+}
+
+function adminResultNotice(result: AdminMutationResult | null): string {
+  if (!result) return "";
+  const client = `<code>${escapeHtml(result.clientId)}</code>`;
+  if (result.secret) {
+    return `<p class="notice" role="status">New secret for client ${client}, shown once: <code>${escapeHtml(result.secret)}</code></p>`;
+  }
+  const message =
+    result.operation === "create"
+      ? `Client ${client} created.`
+      : result.operation === "enable"
+        ? `Client ${client} enabled.`
+        : result.operation === "disable"
+          ? `Client ${client} disabled.`
+          : result.operation === "revoke_grants"
+            ? `Active grants for client ${client} revoked.`
+            : `Client ${client} updated.`;
+  return `<p class="notice" role="status">${message}</p>`;
 }
 
 function alertMessage(message: string): string {

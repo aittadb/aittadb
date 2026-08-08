@@ -271,6 +271,17 @@ export interface AuthStore {
     now: number,
   ): Promise<void>;
   revokeClientGrants(clientId: string, now: number): Promise<void>;
+  claimAdminOperationSubmission(
+    tokenHash: string,
+    userId: string,
+    now: number,
+    expiresAt: number,
+  ): Promise<boolean>;
+  consumeAdminOperationResult(
+    tokenHash: string,
+    userId: string,
+    now: number,
+  ): Promise<boolean>;
 
   createDeviceGrant(grant: DeviceGrant): Promise<void>;
   getDeviceGrantByDeviceHash(hash: string): Promise<DeviceGrant | null>;

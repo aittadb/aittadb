@@ -152,6 +152,11 @@ export class D1AuthStore implements AuthStore {
         now - RATE_COUNTER_RETENTION_SECONDS,
         CLEANUP_BATCH_SIZE,
       ],
+      [
+        "DELETE FROM admin_operation_submissions WHERE rowid IN (SELECT rowid FROM admin_operation_submissions WHERE expires_at <= ? ORDER BY expires_at ASC, token_hash ASC LIMIT ?)",
+        now,
+        CLEANUP_BATCH_SIZE,
+      ],
     ];
     for (const [sql, ...values] of deletions) {
       await this.db
@@ -369,6 +374,35 @@ export class D1AuthStore implements AuthStore {
       .prepare("UPDATE refresh_tokens SET revoked_at = ? WHERE client_id = ?")
       .bind(now, clientId)
       .run();
+  }
+
+  async claimAdminOperationSubmission(
+    tokenHash: string,
+    userId: string,
+    now: number,
+    expiresAt: number,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        "INSERT INTO admin_operation_submissions (token_hash, user_id, created_at, expires_at, result_consumed_at) VALUES (?, ?, ?, ?, NULL) ON CONFLICT(token_hash) DO NOTHING",
+      )
+      .bind(tokenHash, userId, now, expiresAt)
+      .run();
+    return mutationChanges(result) === 1;
+  }
+
+  async consumeAdminOperationResult(
+    tokenHash: string,
+    userId: string,
+    now: number,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        "UPDATE admin_operation_submissions SET result_consumed_at = ? WHERE token_hash = ? AND user_id = ? AND result_consumed_at IS NULL AND expires_at > ?",
+      )
+      .bind(now, tokenHash, userId, now)
+      .run();
+    return mutationChanges(result) === 1;
   }
 
   async createDeviceGrant(grant: DeviceGrant): Promise<void> {

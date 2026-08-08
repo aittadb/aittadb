@@ -39,6 +39,14 @@ export class MemoryAuthStore implements AuthStore {
   storageRecords = new Map<string, StorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
   counters = new Map<string, { count: number; windowStart: number }>();
+  adminOperationSubmissions = new Map<
+    string,
+    {
+      userId: string;
+      expiresAt: number;
+      resultConsumedAt: number | null;
+    }
+  >();
   audits: Array<{ type: string; data: Record<string, unknown>; now: number }> =
     [];
 
@@ -88,6 +96,10 @@ export class MemoryAuthStore implements AuthStore {
     }
     for (const [key, counter] of this.counters) {
       if (counter.windowStart <= now - 300) this.counters.delete(key);
+    }
+    for (const [key, submission] of this.adminOperationSubmissions) {
+      if (submission.expiresAt <= now)
+        this.adminOperationSubmissions.delete(key);
     }
     this.audits = this.audits.filter(
       (event) => event.now > now - 90 * 24 * 60 * 60,
@@ -216,6 +228,39 @@ export class MemoryAuthStore implements AuthStore {
         }
       }
     }
+  }
+
+  async claimAdminOperationSubmission(
+    tokenHash: string,
+    userId: string,
+    _now: number,
+    expiresAt: number,
+  ): Promise<boolean> {
+    if (this.adminOperationSubmissions.has(tokenHash)) return false;
+    this.adminOperationSubmissions.set(tokenHash, {
+      userId,
+      expiresAt,
+      resultConsumedAt: null,
+    });
+    return true;
+  }
+
+  async consumeAdminOperationResult(
+    tokenHash: string,
+    userId: string,
+    now: number,
+  ): Promise<boolean> {
+    const submission = this.adminOperationSubmissions.get(tokenHash);
+    if (
+      !submission ||
+      submission.userId !== userId ||
+      submission.expiresAt <= now ||
+      submission.resultConsumedAt !== null
+    ) {
+      return false;
+    }
+    submission.resultConsumedAt = now;
+    return true;
   }
 
   async createDeviceGrant(grant: DeviceGrant): Promise<void> {

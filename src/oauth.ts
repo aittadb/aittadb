@@ -75,17 +75,37 @@ export async function createClientRegistration(
   store: AuthStore,
   now: number,
 ): Promise<{ client: ClientView; secret: string | null }> {
-  if (!input.name.trim()) throw new Error("Client name is required");
-  if (input.type !== "public" && input.type !== "confidential")
-    throw new Error("Invalid client type");
-  for (const uri of input.redirectUris) assertExactUri(uri);
-  for (const origin of input.origins) assertOrigin(origin);
-  const scopeError = validateRawScopes(input.scopes);
-  if (scopeError) throw new Error(scopeError);
+  const validationError = validateClientRegistrationInput(input);
+  if (validationError) throw new Error(validationError);
   const secret = input.type === "confidential" ? randomToken(32) : null;
   const secretHash = secret ? await sha256(secret) : null;
   const client = await store.createClient(input, secretHash, now);
   return { client, secret };
+}
+
+export function validateClientRegistrationInput(
+  input: ClientRegistrationInput,
+): string | null {
+  const name = input.name.trim();
+  if (!name) return "Client name is required";
+  if (name.length > 120) return "Client name must be at most 120 characters";
+  if (input.type !== "public" && input.type !== "confidential")
+    return "Invalid client type";
+  for (const uri of input.redirectUris) {
+    try {
+      assertExactUri(uri);
+    } catch (error) {
+      return knownValidationMessage(error, "Invalid redirect URI");
+    }
+  }
+  for (const origin of input.origins) {
+    try {
+      assertOrigin(origin);
+    } catch (error) {
+      return knownValidationMessage(error, "Invalid origin");
+    }
+  }
+  return validateRawScopes(input.scopes);
 }
 
 export async function issueTokens(params: {
@@ -581,6 +601,17 @@ function assertOrigin(value: string): void {
   const url = new URL(value);
   if (url.origin !== value)
     throw new Error("Origin must be exact scheme, host, and port");
+}
+
+function knownValidationMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  return [
+    "Unsupported redirect URI",
+    "Redirect URI must not include a fragment",
+    "Origin must be exact scheme, host, and port",
+  ].includes(error.message)
+    ? error.message
+    : fallback;
 }
 
 function redirectOAuthError(

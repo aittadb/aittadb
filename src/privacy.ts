@@ -161,7 +161,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
       title: "Retention and deletion",
       paragraphs: [
         `Access tokens normally expire after ${formatDuration(config.accessTokenTtlSeconds)}, authorization codes after ${formatDuration(config.authCodeTtlSeconds)}, device grants after ${formatDuration(config.deviceCodeTtlSeconds)}, and refresh tokens after ${formatDuration(config.refreshTokenTtlSeconds)}. These periods are deployment-configurable. Expired protocol rows become eligible for bounded, traffic-dependent cleanup and may remain until cleanup runs.`,
-        "Audit events become eligible for bounded cleanup after 90 days. One-minute rate-limit counters become eligible after five minutes. Local identities, remembered consents, client metadata, and application content do not share one automatic expiry period.",
+        "One-time administrator submission hashes become eligible for bounded cleanup after 15 minutes. Audit events become eligible after 90 days, and one-minute rate-limit counters after five minutes. Local identities, remembered consents, client metadata, and application content do not share one automatic expiry period.",
         "Authorized users and applications can delete individual records and files. Other data is retained while needed to provide or secure the deployment, until the deployment is removed, or until the operator completes an applicable deletion request. The current MVP has no self-service whole-account deletion workflow.",
       ],
     },
@@ -169,7 +169,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
       id: "cookies",
       title: "Cookies and browser storage",
       paragraphs: [
-        "AittaDB sets one strictly necessary secure, HttpOnly, SameSite=Lax CSRF cookie for up to 15 minutes when browser forms need protection. Core AittaDB uses no advertising or analytics cookies and stores no authoritative state in localStorage or sessionStorage.",
+        "AittaDB sets a strictly necessary secure, HttpOnly, SameSite=Lax CSRF cookie for up to 15 minutes when browser forms need protection. After a successful administrator form submission, it may also set a secure, HttpOnly, SameSite=Strict encrypted result cookie for up to five minutes so the redirected page can show the result once without repeating the operation. A confidential client secret is encrypted in that cookie, never put in a URL or durable plaintext storage, and disappears after the first valid result read. Core AittaDB uses no advertising or analytics cookies and stores no authoritative state in localStorage or sessionStorage.",
         "ChatGPT Sites and ChatGPT sign-in may use separate platform cookies governed by OpenAI's applicable terms and privacy information.",
       ],
     },

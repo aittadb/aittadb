@@ -82,6 +82,8 @@ The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is
 
 To enable administration, sign in at `/session`, copy the deployment-local AittaDB UUID shown there, and add that canonical UUIDv4 to `ADMIN_SUBJECTS` through Sites configuration. The current trusted Sites session can then open `/admin/clients`; no separate administrator password or key is used. Keep the list narrow. UUID allowlisting does not eliminate reassignment risk because AittaDB still locates that UUID by upstream email.
 
+Request `/admin/clients` with `Accept: text/html` for the human interface or `Accept: application/vnd.aittadb+json; version=0.1` for machine controls. Both expose create, the currently valid enable/disable transition, confidential-only secret rotation, and grant revocation. Follow the returned action target and fields, including the one-time submission token, rather than constructing an operation. JSON returns a no-store mutation result directly. HTML returns `303 See Other`, then displays the result once on the redirected collection GET so refreshing does not repeat the POST. Save a returned confidential secret immediately; it never enters the URL or durable plaintext storage and later collection reads never repeat it.
+
 ## AittaDB Storage
 
 Register a client that is allowed to request `storage.read`, `storage.write`, and `storage.delete`. After the user approves those local scopes, use the returned access token with the storage API.

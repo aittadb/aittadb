@@ -555,6 +555,7 @@ async function migratedDatabase(): Promise<{
     "0002_browser_session_client.sql",
     "0003_browser_session_openid.sql",
     "0004_security_indexes.sql",
+    "0005_admin_submission_results.sql",
   ]) {
     sqlite.exec(
       await readFile(

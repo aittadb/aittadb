@@ -320,7 +320,70 @@ test("OpenAPI documents implemented security controls", () => {
       ],
       true,
     );
+    assert.ok(
+      "406" in operationResponses("/admin/clients", method),
+      `${method.toUpperCase()} administration must document negotiation failure`,
+    );
   }
+  const adminGetDescription = String(
+    openApiOperation("/admin/clients", "get").description,
+  );
+  assert.match(adminGetDescription, /same availability policy/);
+  assert.match(adminGetDescription, /only confidential clients/);
+  const adminPostResponses = operationResponses("/admin/clients", "post");
+  for (const status of ["409", "413", "415"]) {
+    assert.ok(
+      status in adminPostResponses,
+      `admin POST must document ${status}`,
+    );
+  }
+  assert.ok("303" in adminPostResponses);
+  assert.match(
+    String(asObject(adminPostResponses["303"], "admin redirect").description),
+    /does not repeat the POST/,
+  );
+  assert.match(
+    String(asObject(adminPostResponses["409"], "admin conflict").description),
+    /already used/,
+  );
+  for (const schemaName of [
+    "OAuthClientCreateInput",
+    "OAuthClientOperationInput",
+  ]) {
+    const schema = openApiSchema(schemaName);
+    assert.ok(
+      Array.isArray(schema.required) &&
+        schema.required.includes("submission_token"),
+      `${schemaName} must require the advertised one-time submission`,
+    );
+  }
+  const adminCollection = openApiSchema("OAuthClientCollectionDocument");
+  const collectionVariants = adminCollection.allOf;
+  assert.ok(Array.isArray(collectionVariants));
+  const collectionShape = asObject(
+    collectionVariants[1],
+    "OAuthClientCollectionDocument shape",
+  );
+  const adminCollectionData = asObject(
+    asObject(collectionShape.properties, "admin collection properties").data,
+    "admin collection data",
+  );
+  const adminDataProperties = asObject(
+    adminCollectionData.properties,
+    "admin collection data properties",
+  );
+  assert.equal(
+    asObject(adminDataProperties.new_client_secret, "new client secret")
+      .readOnly,
+    true,
+  );
+  assert.equal(
+    asObject(
+      adminDataProperties.new_client_secret_client_id,
+      "new client secret client id",
+    ).format,
+    "uuid",
+  );
 });
 
 async function routeSources(): Promise<{

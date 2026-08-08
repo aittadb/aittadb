@@ -41,11 +41,11 @@ No fixed data-residency promise is made. [OpenAI's Sites documentation](https://
 
 Users can delete individual records and files when their current session or approved client has the required permission. The MVP has no self-service account-deletion operation; requests concerning the local identity or remaining data must be sent to the published privacy contact.
 
-Records and files remain until an authorized user deletes them or the operator ends or removes the deployment, subject to provider lifecycle, backups, legal duties, and technical recovery periods. OAuth access-token, authorization-code, device-code, and refresh-token lifetimes are configurable; expired protocol state becomes eligible for bounded cleanup. Audit events become cleanup-eligible after 90 days and one-minute rate counters after five minutes. Cleanup is bounded, scheduled outside responses, and depends on traffic and platform execution, so eligibility is not a guarantee of immediate physical deletion.
+Records and files remain until an authorized user deletes them or the operator ends or removes the deployment, subject to provider lifecycle, backups, legal duties, and technical recovery periods. OAuth access-token, authorization-code, device-code, and refresh-token lifetimes are configurable; expired protocol state becomes eligible for bounded cleanup. One-time administrator submission hashes become cleanup-eligible after 15 minutes, audit events after 90 days, and one-minute rate counters after five minutes. Cleanup is bounded, scheduled outside responses, and depends on traffic and platform execution, so eligibility is not a guarantee of immediate physical deletion.
 
 ## Cookies
 
-AittaDB core uses a strictly necessary host-only, secure, `HttpOnly`, `SameSite=Lax` CSRF cookie for browser forms. It expires after 15 minutes and is not an authoritative login session. The core sets no analytics or advertising cookies. ChatGPT Sites may use its own cookies for platform access and ChatGPT sign-in under OpenAI's notices and settings.
+AittaDB core uses a strictly necessary host-only, secure, `HttpOnly`, `SameSite=Lax` CSRF cookie for browser forms. It expires after 15 minutes and is not an authoritative login session. After a successful administrator mutation, AittaDB may also use a secure, `HttpOnly`, `SameSite=Strict` encrypted result cookie for up to five minutes. The redirected page atomically consumes it once; any confidential client secret in that result is never put in a URL or durable plaintext storage. The core sets no analytics or advertising cookies. ChatGPT Sites may use its own cookies for platform access and ChatGPT sign-in under OpenAI's notices and settings.
 
 ## Rights
 
