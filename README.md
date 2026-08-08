@@ -4,17 +4,21 @@
 
 [GitHub repository](https://github.com/aittadb/aittadb)
 
-**A third-party application backend that developers can deploy entirely on OpenAI-hosted ChatGPT Sites.**
+**A source-available application backend that developers can deploy entirely on OpenAI-hosted ChatGPT Sites.**
 
-AittaDB currently provides identity, authentication, persistent JSON data, and object storage through a self-contained ChatGPT Sites deployment. It is a third-party project, not an official OpenAI product. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Developers can deploy their own separate AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure.
+AittaDB currently provides identity, authentication, persistent JSON data, and object storage through a self-contained ChatGPT Sites deployment. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Developers can deploy their own separate AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure.
 
 > **Experimental:** AittaDB is under active development. Its interfaces and operational requirements may change before a stable release.
 
-It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
+AittaDB is not affiliated with or endorsed by OpenAI. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
 
 The service creates its own user record with an immutable UUID subject. The upstream email address is used only to locate or create that AittaDB user. ChatGPT Sites does not currently document a stable upstream subject, so an email change can create a new AittaDB identity and a reassigned address can inherit the existing identity and namespace. This remains a risk for ordinary users and administrators: putting that local UUID in `ADMIN_SUBJECTS` does not change how it is located. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
 
-Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication.
+## Licensing
+
+Current public releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication. An MIT license for immediate use of a current release is also available commercially from the maintainer; contact [@thejhh](https://github.com/thejhh) for terms.
+
+Because a current public release remains under FSL until its conversion date, describe that release as **source-available**, not open source. A version already converted to MIT, or licensed directly under MIT, is open-source software under the MIT License.
 
 ## Built for ChatGPT Sites
 

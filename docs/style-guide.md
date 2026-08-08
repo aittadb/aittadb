@@ -23,13 +23,13 @@ Lead with **hosted application backend for third-party apps**. Follow with the c
 
 Use **Identity / Data / Files / Events** as the compact product-capability label. Whenever the page explains capabilities in prose, make clear that Events is planned while identity, data, and files are available now.
 
-Describe AittaDB as a third-party, non-official project deployed on OpenAI-hosted ChatGPT Sites. State plainly that the current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Do not use organizational independence language in a way that implies technical independence from the platform.
+Describe AittaDB positively as a source-available project deployed on OpenAI-hosted ChatGPT Sites. State plainly that the current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Explain that current public releases use FSL-1.1-MIT and convert to MIT after two years, while an MIT license for immediate use is also available commercially. Do not call the current public FSL release open source or imply technical independence from the platform.
 
 The first user-facing reference to the upstream authentication must say "ChatGPT sign-in inside ChatGPT Sites." Later references on the same page may say "ChatGPT sign-in." Do not present the standalone phrase "Sites identity" to users.
 
 Always pair the upstream description with the boundary: AittaDB creates a separate user with an immutable UUID, issues its own tokens, and stores application data only inside AittaDB. Those tokens are not OpenAI or ChatGPT tokens, and AittaDB never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
 
-State in natural prose that AittaDB is a third-party project and is not affiliated with, endorsed by, or an official product of OpenAI. Keep the boolean `officialOpenAIProduct` flag for JSON clients, but do not render "Official OpenAI product: no" as a browser metadata row.
+Keep the OpenAI boundary as secondary trust copy, not the lead product description: AittaDB is not affiliated with or endorsed by OpenAI. Keep `officialOpenAIProduct` for JSON clients, but do not render "Official OpenAI product: no" as a browser metadata row.
 
 Label the downstream credential source as **Session issuer**, never **Token authority**. The latter can be mistaken for AI-model token accounting. Supporting copy may name OAuth, OIDC, and JWT credentials explicitly.
 

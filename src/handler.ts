@@ -250,7 +250,7 @@ async function route(
     const metadata = {
       service: "AittaDB",
       description:
-        "AittaDB is a third-party, non-official project providing a hosted application backend for third-party apps, services, and agents. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. AittaDB issues its own sessions and never forwards ChatGPT credentials.",
+        "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. AittaDB issues its own sessions and never forwards ChatGPT credentials.",
       hostingPlatform: "OpenAI-hosted ChatGPT Sites",
       issuer: config.issuerUrl,
       docs: `${config.issuerUrl}/docs`,

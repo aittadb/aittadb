@@ -165,7 +165,7 @@ test("AGENTS.md keeps AittaDB primitive-first and inside its server boundary", a
   assert.doesNotMatch(policy, /MVP branch is `codex\/initial-implementation`/);
 });
 
-test("public copy distinguishes project status from the current Sites dependency", async () => {
+test("public copy distinguishes licensing from the current Sites dependency", async () => {
   const [agents, appPage, handler, protocolPages, readme, styleGuide] =
     await Promise.all([
       readFile(AGENTS_PATH, "utf8"),
@@ -181,21 +181,26 @@ test("public copy distinguishes project status from the current Sites dependency
     ["README.md", readme],
     ["docs/style-guide.md", styleGuide],
   ] as const) {
-    assert.match(contents, /third-party/i, `${name} must state project status`);
+    assert.match(contents, /source-available/i, `${name} must state licensing`);
+    assert.match(contents, /FSL-1\.1-MIT/i);
+    assert.match(contents, /available commercially/i);
     assert.match(
       contents,
       /current implementation depends on OpenAI-hosted ChatGPT Sites/i,
       `${name} must state the current Sites dependency`,
     );
+    assert.doesNotMatch(contents, /third-party, non-official project/i);
     assert.doesNotMatch(contents, /remains independent from OpenAI/i);
     assert.doesNotMatch(contents, /AittaDB is independent/i);
   }
 
-  assert.match(appPage, /third-party application/);
+  assert.match(appPage, /source-available project/);
+  assert.match(appPage, /MIT license for[\s\S]+available commercially/);
   assert.match(
     appPage,
-    /current implementation depends on OpenAI-hosted ChatGPT Sites/,
+    /current implementation[\s\S]+depends on OpenAI-hosted ChatGPT Sites/,
   );
+  assert.doesNotMatch(appPage, /third-party, non-official project/);
   assert.doesNotMatch(appPage, /independent application/i);
   assert.doesNotMatch(appPage, /Persistent Events are planned/i);
 

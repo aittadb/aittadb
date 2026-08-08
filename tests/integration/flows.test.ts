@@ -52,13 +52,19 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiRootJson.api_version, "0.1");
   assert.equal(apiRootJson.type, "service");
   assert.equal(apiRootJson.data.service, "AittaDB");
-  assert.match(
-    apiRootJson.data.description,
-    /third-party, non-official project/i,
-  );
+  assert.match(apiRootJson.data.description, /source-available project/i);
   assert.match(
     apiRootJson.data.description,
     /hosted application backend for third-party apps/i,
+  );
+  assert.match(apiRootJson.data.description, /FSL-1\.1-MIT/);
+  assert.match(
+    apiRootJson.data.description,
+    /MIT license for immediate use is also available commercially/i,
+  );
+  assert.doesNotMatch(
+    apiRootJson.data.description,
+    /third-party, non-official project/i,
   );
   assert.match(
     apiRootJson.data.description,
@@ -194,20 +200,22 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     rootTrustNotice,
     /deploy a separate AittaDB instance in their own ChatGPT Sites project/,
   );
-  assert.match(rootTrustNotice, /third-party project/);
-  assert.match(rootTrustNotice, /not an official OpenAI product/);
+  assert.match(rootTrustNotice, /source-available software/);
+  assert.match(rootTrustNotice, /FSL-1\.1-MIT/);
   assert.match(
     rootTrustNotice,
-    /current implementation depends on Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets/,
+    /MIT license for immediate use is also available commercially/,
   );
   assert.match(rootTrustNotice, /never forwards ChatGPT credentials/);
+  assert.match(rootTrustNotice, /not affiliated with or endorsed by OpenAI/);
+  assert.doesNotMatch(rootTrustNotice, /third-party, non-official project/);
   assert.doesNotMatch(rootTrustNotice, /remains independent from OpenAI/);
   assert.match(browserRootHtml, /Session issuer/);
   assert.match(browserRootHtml, /Hosting platform/);
   assert.match(browserRootHtml, /OpenAI-hosted ChatGPT Sites/);
   assert.match(browserRootHtml, /Persistent storage/);
   assert.doesNotMatch(browserRootHtml, /Official OpenAI product/);
-  assert.match(browserRootHtml, />How AittaDB works<\/a>/);
+  assert.match(browserRootHtml, />Licensing and platform details<\/a>/);
   assert.match(browserRootHtml, /Identity \/ Data \/ Files \/ Events/);
   assert.match(browserRootHtml, />Sign out<\/a>/);
   assert.doesNotMatch(browserRootHtml, />Sign in to AittaDB<\/a>/);

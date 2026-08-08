@@ -12,11 +12,11 @@ The server boundary includes identity/authentication; user, client, application,
 
 Application workflows such as billing, memberships, infrastructure provisioning, messaging, or games belong outside AittaDB and compose its public primitives. Examples may motivate/evaluate a primitive, but must not determine provider-specific routes, schemas, configuration, scopes, or business rules here.
 
-AittaDB is a third-party project, not affiliated with, endorsed by, or an official product of OpenAI. The current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, sign-in, D1, R2, configuration, and secrets. Local users, credentials, grants, sessions, and stored data belong to that AittaDB deployment, not OpenAI or ChatGPT. Never call it "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or imply that AittaDB credentials are OpenAI or ChatGPT credentials.
+AittaDB is a source-available project, not affiliated with or endorsed by OpenAI. The current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, sign-in, D1, R2, configuration, and secrets. Local users, credentials, grants, sessions, and stored data belong to that AittaDB deployment, not OpenAI or ChatGPT. Never call it "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or imply that AittaDB credentials are OpenAI or ChatGPT credentials.
 
 AittaDB does not expose or forward ChatGPT cookies, credentials, tokens, or sessions. It does not access ChatGPT conversations, files, Projects, Library, connectors, subscriptions, workspace roles, billing, or API quota. Its scopes authorize only AittaDB claims, sessions, and storage.
 
-Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication. Do not describe a current release as open source.
+Current public releases use FSL-1.1-MIT and convert to MIT two years after publication. An MIT license for immediate use is also available commercially. Describe a current public FSL release as source-available, not open source; a converted or directly MIT-licensed version is open-source software.
 
 ## Canonical Source and Origin
 
@@ -59,7 +59,7 @@ Never trust browser JavaScript for identity or accept arbitrary `oai-authenticat
 
 AittaDB alone issues downstream access tokens, refresh tokens, ID tokens, authorization codes, device codes, consents, and sessions. Supported scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, and `storage.delete`. The data model may permit future custom scopes, but do not invent more MVP scopes.
 
-Lead public descriptions with "hosted application backend for third-party apps", then ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, JSON records, and files. On first reference, call AittaDB third-party and non-official and state its current Sites dependency; never imply technical independence. Do not use unexplained "Sites identity" or "Token authority" copy. Use "Session issuer" where needed. Keep `officialOpenAIProduct: false` in machine metadata, not a browser row.
+Lead public descriptions with "source-available hosted application backend for third-party apps", then ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, JSON records, and files. State the current Sites dependency without leading with defensive "third-party" or "non-official" labels; keep the no-affiliation/no-endorsement boundary as secondary trust copy and never imply technical independence. Do not use unexplained "Sites identity" or "Token authority" copy. Use "Session issuer" where needed. Keep `officialOpenAIProduct: false` in machine metadata, not a browser row.
 
 ## Repository Structure
 
@@ -196,7 +196,7 @@ Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing,
 
 Maintain `README.md`, `AGENTS.md`, `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.env.example`, architecture, style, performance, privacy baseline, threat model, deployment, self-hosting limits, OpenAPI, schema/migrations, CLI Device Grant example, browser/native PKCE example, curl examples, key generation/rotation, downstream JWT verification, fork setup, and Sites-specific behavior.
 
-README must prominently state experimental and third-party/non-official status, current Sites platform and identity-header dependencies, separate local identity/credentials, no official ChatGPT OAuth service, self-hosting adapter replacement, and FSL-to-MIT conversion. Keep claims current.
+README must prominently state experimental status; source availability under FSL-1.1-MIT, two-year MIT conversion, and immediate commercial MIT licensing; current Sites platform and identity-header dependencies; separate local identity/credentials; that AittaDB does not provide an official ChatGPT OAuth service; and self-hosting adapter replacement. Keep claims current and put no-affiliation/no-endorsement language after the positive product description.
 
 ## Commands
 

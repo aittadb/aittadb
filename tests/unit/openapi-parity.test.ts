@@ -128,8 +128,14 @@ test("OpenAPI guard locates legacy _links members without rejecting links", () =
   ]);
 });
 
-test("OpenAPI distinguishes third-party status from the current Sites dependency", () => {
+test("OpenAPI distinguishes licensing posture from the current Sites dependency", () => {
+  assert.match(openApiSpec.info.description, /source-available project/);
+  assert.match(openApiSpec.info.description, /FSL-1\.1-MIT/);
   assert.match(
+    openApiSpec.info.description,
+    /MIT license for immediate use is also available commercially/,
+  );
+  assert.doesNotMatch(
     openApiSpec.info.description,
     /third-party, non-official project/,
   );
@@ -140,7 +146,7 @@ test("OpenAPI distinguishes third-party status from the current Sites dependency
   assert.doesNotMatch(openApiSpec.info.description, /AittaDB is independent/);
 
   const rootDescription = String(openApiOperation("/", "get").description);
-  assert.match(rootDescription, /third-party status/);
+  assert.match(rootDescription, /licensing posture/);
   assert.match(rootDescription, /platform dependency/);
 
   const serviceProperties = asObject(
