@@ -87,13 +87,27 @@ test("AGENTS.md requires intended changes to be committed before handoff", async
 
   assert.match(
     policy,
-    /After validation, commit every intended source change/,
-    "AGENTS.md must require intended changes to be committed after validation",
+    /Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly/,
+    "AGENTS.md must require intended changes to be checkpointed promptly",
   );
   assert.match(
     policy,
-    /Do not leave intended implementation changes unstaged or uncommitted at handoff/,
+    /Never leave intended changes loose at handoff/,
     "AGENTS.md must prohibit an uncommitted handoff",
+  );
+});
+
+test("AGENTS.md isolates implementation agents from the primary worktree", async () => {
+  const policy = await readFile(AGENTS_PATH, "utf8");
+
+  assert.match(
+    policy,
+    /Implementation subagents MUST edit only isolated Git worktrees/,
+  );
+  assert.match(policy, /only reviewed, complete, validated agent commits/);
+  assert.match(
+    policy,
+    /Coordination files such as `PLAN\.md`, `ROADMAP\.md`, `BACKLOG\.md`, and `CHANGELOG\.md` MAY be edited directly/,
   );
 });
 

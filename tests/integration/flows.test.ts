@@ -2365,6 +2365,11 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   assert.match(fileFormHtml, /name="_method" value="POST"/);
   assert.match(fileFormHtml, /enctype="multipart\/form-data"/);
   assert.match(fileFormHtml, /data-file-drop-zone/);
+  assert.match(fileFormHtml, /<label for="files_create_file">File /);
+  assert.match(
+    fileFormHtml,
+    /<input id="files_create_file" name="file" type="file" aria-describedby="files_create_file_status" required>/,
+  );
   assert.match(fileFormHtml, /Choose a file, or drag and drop it here\./);
   assert.doesNotMatch(fileFormHtml, /name="operation"/);
   assert.match(

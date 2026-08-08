@@ -235,7 +235,7 @@ Before implementing any repository-affecting user request, first capture it in r
 
 Process in order unless a discovered dependency is documented. Add missing work as a new unchecked flat item at the correct position before doing it. After the entire definition of done passes, atomically remove the task from PLAN and append its stable identifier and unchanged full description under the current release's completed-plan-task archive in `CHANGELOG.md`. Never archive partial work; PLAN must contain no completed checkboxes, and CHANGELOG preserves the audit history.
 
-Parallelize independent reads, validation commands, and non-overlapping implementation work whenever practical. Serialize dependent, overlapping, and security-sensitive edits; use an isolated Git worktree only when it reduces conflict without replacing this canonical checkout.
+Parallelize independent reads, checks, and disjoint work when practical. Implementation subagents MUST edit only isolated Git worktrees. Treat the primary worktree as the integration checkout: rebase or otherwise preserve only reviewed, complete, validated agent commits into it; never import partial agent work. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly in the primary worktree.
 
 Prefer the smallest implementation that materially reduces risk and leaves a coherent working repository; do not speculate beyond the requested or evidenced problem. Whenever deciding that a feature, task, deployment, or release is ready, report an evidence-based readiness confidence from `0/100` to `100/100`, name the decisive evidence and material residual uncertainty, and rarely use `100/100`. The score informs judgment but never replaces security gates or the definition of done. Capture every material residual finding in `PLAN.md`, `ROADMAP.md`, or `BACKLOG.md` before handoff.
 
@@ -258,9 +258,7 @@ Never split one unit's implementation, tests, or documentation into separate tas
 
 ## Git, Review, and Deployment
 
-Use focused commits aligned to completed PLAN items where practical. Inspect a dirty tree and preserve unrelated user work. Never use destructive reset/checkout without explicit instruction. Run relevant checks before commits and `npm run validate` before handoff.
-
-After validation, commit every intended source change, use authenticated GitHub access to push the feature branch, and update/open a draft PR. Otherwise keep the verified commit local and report unavailable write access. Do not leave intended implementation changes unstaged or uncommitted at handoff. Do not merge. Review findings prioritize security, behavioral regressions, protocol divergence, and missing tests.
+Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly, and push after relevant checks when authenticated access is available. Planning-only checkpoints may be committed directly. Preserve unrelated user work; never use destructive reset/checkout without explicit instruction. Run `npm run validate` before handoff. Update/open a draft PR after validation; if push access is unavailable, retain the verified local commit and report it. Never leave intended changes loose at handoff and never merge. Reviews prioritize security, regressions, protocol divergence, and missing tests.
 
 Production or preview deployment still requires the approval described under Canonical Source. Publish the exact validated committed source, apply checked-in migration artifacts through Sites, preserve D1/R2 bindings and hosted secrets, and verify deployment status. Never claim ChatGPT authentication works end to end unless a real private/public Sites deployment was tested. Record unverified Sites behavior and the exact next manual step.
 
