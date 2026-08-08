@@ -194,12 +194,13 @@ test("public copy distinguishes licensing from the current Sites dependency", as
     assert.doesNotMatch(contents, /AittaDB is independent/i);
   }
 
-  assert.match(appPage, /source-available project/);
-  assert.match(appPage, /MIT license for[\s\S]+available commercially/);
+  assert.match(appPage, /Source-available under FSL-1\.1-MIT/);
   assert.match(
     appPage,
-    /current implementation[\s\S]+depends on OpenAI-hosted ChatGPT Sites/,
+    /Identity, sessions, JSON data, and files for connected applications/,
   );
+  assert.match(appPage, /runs on OpenAI-hosted[\s\S]+ChatGPT Sites/);
+  assert.match(appPage, /never forwards ChatGPT[\s\S]+credentials/);
   assert.doesNotMatch(appPage, /third-party, non-official project/);
   assert.doesNotMatch(appPage, /independent application/i);
   assert.doesNotMatch(appPage, /Persistent Events are planned/i);

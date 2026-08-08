@@ -14,21 +14,14 @@ export default function Page() {
       <p className="eyebrow">Hosted application backend</p>
       <h1>Identity, data, and files for third-party applications.</h1>
       <p>
-        AittaDB is a source-available project. Current public releases use
-        FSL-1.1-MIT and become MIT-licensed after two years; an MIT license for
-        immediate use is also available commercially. Its current implementation
-        depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1,
-        R2, configuration, and secrets. Within that platform boundary, AittaDB
-        maps ChatGPT sign-in to a separate user, issues its own OAuth 2.0 and
-        OpenID Connect sessions, and provides persistent JSON records and file
-        storage isolated by user and client.
+        Identity, sessions, JSON data, and files for connected applications.
       </p>
       <p>
-        Third-party apps, services, and agents use AittaDB through its REST and
-        hypermedia APIs. AittaDB is not affiliated with or endorsed by OpenAI.
-        See <Link href="/docs">API docs</Link>,{" "}
+        Source-available under FSL-1.1-MIT. AittaDB runs on OpenAI-hosted
+        ChatGPT Sites, issues its own credentials, and never forwards ChatGPT
+        credentials. See <Link href="/docs">API docs</Link>,{" "}
         <Link href="/health">health metadata</Link>, or the{" "}
-        <Link href="https://github.com/aittadb/aittadb">
+        <Link href="https://github.com/aittadb/aittadb#licensing">
           project repository
         </Link>
         .

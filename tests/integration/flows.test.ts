@@ -189,25 +189,23 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /ChatGPT sign-in/);
   assert.match(
     browserRootHtml,
-    /hosted application backend for third-party apps/i,
+    /Identity, sessions, JSON data, and files for connected applications\./,
   );
   const rootTrustNotice = /<p class="note">([\s\S]*?)<\/p>/.exec(
     browserRootHtml,
   )?.[1];
   assert.ok(rootTrustNotice);
   assert.doesNotMatch(rootTrustNotice, /Persistent events are planned/);
-  assert.match(
-    rootTrustNotice,
-    /deploy a separate AittaDB instance in their own ChatGPT Sites project/,
-  );
-  assert.match(rootTrustNotice, /source-available software/);
+  assert.match(rootTrustNotice, /Source-available under FSL-1\.1-MIT/);
   assert.match(rootTrustNotice, /FSL-1\.1-MIT/);
-  assert.match(
-    rootTrustNotice,
-    /MIT license for immediate use is also available commercially/,
-  );
+  assert.match(rootTrustNotice, /runs on OpenAI-hosted ChatGPT Sites/);
+  assert.match(rootTrustNotice, /issues its own credentials/);
   assert.match(rootTrustNotice, /never forwards ChatGPT credentials/);
-  assert.match(rootTrustNotice, /not affiliated with or endorsed by OpenAI/);
+  assert.doesNotMatch(rootTrustNotice, /available commercially/);
+  assert.doesNotMatch(
+    rootTrustNotice,
+    /not affiliated with or endorsed by OpenAI/,
+  );
   assert.doesNotMatch(rootTrustNotice, /third-party, non-official project/);
   assert.doesNotMatch(rootTrustNotice, /remains independent from OpenAI/);
   assert.match(browserRootHtml, /Session issuer/);
