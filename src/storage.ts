@@ -18,12 +18,14 @@ import {
 } from "./hypermedia";
 import { parseScopes, verifyAccessToken } from "./oauth";
 import { decodeStorageCursor, encodeStorageCursor } from "./storage-cursor";
+import { storageFileWriteFence } from "./storage-file-write-fence";
 import type {
   AppConfig,
   AuthStore,
   ClientView,
   RuntimeEnv,
   StorageFileMetadata,
+  StorageFileWriteFence,
   StorageListPosition,
   StorageRecord,
   StorageUsage,
@@ -443,18 +445,19 @@ async function writeStorageFile(
   const now = nowSeconds();
   // Copy-on-write keeps the committed object untouched until its new metadata
   // is durable, so a failed replacement cannot change bytes behind old metadata.
-  const r2Key = `users/${principal.userId}/clients/${principal.client.id}/files/${uuid()}`;
+  const r2Key = `objects/${uuid()}`;
   const contentType =
     request.headers.get("content-type") || "application/octet-stream";
   const digest = await sha256(new Uint8Array(body));
-  await env.BUCKET.put(r2Key, body, {
-    httpMetadata: { contentType },
-    customMetadata: {
-      userId: principal.userId,
-      clientId: principal.client.id,
-      keySha256: await sha256(fileKey),
-    },
-  });
+  const fence = storageFileWriteFence(
+    principal.userId,
+    principal.client.id,
+    r2Key,
+    nowSeconds(),
+  );
+  if (!(await store.reserveStorageFileWriteFence(fence))) {
+    return oauthError("invalid_token", "Invalid token", 401);
+  }
   const file: StorageFileMetadata = {
     userId: principal.userId,
     clientId: principal.client.id,
@@ -467,7 +470,11 @@ async function writeStorageFile(
     updatedAt: now,
   };
   const expectedR2Key = existing?.r2Key ?? null;
+  let metadataCommitted = false;
   try {
+    await env.BUCKET.put(r2Key, body, {
+      httpMetadata: { contentType },
+    });
     if (
       !(await store.upsertStorageFileMetadata(
         file,
@@ -475,7 +482,7 @@ async function writeStorageFile(
         config.storageLimits,
       ))
     ) {
-      await retireUncommittedStorageObject(env.BUCKET, store, file);
+      await retireFencedStorageObject(env.BUCKET, store, file, fence);
       const current = await store.getStorageFileMetadata(
         principal.userId,
         principal.client.id,
@@ -489,19 +496,30 @@ async function writeStorageFile(
       }
       return storageLimitExceeded();
     }
+    metadataCommitted = true;
   } catch (error) {
-    try {
-      await deleteR2Object(env.BUCKET, r2Key);
-    } catch {
-      await recordStorageFileOrphanRepairs(store, file);
+    const current = await store.getStorageFileMetadata(
+      principal.userId,
+      principal.client.id,
+      fileKey,
+    );
+    metadataCommitted = current?.r2Key === r2Key;
+    if (!metadataCommitted) {
+      await retireFencedStorageObject(env.BUCKET, store, file, fence);
     }
     throw error;
   }
-  if (existing) {
-    if (
-      !(await retireReplacedStorageObject(env.BUCKET, store, existing, file))
-    ) {
-      return storageConflict();
+  try {
+    if (existing) {
+      if (
+        !(await retireReplacedStorageObject(env.BUCKET, store, existing, file))
+      ) {
+        return storageConflict();
+      }
+    }
+  } finally {
+    if (metadataCommitted) {
+      await releaseStorageFileWriteFence(store, fence);
     }
   }
   return hypermediaJson(
@@ -519,6 +537,35 @@ async function writeStorageFile(
         }
       : undefined,
   );
+}
+
+async function retireFencedStorageObject(
+  bucket: R2Bucket,
+  store: AuthStore,
+  file: StorageFileMetadata,
+  fence: StorageFileWriteFence,
+): Promise<void> {
+  try {
+    await deleteR2Object(bucket, file.r2Key);
+    await releaseStorageFileWriteFence(store, fence);
+  } catch {
+    if (
+      !(await store.convertStorageFileWriteFenceToRepair(fence, nowSeconds()))
+    ) {
+      throw new Error("storage_file_write_fence_conversion_failed");
+    }
+  }
+}
+
+async function releaseStorageFileWriteFence(
+  store: AuthStore,
+  fence: StorageFileWriteFence,
+): Promise<void> {
+  try {
+    await store.completeStorageFileWriteFence(fence);
+  } catch {
+    // The expiring durable fence remains fail-closed and becomes repair work.
+  }
 }
 
 async function retireUncommittedStorageObject(

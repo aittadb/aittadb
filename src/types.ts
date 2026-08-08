@@ -242,9 +242,18 @@ export interface StorageFileOrphanRepair {
   updatedAt: number;
 }
 
+export interface StorageFileWriteFence {
+  userId: string;
+  clientId: string;
+  r2Key: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
 export type StorageFileOrphanRepairDisposition =
   | "missing"
   | "referenced"
+  | "conflict"
   | "orphan";
 
 export interface StorageListPosition {
@@ -314,8 +323,19 @@ export interface AccountRecordPurgeRepository {
   ): Promise<AccountRecordPurgeBatch>;
 }
 
+export interface AccountDeletionFinalizationRepository {
+  finalizeAccountDeletion(
+    subject: string,
+    attempt: number,
+    now: number,
+  ): Promise<boolean>;
+}
+
 export interface AuthStore
-  extends AccountCredentialPurgeRepository, AccountRecordPurgeRepository {
+  extends
+    AccountCredentialPurgeRepository,
+    AccountRecordPurgeRepository,
+    AccountDeletionFinalizationRepository {
   cleanup(now: number): Promise<void>;
   rateLimit(
     key: string,
@@ -349,17 +369,18 @@ export interface AuthStore
     now: number,
     retryAt: number,
   ): Promise<boolean>;
-  completeAccountDeletionJob(
-    subject: string,
-    attempt: number,
-    now: number,
-  ): Promise<boolean>;
   stageAccountFilePurgeBatch(
     subject: string,
     attempt: number,
     now: number,
     limit: number,
   ): Promise<AccountFilePurgeStageResult>;
+  stageExpiredAccountFileWriteFences(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<number>;
   hasStorageFilesForSubject(subject: string): Promise<boolean>;
 
   createClient(
@@ -497,6 +518,12 @@ export interface AuthStore
   ): Promise<boolean>;
   recordStorageFileOrphanRepair(
     repair: StorageFileOrphanRepair,
+  ): Promise<boolean>;
+  reserveStorageFileWriteFence(fence: StorageFileWriteFence): Promise<boolean>;
+  completeStorageFileWriteFence(fence: StorageFileWriteFence): Promise<boolean>;
+  convertStorageFileWriteFenceToRepair(
+    fence: StorageFileWriteFence,
+    now: number,
   ): Promise<boolean>;
   listStorageFileOrphanRepairs(
     limit: number,

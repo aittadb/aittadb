@@ -2067,8 +2067,10 @@ test("storage is isolated by local user and client without exposing deployment i
   assert.ok(ownerFile);
   assert.match(
     ownerFile.r2Key,
-    new RegExp(`^users/${owner.id}/clients/${ownerClient.id}/files/`),
+    /^objects\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   );
+  assert.equal(ownerFile.r2Key.includes(owner.id), false);
+  assert.equal(ownerFile.r2Key.includes(ownerClient.id), false);
   assert.equal(ownerFile.r2Key.includes("internal/secrets.html"), false);
   assert.equal(bucket.objects.has(ownerFile.r2Key), true);
 

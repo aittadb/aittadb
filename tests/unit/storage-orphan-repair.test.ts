@@ -56,7 +56,7 @@ test("orphan-repair migration stores only internal physical repair metadata", as
   }
 });
 
-test("D1 repair row excludes metadata reattachment and resolves current references", async () => {
+test("D1 repair row excludes reattachment and retains foreign-owner conflicts", async () => {
   const sqlite = await migratedDatabase();
   try {
     sqlite.exec(
@@ -83,10 +83,9 @@ test("D1 repair row excludes metadata reattachment and resolves current referenc
     assert.equal(await store.recordStorageFileOrphanRepair(candidate), true);
     assert.equal(
       await store.classifyStorageFileOrphanRepair(candidate),
-      "referenced",
+      "conflict",
     );
-    assert.equal(await store.completeStorageFileOrphanRepair(candidate), true);
-    assert.deepEqual(await store.listStorageFileOrphanRepairs(10), []);
+    assert.deepEqual(await store.listStorageFileOrphanRepairs(10), [candidate]);
   } finally {
     sqlite.close();
   }

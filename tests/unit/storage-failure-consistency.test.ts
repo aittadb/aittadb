@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import {
+  ACCOUNT_DELETION_COORDINATOR_RETRY_SECONDS,
+  coordinateAccountDeletionBatch,
+} from "../../src/account-deletion-coordinator";
 import { loadConfig } from "../../src/config";
 import { nowSeconds, sha256 } from "../../src/crypto";
 import type { AittaDBApp } from "../../src/handler";
@@ -275,6 +279,41 @@ test("file creation leaves neither metadata nor an R2 object after an isolated w
   assert.equal(context.bucket.objects.size, 0);
 });
 
+test("new R2 objects use opaque keys and no subject-bearing custom metadata", async () => {
+  const context = await fixture();
+  const logicalKey = "private-user-file.txt";
+  assert.equal(
+    (
+      await fileRequest(
+        context,
+        "PUT",
+        logicalKey,
+        "private bytes",
+        "text/plain",
+      )
+    ).status,
+    200,
+  );
+  const metadata = await context.store.getStorageFileMetadata(
+    context.userId,
+    context.clientId,
+    logicalKey,
+  );
+  assert.ok(metadata);
+  assert.match(
+    metadata.r2Key,
+    /^objects\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  for (const privateValue of [context.userId, context.clientId, logicalKey]) {
+    assert.equal(metadata.r2Key.includes(privateValue), false);
+  }
+  assert.equal(
+    context.bucket.objects.get(metadata.r2Key)?.customMetadata,
+    undefined,
+  );
+  assert.equal(context.store.storageFileWriteFences.size, 0);
+});
+
 test("failed metadata write and failed R2 compensation record one internal repair", async () => {
   const context = await fixture();
   context.store.upsertFileFailures = 1;
@@ -310,6 +349,7 @@ test("failed metadata write and failed R2 compensation record one internal repai
       },
     ],
   );
+  assert.equal(context.store.storageFileWriteFences.size, 0);
 
   const unavailable = await context.app.fetch(
     new Request("https://aittadb.example.test/storage/file-orphan-repairs", {
@@ -325,6 +365,50 @@ test("failed metadata write and failed R2 compensation record one internal repai
   assert.equal(unavailableBody.includes(physicalKey), false);
   assert.equal(unavailableBody.includes(context.userId), false);
   assert.equal(unavailableBody.includes(context.clientId), false);
+});
+
+test("an in-flight R2 put fences finalization and cannot attach metadata after deletion starts", async () => {
+  const bucket = new CoordinatedBucket();
+  const context = await fixture(bucket);
+  const gate = bucket.pauseNextPut();
+  const upload = fileRequest(
+    context,
+    "PUT",
+    "late-upload.txt",
+    "late bytes",
+    "text/plain",
+  );
+  await gate.entered;
+  assert.equal(context.store.storageFileWriteFences.size, 1);
+
+  const now = nowSeconds();
+  assert.equal(
+    (await context.store.startAccountDeletionJob(context.userId, now)).created,
+    true,
+  );
+  assert.deepEqual(
+    await coordinateAccountDeletionBatch(context.store, bucket, () => now),
+    { claimed: 1, completed: 0, deferred: 1, leaseLost: 0 },
+  );
+  assert.ok(await context.store.getUser(context.userId));
+  assert.equal(context.store.storageFileWriteFences.size, 1);
+
+  gate.release();
+  await assertGenericFailure(await upload, context);
+  assert.equal(context.store.storageFiles.size, 0);
+  assert.equal(context.store.storageFileWriteFences.size, 0);
+  assert.equal(context.store.storageFileOrphanRepairs.size, 0);
+  assert.equal(bucket.objects.size, 0);
+
+  assert.deepEqual(
+    await coordinateAccountDeletionBatch(
+      context.store,
+      bucket,
+      () => now + ACCOUNT_DELETION_COORDINATOR_RETRY_SECONDS,
+    ),
+    { claimed: 1, completed: 1, deferred: 0, leaseLost: 0 },
+  );
+  assert.equal(await context.store.getUser(context.userId), null);
 });
 
 test("quota rejection queues failed R2 retirement and bounded repair converges", async () => {

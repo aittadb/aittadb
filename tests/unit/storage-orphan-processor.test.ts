@@ -50,7 +50,7 @@ test("orphan processor handles one deterministic finite batch", async () => {
   ]);
 });
 
-test("referenced physical bytes are retained and the stale repair is resolved", async () => {
+test("foreign-owner references retain bytes and defer the repair", async () => {
   const store = new MemoryAuthStore();
   const bucket = new TrackingBucket();
   const candidate = repair("physical/referenced", 1);
@@ -61,13 +61,13 @@ test("referenced physical bytes are retained and the stale repair is resolved", 
 
   const result = await repairStorageFileOrphans(store, bucket, 100);
 
-  assert.deepEqual(result, { examined: 1, resolved: 1, deferred: 0 });
+  assert.deepEqual(result, { examined: 1, resolved: 0, deferred: 1 });
   assert.deepEqual(bucket.deleteCalls, []);
   assert.equal(bucket.objects.has(candidate.r2Key), true);
-  assert.equal(store.storageFileOrphanRepairs.size, 0);
+  assert.equal(store.storageFileOrphanRepairs.size, 1);
 });
 
-test("concurrent processors never reinterpret a removed referenced repair as an orphan", async () => {
+test("concurrent processors keep a foreign-owner conflict deferred", async () => {
   const store = new MemoryAuthStore();
   const bucket = new TrackingBucket();
   const candidate = repair("physical/concurrent-reference", 1);
@@ -88,7 +88,7 @@ test("concurrent processors never reinterpret a removed referenced repair as an 
 
   assert.deepEqual(bucket.deleteCalls, []);
   assert.equal(bucket.objects.has(candidate.r2Key), true);
-  assert.equal(store.storageFileOrphanRepairs.size, 0);
+  assert.equal(store.storageFileOrphanRepairs.size, 1);
 });
 
 test("queued repair blocks a metadata reattachment race until deletion completes", async () => {

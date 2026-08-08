@@ -55,7 +55,7 @@ test("account deletion migration has one subject key and constrained states", as
             "INSERT INTO account_deletion_jobs (subject, state, attempt, available_at, created_at, updated_at, completed_at) VALUES (?, 'completed', 0, NULL, 1, 1, 1)",
           )
           .run(UNKNOWN_SUBJECT),
-      /CHECK constraint failed/,
+      /account_deletion_finalization_invalid/,
     );
   } finally {
     sqlite.close();
@@ -189,7 +189,7 @@ test("D1 and memory claim finite disjoint batches and reject invalid bounds", as
   }
 });
 
-test("D1 and memory reject stale or cross-subject completion and keep completed terminal", async (t) => {
+test("D1 and memory finalize only a clean exact live claim", async (t) => {
   for (const adapter of adapters()) {
     await t.test(adapter.name, async () => {
       const fixture = await adapter.create();
@@ -207,7 +207,7 @@ test("D1 and memory reject stale or cross-subject completion and keep completed 
         const firstB = requiredJob(firstClaims, subjectB);
 
         assert.equal(
-          await fixture.store.completeAccountDeletionJob(
+          await fixture.store.finalizeAccountDeletion(
             UNKNOWN_SUBJECT,
             firstA.attempt,
             101,
@@ -215,7 +215,7 @@ test("D1 and memory reject stale or cross-subject completion and keep completed 
           false,
         );
         assert.equal(
-          await fixture.store.completeAccountDeletionJob(
+          await fixture.store.finalizeAccountDeletion(
             subjectB,
             firstB.attempt + 1,
             101,
@@ -235,7 +235,7 @@ test("D1 and memory reject stale or cross-subject completion and keep completed 
         const secondA = requiredJob(secondClaims, subjectA);
         assert.equal(secondA.attempt, firstA.attempt + 1);
         assert.equal(
-          await fixture.store.completeAccountDeletionJob(
+          await fixture.store.finalizeAccountDeletion(
             subjectA,
             firstA.attempt,
             131,
@@ -270,7 +270,7 @@ test("D1 and memory reject stale or cross-subject completion and keep completed 
         );
         assert.equal(thirdA.attempt, secondA.attempt + 1);
         assert.equal(
-          await fixture.store.completeAccountDeletionJob(
+          await fixture.store.finalizeAccountDeletion(
             subjectA,
             thirdA.attempt,
             141,
@@ -278,12 +278,12 @@ test("D1 and memory reject stale or cross-subject completion and keep completed 
           true,
         );
         assert.equal(
-          await fixture.store.completeAccountDeletionJob(
+          await fixture.store.finalizeAccountDeletion(
             subjectA,
             thirdA.attempt,
             142,
           ),
-          false,
+          true,
         );
         assert.equal(
           await fixture.store.retryAccountDeletionJob(
@@ -298,6 +298,9 @@ test("D1 and memory reject stale or cross-subject completion and keep completed 
         assert.equal(completed?.state, "completed");
         assert.equal(completed?.availableAt, null);
         assert.equal(completed?.completedAt, 141);
+        assert.equal(await fixture.store.getUser(subjectA), null);
+        assert.ok(await fixture.store.getUser(subjectB));
+        assert.equal(await fixture.store.countUsers(), 1);
         assert.deepEqual(
           await fixture.store.startAccountDeletionJob(subjectA, 999),
           { created: false, job: completed },
@@ -377,34 +380,62 @@ async function migratedDatabase(): Promise<DatabaseSync> {
 }
 
 function sqliteD1(database: DatabaseSync): D1Database {
+  const prepared = new WeakMap<
+    D1PreparedStatement,
+    { query: string; values: SQLInputValue[] }
+  >();
   return {
     prepare(query: string): D1PreparedStatement {
-      let values: SQLInputValue[] = [];
+      const execution = { query, values: [] as SQLInputValue[] };
       const statement: D1PreparedStatement = {
         bind(...nextValues: unknown[]): D1PreparedStatement {
-          values = nextValues as SQLInputValue[];
+          execution.values = nextValues as SQLInputValue[];
           return statement;
         },
         async first<T>(): Promise<T | null> {
           return (
-            (database.prepare(query).get(...values) as T | undefined) ?? null
+            (database.prepare(query).get(...execution.values) as
+              | T
+              | undefined) ?? null
           );
         },
         async all<T>(): Promise<D1Result<T>> {
           return {
             success: true,
-            results: database.prepare(query).all(...values) as T[],
+            results: database.prepare(query).all(...execution.values) as T[],
           };
         },
         async run<T>(): Promise<D1Result<T>> {
-          const result = database.prepare(query).run(...values);
+          const result = database.prepare(query).run(...execution.values);
           return {
             success: true,
             meta: { changes: Number(result.changes) },
           };
         },
       };
+      prepared.set(statement, execution);
       return statement;
+    },
+    async batch<T>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const results = statements.map((statement) => {
+          const execution = prepared.get(statement);
+          assert.ok(execution);
+          const result = database
+            .prepare(execution.query)
+            .run(...execution.values);
+          return {
+            success: true,
+            meta: { changes: Number(result.changes) },
+          } as D1Result<T>;
+        });
+        database.exec("COMMIT");
+        return results;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
     },
   };
 }

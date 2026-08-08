@@ -233,13 +233,14 @@ test("bounded account file purge converges across client namespaces and preserve
           },
         );
         assert.equal(
-          await fixture.store.completeAccountDeletionJob(
+          await fixture.store.finalizeAccountDeletion(
             target,
             claim.attempt,
             111,
           ),
           true,
         );
+        assert.equal(await fixture.store.getUser(target), null);
         assert.deepEqual(
           await purgeAccountFilesBatch(
             fixture.store,
@@ -263,7 +264,7 @@ test("bounded account file purge converges across client namespaces and preserve
   }
 });
 
-test("a globally referenced object survives one subject's purge", async (t) => {
+test("a foreign-owner object reference blocks subject finalization", async (t) => {
   for (const adapter of adapters()) {
     await t.test(adapter.name, async () => {
       const fixture = await adapter.create();
@@ -318,8 +319,9 @@ test("a globally referenced object survives one subject's purge", async (t) => {
           claim.attempt,
           21,
         );
-        assert.equal(result.complete, true);
-        assert.equal(result.resolved, 1);
+        assert.equal(result.complete, false);
+        assert.equal(result.resolved, 0);
+        assert.equal(result.deferred, 1);
         assert.equal((await fixture.bucket.get(physicalKey)) !== null, true);
         assert.ok(
           await fixture.store.getStorageFileMetadata(
@@ -327,6 +329,19 @@ test("a globally referenced object survives one subject's purge", async (t) => {
             client!.id,
             controlFile.key,
           ),
+        );
+        assert.equal(
+          await fixture.store.finalizeAccountDeletion(
+            target,
+            claim.attempt,
+            22,
+          ),
+          false,
+        );
+        assert.ok(await fixture.store.getUser(target));
+        assert.equal(
+          await fixture.store.hasStorageFileOrphanRepairsForSubject(target),
+          true,
         );
       } finally {
         fixture.close();
@@ -392,7 +407,7 @@ test("missing account-deletion state rejects before D1 or R2 mutation", async (t
   }
 });
 
-test("stale claims and dirty completed tombstones fail before file mutation", async (t) => {
+test("stale claims and dirty finalization fail before file mutation", async (t) => {
   for (const adapter of adapters()) {
     await t.test(adapter.name, async () => {
       const fixture = await adapter.create();
@@ -440,22 +455,16 @@ test("stale claims and dirty completed tombstones fail before file mutation", as
           /account_file_purge_lease_invalid/,
         );
         assert.equal(
-          await fixture.store.completeAccountDeletionJob(
+          await fixture.store.finalizeAccountDeletion(
             subject,
             claim.attempt,
             32,
           ),
-          true,
+          false,
         );
-        await assert.rejects(
-          purgeAccountFilesBatch(
-            fixture.store,
-            fixture.bucket,
-            subject,
-            claim.attempt,
-            33,
-          ),
-          /account_file_purge_failed/,
+        assert.equal(
+          (await fixture.store.getAccountDeletionJob(subject))?.state,
+          "running",
         );
         assert.ok(
           await fixture.store.getStorageFileMetadata(
@@ -625,7 +634,8 @@ test("account file purge remains internal and its failure model is documented", 
   assert.match(architecture, /account file purge/i);
   assert.match(architecture, /transactional D1 batch/i);
   assert.match(threatModel, /account file purge/i);
-  assert.match(privacy, /bounded internal file purge/i);
+  assert.match(privacy, /in-flight uploads reserve durable fences/i);
+  assert.match(privacy, /Finalization removes personal fields/i);
   assert.match(selfHosting, /transactional batch/i);
   assert.doesNotMatch(openapi, /account[-_ ]file[-_ ]purge/i);
 });

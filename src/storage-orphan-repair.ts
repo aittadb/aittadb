@@ -58,6 +58,11 @@ export async function repairStorageFileOrphanBatch(
         resolved += 1;
         continue;
       }
+      if (disposition === "conflict") {
+        deferred += 1;
+        await store.deferStorageFileOrphanRepair(repair, now);
+        continue;
+      }
 
       await bucket.delete(repair.r2Key);
       await store.completeStorageFileOrphanRepair(repair);

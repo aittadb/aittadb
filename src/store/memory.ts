@@ -2,6 +2,11 @@ import { uuid } from "../crypto";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
+  assertStorageFileWriteFenceBatchLimit,
+  assertStorageFileWriteFence,
+  STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH,
+} from "../storage-file-write-fence";
+import {
   accountDeletionClaimExpiry,
   assertAccountDeletionNow,
   assertAccountDeletionRetryAt,
@@ -38,6 +43,7 @@ import type {
   StorageFileMetadata,
   StorageFileOrphanRepair,
   StorageFileOrphanRepairDisposition,
+  StorageFileWriteFence,
   StorageLimits,
   StorageListPage,
   StorageListPosition,
@@ -64,6 +70,7 @@ export class MemoryAuthStore implements AuthStore {
   accountDeletionJobs = new Map<string, AccountDeletionJob>();
   storageRecords = new Map<string, StorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
+  storageFileWriteFences = new Map<string, StorageFileWriteFence>();
   storageFileOrphanRepairs = new Map<string, StorageFileOrphanRepair>();
   counters = new Map<string, { count: number; windowStart: number }>();
   adminOperationSubmissions = new Map<
@@ -127,6 +134,32 @@ export class MemoryAuthStore implements AuthStore {
     for (const [key, submission] of this.adminOperationSubmissions) {
       if (submission.expiresAt <= now)
         this.adminOperationSubmissions.delete(key);
+    }
+    const expiredFences = Array.from(this.storageFileWriteFences.values())
+      .filter((fence) => fence.expiresAt <= now)
+      .sort(
+        (left, right) =>
+          left.expiresAt - right.expiresAt ||
+          left.r2Key.localeCompare(right.r2Key),
+      )
+      .slice(0, STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH);
+    for (const fence of expiredFences) {
+      const existing = this.storageFileOrphanRepairs.get(fence.r2Key);
+      if (
+        existing &&
+        (existing.userId !== fence.userId ||
+          existing.clientId !== fence.clientId)
+      ) {
+        continue;
+      }
+      this.storageFileOrphanRepairs.set(fence.r2Key, {
+        userId: fence.userId,
+        clientId: fence.clientId,
+        r2Key: fence.r2Key,
+        createdAt: existing?.createdAt ?? fence.createdAt,
+        updatedAt: Math.max(existing?.updatedAt ?? 0, now),
+      });
+      this.storageFileWriteFences.delete(fence.r2Key);
     }
     this.audits = this.audits.filter(
       (event) => event.now > now - 90 * 24 * 60 * 60,
@@ -282,7 +315,7 @@ export class MemoryAuthStore implements AuthStore {
     return true;
   }
 
-  async completeAccountDeletionJob(
+  async finalizeAccountDeletion(
     subject: string,
     attempt: number,
     now: number,
@@ -293,12 +326,33 @@ export class MemoryAuthStore implements AuthStore {
       !job ||
       !Number.isSafeInteger(attempt) ||
       attempt < 1 ||
-      job.state !== "running" ||
-      job.attempt !== attempt ||
-      job.availableAt === null ||
-      job.availableAt <= now
+      job.attempt !== attempt
     ) {
       return false;
+    }
+    if (job.state === "completed") {
+      return (
+        !this.users.has(subject) && !this.hasAccountFinalizationResidue(subject)
+      );
+    }
+    if (
+      job.state !== "running" ||
+      job.availableAt === null ||
+      job.availableAt <= now ||
+      this.hasAccountFinalizationResidue(subject)
+    ) {
+      return false;
+    }
+
+    const user = this.users.get(subject);
+    if (user && this.usersByEmail.get(user.email) === subject) {
+      this.usersByEmail.delete(user.email);
+    }
+    this.users.delete(subject);
+    for (const [key, submission] of this.adminOperationSubmissions) {
+      if (submission.userId === subject) {
+        this.adminOperationSubmissions.delete(key);
+      }
     }
     this.accountDeletionJobs.set(subject, {
       ...job,
@@ -396,6 +450,15 @@ export class MemoryAuthStore implements AuthStore {
         left.revokedAt - right.revokedAt || leftJti.localeCompare(rightJti),
       ([jti]) => this.revokedJtis.delete(jti),
     );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.adminOperationSubmissions.entries()).filter(
+        ([, submission]) => submission.userId === subject,
+      ),
+      remaining(),
+      ([leftKey, left], [rightKey, right]) =>
+        left.expiresAt - right.expiresAt || leftKey.localeCompare(rightKey),
+      ([key]) => this.adminOperationSubmissions.delete(key),
+    );
 
     return {
       deletedCount,
@@ -472,6 +535,53 @@ export class MemoryAuthStore implements AuthStore {
       this.storageFiles.delete(key);
     }
     return { selected: selected.length, staged: selected.length };
+  }
+
+  async stageExpiredAccountFileWriteFences(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<number> {
+    assertStorageFileWriteFenceBatchLimit(limit);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return 0;
+    }
+    const expired = Array.from(this.storageFileWriteFences.values())
+      .filter((fence) => fence.userId === subject && fence.expiresAt <= now)
+      .sort(
+        (left, right) =>
+          left.expiresAt - right.expiresAt ||
+          left.r2Key.localeCompare(right.r2Key),
+      )
+      .slice(0, limit);
+    let staged = 0;
+    for (const fence of expired) {
+      const repair = this.storageFileOrphanRepairs.get(fence.r2Key);
+      if (
+        repair &&
+        (repair.userId !== fence.userId || repair.clientId !== fence.clientId)
+      ) {
+        continue;
+      }
+      this.storageFileOrphanRepairs.set(fence.r2Key, {
+        userId: fence.userId,
+        clientId: fence.clientId,
+        r2Key: fence.r2Key,
+        createdAt: repair?.createdAt ?? fence.createdAt,
+        updatedAt: Math.max(repair?.updatedAt ?? 0, now),
+      });
+      this.storageFileWriteFences.delete(fence.r2Key);
+      staged += 1;
+    }
+    return staged;
   }
 
   async hasStorageFilesForSubject(subject: string): Promise<boolean> {
@@ -554,6 +664,7 @@ export class MemoryAuthStore implements AuthStore {
     _now: number,
     expiresAt: number,
   ): Promise<boolean> {
+    this.assertSubjectWriteActive(userId);
     if (this.adminOperationSubmissions.has(tokenHash)) return false;
     this.adminOperationSubmissions.set(tokenHash, {
       userId,
@@ -582,6 +693,7 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   async createDeviceGrant(grant: DeviceGrant): Promise<void> {
+    this.assertSubjectWriteActive(grant.userId);
     this.devices.set(grant.deviceCodeHash, { ...grant });
     this.devicesByUserCodeHash.set(grant.userCodeHash, grant.deviceCodeHash);
   }
@@ -615,6 +727,7 @@ export class MemoryAuthStore implements AuthStore {
     userId: string | null,
     now: number,
   ): Promise<DeviceGrant | null> {
+    this.assertSubjectWriteActive(userId);
     const deviceHash = this.devicesByUserCodeHash.get(userCodeHash);
     const grant = deviceHash ? this.devices.get(deviceHash) : null;
     if (!grant || grant.status !== "pending" || grant.expiresAt <= now)
@@ -646,6 +759,7 @@ export class MemoryAuthStore implements AuthStore {
   async createAuthorizationRequest(
     request: AuthorizationRequest,
   ): Promise<void> {
+    this.assertSubjectWriteActive(request.userId);
     this.authRequests.set(request.id, { ...request });
   }
 
@@ -662,6 +776,7 @@ export class MemoryAuthStore implements AuthStore {
     userId: string | null,
     now: number,
   ): Promise<boolean> {
+    this.assertSubjectWriteActive(userId);
     const request = this.authRequests.get(id);
     if (!request || request.status !== "pending" || request.expiresAt <= now)
       return false;
@@ -670,6 +785,7 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   async createAuthorizationCode(code: AuthorizationCode): Promise<void> {
+    this.assertSubjectWriteActive(code.userId);
     this.authCodes.set(code.codeHash, { ...code });
   }
 
@@ -706,14 +822,17 @@ export class MemoryAuthStore implements AuthStore {
     scope: string,
     now: number,
   ): Promise<void> {
+    this.assertSubjectWriteActive(userId);
     this.consents.set(`${userId}:${clientId}:${scope}`, now);
   }
 
   async createRefreshFamily(family: RefreshTokenFamily): Promise<void> {
+    this.assertSubjectWriteActive(family.userId);
     this.families.set(family.id, { ...family });
   }
 
   async createRefreshToken(token: RefreshTokenRecord): Promise<void> {
+    this.assertSubjectWriteActive(token.userId);
     this.refreshTokens.set(token.tokenHash, { ...token });
   }
 
@@ -768,6 +887,7 @@ export class MemoryAuthStore implements AuthStore {
     expiresAt: number,
     now: number,
   ): Promise<void> {
+    this.assertSubjectWriteActive(subject);
     const existing = this.revokedJtis.get(jti);
     if (existing && existing.subject !== subject) return;
     this.revokedJtis.set(jti, { subject, expiresAt, revokedAt: now });
@@ -799,6 +919,9 @@ export class MemoryAuthStore implements AuthStore {
       ) ||
       Array.from(this.revokedJtis.values()).some(
         (revocation) => revocation.subject === subject,
+      ) ||
+      Array.from(this.adminOperationSubmissions.values()).some(
+        (submission) => submission.userId === subject,
       )
     );
   }
@@ -832,6 +955,7 @@ export class MemoryAuthStore implements AuthStore {
     record: StorageRecord,
     limits: StorageLimits,
   ): Promise<boolean> {
+    this.assertSubjectWriteActive(record.userId);
     const key = storageKey(record.userId, record.clientId, record.key);
     const existing = this.storageRecords.get(key);
     const nextBytes = utf8Bytes(record.valueJson);
@@ -893,6 +1017,7 @@ export class MemoryAuthStore implements AuthStore {
     expectedR2Key: string | null,
     limits?: StorageLimits,
   ): Promise<boolean> {
+    this.assertSubjectWriteActive(file.userId);
     if (this.storageFileOrphanRepairs.has(file.r2Key)) return false;
     const key = storageKey(file.userId, file.clientId, file.key);
     const existing = this.storageFiles.get(key);
@@ -938,6 +1063,10 @@ export class MemoryAuthStore implements AuthStore {
   async recordStorageFileOrphanRepair(
     repair: StorageFileOrphanRepair,
   ): Promise<boolean> {
+    const job = this.accountDeletionJobs.get(repair.userId);
+    if (job?.state === "completed") {
+      throw new Error("account_deletion_subject_inactive");
+    }
     const existing = this.storageFileOrphanRepairs.get(repair.r2Key);
     if (
       existing &&
@@ -951,6 +1080,60 @@ export class MemoryAuthStore implements AuthStore {
       createdAt: existing?.createdAt ?? repair.createdAt,
       updatedAt: Math.max(existing?.updatedAt ?? 0, repair.updatedAt),
     });
+    return true;
+  }
+
+  async reserveStorageFileWriteFence(
+    fence: StorageFileWriteFence,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    if (
+      this.accountDeletionJobs.has(fence.userId) ||
+      !this.users.has(fence.userId) ||
+      !this.clients.has(fence.clientId) ||
+      this.storageFileWriteFences.has(fence.r2Key) ||
+      this.storageFileOrphanRepairs.has(fence.r2Key)
+    ) {
+      return false;
+    }
+    this.storageFileWriteFences.set(fence.r2Key, { ...fence });
+    return true;
+  }
+
+  async completeStorageFileWriteFence(
+    fence: StorageFileWriteFence,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    const current = this.storageFileWriteFences.get(fence.r2Key);
+    if (!sameStorageFileWriteFence(current, fence)) return false;
+    return this.storageFileWriteFences.delete(fence.r2Key);
+  }
+
+  async convertStorageFileWriteFenceToRepair(
+    fence: StorageFileWriteFence,
+    now: number,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    if (!Number.isSafeInteger(now) || now < 0) {
+      throw new RangeError("storage_file_write_fence_now_invalid");
+    }
+    const current = this.storageFileWriteFences.get(fence.r2Key);
+    if (!sameStorageFileWriteFence(current, fence)) return false;
+    const repair = this.storageFileOrphanRepairs.get(fence.r2Key);
+    if (
+      repair &&
+      (repair.userId !== fence.userId || repair.clientId !== fence.clientId)
+    ) {
+      return false;
+    }
+    this.storageFileOrphanRepairs.set(fence.r2Key, {
+      userId: fence.userId,
+      clientId: fence.clientId,
+      r2Key: fence.r2Key,
+      createdAt: repair?.createdAt ?? fence.createdAt,
+      updatedAt: Math.max(repair?.updatedAt ?? 0, now),
+    });
+    this.storageFileWriteFences.delete(fence.r2Key);
     return true;
   }
 
@@ -995,10 +1178,18 @@ export class MemoryAuthStore implements AuthStore {
   ): Promise<StorageFileOrphanRepairDisposition> {
     const current = this.storageFileOrphanRepairs.get(repair.r2Key);
     if (!sameStorageFileOrphanRepairOwner(current, repair)) return "missing";
-    const referenced = Array.from(this.storageFiles.values()).some(
+    const references = Array.from(this.storageFiles.values()).filter(
       (file) => file.r2Key === repair.r2Key,
     );
-    return referenced ? "referenced" : "orphan";
+    if (
+      references.some(
+        (file) =>
+          file.userId !== repair.userId || file.clientId !== repair.clientId,
+      )
+    ) {
+      return "conflict";
+    }
+    return references.length > 0 ? "referenced" : "orphan";
   }
 
   async completeStorageFileOrphanRepair(
@@ -1027,6 +1218,30 @@ export class MemoryAuthStore implements AuthStore {
     clientId: string,
   ): Promise<StorageUsage> {
     return usageFor(this, userId, clientId);
+  }
+
+  private assertSubjectWriteActive(subject: string | null): void {
+    if (subject && this.accountDeletionJobs.has(subject)) {
+      throw new Error("account_deletion_subject_inactive");
+    }
+  }
+
+  private hasAccountFinalizationResidue(subject: string): boolean {
+    return (
+      this.hasAccountCredentialsAndGrants(subject) ||
+      Array.from(this.storageRecords.values()).some(
+        (record) => record.userId === subject,
+      ) ||
+      Array.from(this.storageFiles.values()).some(
+        (file) => file.userId === subject,
+      ) ||
+      Array.from(this.storageFileWriteFences.values()).some(
+        (fence) => fence.userId === subject,
+      ) ||
+      Array.from(this.storageFileOrphanRepairs.values()).some(
+        (repair) => repair.userId === subject,
+      )
+    );
   }
 }
 
@@ -1069,6 +1284,19 @@ function sameStorageFileOrphanRepairOwner(
     current !== undefined &&
     current.userId === expected.userId &&
     current.clientId === expected.clientId
+  );
+}
+
+function sameStorageFileWriteFence(
+  current: StorageFileWriteFence | undefined,
+  expected: StorageFileWriteFence,
+): current is StorageFileWriteFence {
+  return (
+    current !== undefined &&
+    current.userId === expected.userId &&
+    current.clientId === expected.clientId &&
+    current.createdAt === expected.createdAt &&
+    current.expiresAt === expected.expiresAt
   );
 }
 

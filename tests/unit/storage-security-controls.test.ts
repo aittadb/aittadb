@@ -416,8 +416,9 @@ test("every bounded D1 cleanup query has an explicit deterministic order", async
   const cleanupQueries = prepared.filter((query) =>
     query.startsWith("DELETE FROM"),
   );
-  assert.equal(cleanupQueries.length, 9);
+  assert.equal(cleanupQueries.length, 10);
   for (const pattern of [
+    /DELETE FROM storage_file_write_fences .* ORDER BY fence\.expires_at ASC, fence\.r2_key ASC LIMIT \?\)/,
     /DELETE FROM authorization_codes .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
     /DELETE FROM authorization_requests .* ORDER BY ar\.expires_at ASC, ar\.rowid ASC LIMIT \?\)/,
     /DELETE FROM device_grants .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
@@ -748,6 +749,9 @@ async function migratedDatabase(): Promise<{
     "0005_admin_submission_results.sql",
     "0006_storage_file_orphan_repairs.sql",
     "0007_storage_file_orphan_repair_order.sql",
+    "0008_account_deletion_jobs.sql",
+    "0009_account_credential_purge.sql",
+    "0010_account_deletion_finalization.sql",
   ]) {
     sqlite.exec(
       await readFile(

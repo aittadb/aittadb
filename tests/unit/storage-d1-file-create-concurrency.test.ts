@@ -610,34 +610,62 @@ async function migratedDatabase(): Promise<DatabaseSync> {
 }
 
 function sqliteD1(database: DatabaseSync): D1Database {
+  const prepared = new WeakMap<
+    D1PreparedStatement,
+    { query: string; values: SQLInputValue[] }
+  >();
   return {
     prepare(query: string): D1PreparedStatement {
-      let values: SQLInputValue[] = [];
+      const execution = { query, values: [] as SQLInputValue[] };
       const statement: D1PreparedStatement = {
         bind(...nextValues: unknown[]): D1PreparedStatement {
-          values = nextValues as SQLInputValue[];
+          execution.values = nextValues as SQLInputValue[];
           return statement;
         },
         async first<T>(): Promise<T | null> {
           return (
-            (database.prepare(query).get(...values) as T | undefined) ?? null
+            (database.prepare(query).get(...execution.values) as
+              | T
+              | undefined) ?? null
           );
         },
         async all<T>(): Promise<D1Result<T>> {
           return {
             success: true,
-            results: database.prepare(query).all(...values) as T[],
+            results: database.prepare(query).all(...execution.values) as T[],
           };
         },
         async run<T>(): Promise<D1Result<T>> {
-          const result = database.prepare(query).run(...values);
+          const result = database.prepare(query).run(...execution.values);
           return {
             success: true,
             meta: { changes: Number(result.changes) },
           };
         },
       };
+      prepared.set(statement, execution);
       return statement;
+    },
+    async batch<T>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const results = statements.map((statement) => {
+          const execution = prepared.get(statement);
+          assert.ok(execution);
+          const result = database
+            .prepare(execution.query)
+            .run(...execution.values);
+          return {
+            success: true,
+            meta: { changes: Number(result.changes) },
+          } as D1Result<T>;
+        });
+        database.exec("COMMIT");
+        return results;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
     },
   };
 }

@@ -58,13 +58,13 @@ test("revoked access-token migration adds nullable subject ownership", async () 
 
     const store = new D1AuthStore(sqliteD1(sqlite));
     const subject = await createSubject(store, "migration-target", 1);
-    await store.startAccountDeletionJob(subject, 10);
     sqlite
       .prepare(
         "INSERT INTO revoked_access_tokens (jti, expires_at, revoked_at) VALUES (?, ?, ?)",
       )
       .run("legacy-unattributed", 500, 5);
     await store.revokeAccessTokenJti("owned-revocation", subject, 500, 6);
+    await store.startAccountDeletionJob(subject, 10);
 
     assert.deepEqual(
       await store.purgeAccountCredentialsAndGrants(subject, 10),
@@ -104,7 +104,6 @@ test("D1 and memory purge finite deterministic batches with subject isolation", 
           `${adapter.name}-control`,
           11,
         );
-        await fixture.store.startAccountDeletionJob(subject, 20);
         await seedCredentialSets(
           fixture.store,
           subject,
@@ -122,6 +121,7 @@ test("D1 and memory purge finite deterministic batches with subject isolation", 
         await seedAnonymousGrantState(fixture.store, clients[0]!);
         await seedStorage(fixture.store, subject, clients[0]!, "target");
         await seedStorage(fixture.store, otherSubject, clients[0]!, "control");
+        await fixture.store.startAccountDeletionJob(subject, 20);
 
         const before = await fixture.snapshot(subject);
         assert.deepEqual(
@@ -255,7 +255,6 @@ test("D1 retries safely after an interrupted child-before-parent purge", async (
     const clients = await createClients(store, "interruption");
     const subject = await createSubject(store, "interrupted-target", 50);
     const otherSubject = await createSubject(store, "interrupted-control", 51);
-    await store.startAccountDeletionJob(subject, 60);
     await seedCredentialSets(store, subject, clients, "interrupted-target", 1);
     await seedCredentialSets(
       store,
@@ -264,6 +263,7 @@ test("D1 retries safely after an interrupted child-before-parent purge", async (
       "interrupted-control",
       1,
     );
+    await store.startAccountDeletionJob(subject, 60);
 
     await assert.rejects(
       store.purgeAccountCredentialsAndGrants(subject, 100),
@@ -276,7 +276,7 @@ test("D1 retries safely after an interrupted child-before-parent purge", async (
 
     assert.deepEqual(
       await inspectionStore.purgeAccountCredentialsAndGrants(subject, 100),
-      { deletedCount: 5, done: true },
+      { deletedCount: 6, done: true },
     );
     assert.deepEqual(
       credentialCounts(sqliteSnapshot(sqlite, subject)),
@@ -299,6 +299,7 @@ interface CredentialSnapshot {
   refreshTokens: number;
   refreshFamilies: number;
   revokedJtis: number;
+  adminSubmissions: number;
   storageRecords: number;
   storageFiles: number;
 }
@@ -458,6 +459,15 @@ async function seedCredentialSets(
       index + 1_400,
       index + 100,
     );
+    assert.equal(
+      await store.claimAdminOperationSubmission(
+        `${prefix}-admin-${suffix}`,
+        subject,
+        index + 100,
+        index + 1_500,
+      ),
+      true,
+    );
   }
 }
 
@@ -544,11 +554,12 @@ function credentialCounts(snapshot: CredentialSnapshot): number[] {
     snapshot.refreshTokens,
     snapshot.refreshFamilies,
     snapshot.revokedJtis,
+    snapshot.adminSubmissions,
   ];
 }
 
 function filledCounts(value: number): number[] {
-  return Array.from({ length: 7 }, () => value);
+  return Array.from({ length: 8 }, () => value);
 }
 
 function credentialTotal(snapshot: CredentialSnapshot): number {
@@ -587,6 +598,10 @@ function memorySnapshot(
       store.revokedJtis,
       (value) => value.subject === subject,
     ),
+    adminSubmissions: countValues(
+      store.adminOperationSubmissions,
+      (value) => value.userId === subject,
+    ),
     storageRecords: countValues(
       store.storageRecords,
       (value) => value.userId === subject,
@@ -621,6 +636,11 @@ function sqliteSnapshot(
     refreshTokens: sqliteCount(sqlite, "refresh_tokens", subject),
     refreshFamilies: sqliteCount(sqlite, "refresh_token_families", subject),
     revokedJtis: sqliteCount(sqlite, "revoked_access_tokens", subject),
+    adminSubmissions: sqliteCount(
+      sqlite,
+      "admin_operation_submissions",
+      subject,
+    ),
     storageRecords: sqliteCount(sqlite, "storage_records", subject),
     storageFiles: sqliteCount(sqlite, "storage_files", subject),
   };

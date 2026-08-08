@@ -2,6 +2,11 @@ import { uuid } from "../crypto";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
+  assertStorageFileWriteFenceBatchLimit,
+  assertStorageFileWriteFence,
+  STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH,
+} from "../storage-file-write-fence";
+import {
   accountDeletionClaimExpiry,
   assertAccountDeletionNow,
   assertAccountDeletionRetryAt,
@@ -37,6 +42,7 @@ import type {
   StorageFileMetadata,
   StorageFileOrphanRepair,
   StorageFileOrphanRepairDisposition,
+  StorageFileWriteFence,
   StorageLimits,
   StorageListPage,
   StorageListPosition,
@@ -60,10 +66,66 @@ const ACCOUNT_CREDENTIAL_PURGE_DELETIONS = [
   "DELETE FROM refresh_tokens WHERE id IN (SELECT id FROM refresh_tokens WHERE user_id = ? ORDER BY expires_at ASC, id ASC LIMIT ?)",
   "DELETE FROM refresh_token_families WHERE id IN (SELECT family.id FROM refresh_token_families family WHERE family.user_id = ? AND NOT EXISTS (SELECT 1 FROM refresh_tokens token WHERE token.family_id = family.id) ORDER BY family.created_at ASC, family.id ASC LIMIT ?)",
   "DELETE FROM revoked_access_tokens WHERE jti IN (SELECT jti FROM revoked_access_tokens WHERE user_id = ? ORDER BY revoked_at ASC, jti ASC LIMIT ?)",
+  "DELETE FROM admin_operation_submissions WHERE token_hash IN (SELECT token_hash FROM admin_operation_submissions WHERE user_id = ? ORDER BY expires_at ASC, token_hash ASC LIMIT ?)",
 ] as const;
 
 const ACCOUNT_CREDENTIAL_PURGE_REMAINS =
-  "SELECT 1 AS remaining FROM authorization_codes WHERE user_id = ?1 UNION ALL SELECT 1 FROM authorization_requests WHERE user_id = ?1 UNION ALL SELECT 1 FROM device_grants WHERE user_id = ?1 UNION ALL SELECT 1 FROM consents WHERE user_id = ?1 UNION ALL SELECT 1 FROM refresh_tokens WHERE user_id = ?1 UNION ALL SELECT 1 FROM refresh_token_families WHERE user_id = ?1 UNION ALL SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1 LIMIT 1";
+  "SELECT 1 AS remaining FROM authorization_codes WHERE user_id = ?1 UNION ALL SELECT 1 FROM authorization_requests WHERE user_id = ?1 UNION ALL SELECT 1 FROM device_grants WHERE user_id = ?1 UNION ALL SELECT 1 FROM consents WHERE user_id = ?1 UNION ALL SELECT 1 FROM refresh_tokens WHERE user_id = ?1 UNION ALL SELECT 1 FROM refresh_token_families WHERE user_id = ?1 UNION ALL SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1 UNION ALL SELECT 1 FROM admin_operation_submissions WHERE user_id = ?1 LIMIT 1";
+
+const DELETE_FINALIZED_ACCOUNT_USER = `
+DELETE FROM users
+WHERE id = ?1
+  AND EXISTS (
+    SELECT 1 FROM account_deletion_jobs
+    WHERE subject = ?1 AND state = 'running' AND attempt = ?2 AND available_at > ?3
+  )
+  AND NOT EXISTS (SELECT 1 FROM authorization_requests WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM authorization_codes WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM device_grants WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM refresh_token_families WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM refresh_tokens WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM consents WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM admin_operation_submissions WHERE user_id = ?1)`;
+
+const COMPLETE_FINALIZED_ACCOUNT_JOB = `
+UPDATE account_deletion_jobs
+SET state = 'completed', available_at = NULL, updated_at = ?3, completed_at = ?3
+WHERE subject = ?1 AND state = 'running' AND attempt = ?2 AND available_at > ?3
+  AND NOT EXISTS (SELECT 1 FROM users WHERE id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM authorization_requests WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM authorization_codes WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM device_grants WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM refresh_token_families WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM refresh_tokens WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM consents WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM admin_operation_submissions WHERE user_id = ?1)`;
+
+const SELECT_CLEAN_COMPLETED_ACCOUNT_JOB = `
+SELECT 1 AS clean FROM account_deletion_jobs
+WHERE subject = ?1 AND state = 'completed' AND attempt = ?2
+  AND NOT EXISTS (SELECT 1 FROM users WHERE id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM authorization_requests WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM authorization_codes WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM device_grants WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM refresh_token_families WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM refresh_tokens WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM consents WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM admin_operation_submissions WHERE user_id = ?1)`;
 
 const UPSERT_STORAGE_RECORD_WITH_LIMITS = `
 INSERT INTO storage_records (user_id, client_id, key, value_json, created_at, updated_at)
@@ -149,6 +211,18 @@ export class D1AuthStore implements AuthStore {
   constructor(private readonly db: D1Database) {}
 
   async cleanup(now: number): Promise<void> {
+    await this.db
+      .prepare(
+        "INSERT INTO storage_file_orphan_repairs (r2_key, user_id, client_id, created_at, updated_at) SELECT r2_key, user_id, client_id, created_at, ? FROM storage_file_write_fences WHERE expires_at <= ? ORDER BY expires_at ASC, r2_key ASC LIMIT ? ON CONFLICT(r2_key) DO UPDATE SET updated_at = MAX(storage_file_orphan_repairs.updated_at, excluded.updated_at) WHERE storage_file_orphan_repairs.user_id = excluded.user_id AND storage_file_orphan_repairs.client_id = excluded.client_id",
+      )
+      .bind(now, now, STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH)
+      .run();
+    await this.db
+      .prepare(
+        "DELETE FROM storage_file_write_fences WHERE r2_key IN (SELECT fence.r2_key FROM storage_file_write_fences fence WHERE fence.expires_at <= ? AND EXISTS (SELECT 1 FROM storage_file_orphan_repairs repair WHERE repair.r2_key = fence.r2_key AND repair.user_id = fence.user_id AND repair.client_id = fence.client_id) ORDER BY fence.expires_at ASC, fence.r2_key ASC LIMIT ?)",
+      )
+      .bind(now, STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH)
+      .run();
     const deletions: Array<[string, ...unknown[]]> = [
       [
         "DELETE FROM authorization_codes WHERE rowid IN (SELECT rowid FROM authorization_codes WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?)",
@@ -370,20 +444,54 @@ export class D1AuthStore implements AuthStore {
     return mutationChanges(result) === 1;
   }
 
-  async completeAccountDeletionJob(
+  async finalizeAccountDeletion(
     subject: string,
     attempt: number,
     now: number,
   ): Promise<boolean> {
     assertAccountDeletionNow(now);
-    if (!Number.isSafeInteger(attempt) || attempt < 1) return false;
-    const result = await this.db
-      .prepare(
-        "UPDATE account_deletion_jobs SET state = 'completed', available_at = NULL, updated_at = ?, completed_at = ? WHERE subject = ? AND state = 'running' AND attempt = ? AND available_at > ?",
-      )
-      .bind(now, now, subject, attempt, now)
-      .run();
-    return mutationChanges(result) === 1;
+    if (
+      subject.length === 0 ||
+      subject.length > 128 ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 1
+    ) {
+      return false;
+    }
+    if (!this.db.batch) {
+      throw new Error("account_deletion_finalization_batch_unavailable");
+    }
+
+    const results = await this.db.batch([
+      this.db
+        .prepare(DELETE_FINALIZED_ACCOUNT_USER)
+        .bind(subject, attempt, now),
+      this.db
+        .prepare(COMPLETE_FINALIZED_ACCOUNT_JOB)
+        .bind(subject, attempt, now),
+    ]);
+    if (results.length !== 2 || results.some((result) => !result.success)) {
+      throw new Error("account_deletion_finalization_failed");
+    }
+    const deletedUsers = requiredMutationChanges(
+      results[0]!,
+      "account_deletion_finalization_failed",
+    );
+    const completedJobs = requiredMutationChanges(
+      results[1]!,
+      "account_deletion_finalization_failed",
+    );
+    if (completedJobs === 1 && (deletedUsers === 0 || deletedUsers === 1)) {
+      return true;
+    }
+    if (deletedUsers !== 0 || completedJobs !== 0) {
+      throw new Error("account_deletion_finalization_failed");
+    }
+    const completed = await this.db
+      .prepare(SELECT_CLEAN_COMPLETED_ACCOUNT_JOB)
+      .bind(subject, attempt)
+      .first<Row>();
+    return Boolean(completed);
   }
 
   async purgeAccountCredentialsAndGrants(
@@ -489,6 +597,39 @@ export class D1AuthStore implements AuthStore {
       staged += mutationChanges(results[index]!);
     }
     return { selected: selected.length, staged };
+  }
+
+  async stageExpiredAccountFileWriteFences(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<number> {
+    assertStorageFileWriteFenceBatchLimit(limit);
+    assertAccountDeletionNow(now);
+    if (!Number.isSafeInteger(attempt) || attempt < 1) return 0;
+    if (!this.db.batch) {
+      throw new Error("storage_file_write_fence_batch_unavailable");
+    }
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          "INSERT INTO storage_file_orphan_repairs (r2_key, user_id, client_id, created_at, updated_at) SELECT fence.r2_key, fence.user_id, fence.client_id, fence.created_at, ?3 FROM storage_file_write_fences fence WHERE fence.user_id = ?1 AND fence.expires_at <= ?3 AND EXISTS (SELECT 1 FROM account_deletion_jobs job WHERE job.subject = ?1 AND job.state = 'running' AND job.attempt = ?2 AND job.available_at > ?3) ORDER BY fence.expires_at ASC, fence.r2_key ASC LIMIT ?4 ON CONFLICT(r2_key) DO UPDATE SET updated_at = MAX(storage_file_orphan_repairs.updated_at, excluded.updated_at) WHERE storage_file_orphan_repairs.user_id = excluded.user_id AND storage_file_orphan_repairs.client_id = excluded.client_id",
+        )
+        .bind(subject, attempt, now, limit),
+      this.db
+        .prepare(
+          "DELETE FROM storage_file_write_fences WHERE r2_key IN (SELECT fence.r2_key FROM storage_file_write_fences fence WHERE fence.user_id = ?1 AND fence.expires_at <= ?3 AND EXISTS (SELECT 1 FROM account_deletion_jobs job WHERE job.subject = ?1 AND job.state = 'running' AND job.attempt = ?2 AND job.available_at > ?3) AND EXISTS (SELECT 1 FROM storage_file_orphan_repairs repair WHERE repair.r2_key = fence.r2_key AND repair.user_id = fence.user_id AND repair.client_id = fence.client_id) ORDER BY fence.expires_at ASC, fence.r2_key ASC LIMIT ?4)",
+        )
+        .bind(subject, attempt, now, limit),
+    ]);
+    if (results.length !== 2 || results.some((result) => !result.success)) {
+      throw new Error("storage_file_write_fence_conversion_failed");
+    }
+    return requiredMutationChanges(
+      results[1]!,
+      "storage_file_write_fence_conversion_failed",
+    );
   }
 
   async hasStorageFilesForSubject(subject: string): Promise<boolean> {
@@ -1162,6 +1303,93 @@ export class D1AuthStore implements AuthStore {
     return mutationChanges(result) === 1;
   }
 
+  async reserveStorageFileWriteFence(
+    fence: StorageFileWriteFence,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    const result = await this.db
+      .prepare(
+        "INSERT INTO storage_file_write_fences (r2_key, user_id, client_id, created_at, expires_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM users WHERE id = ?) AND EXISTS (SELECT 1 FROM oauth_clients WHERE id = ?) AND NOT EXISTS (SELECT 1 FROM account_deletion_jobs WHERE subject = ?) AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE r2_key = ?) ON CONFLICT(r2_key) DO NOTHING",
+      )
+      .bind(
+        fence.r2Key,
+        fence.userId,
+        fence.clientId,
+        fence.createdAt,
+        fence.expiresAt,
+        fence.userId,
+        fence.clientId,
+        fence.userId,
+        fence.r2Key,
+      )
+      .run();
+    return mutationChanges(result) === 1;
+  }
+
+  async completeStorageFileWriteFence(
+    fence: StorageFileWriteFence,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    const result = await this.db
+      .prepare(
+        "DELETE FROM storage_file_write_fences WHERE r2_key = ? AND user_id = ? AND client_id = ? AND created_at = ? AND expires_at = ?",
+      )
+      .bind(
+        fence.r2Key,
+        fence.userId,
+        fence.clientId,
+        fence.createdAt,
+        fence.expiresAt,
+      )
+      .run();
+    return mutationChanges(result) === 1;
+  }
+
+  async convertStorageFileWriteFenceToRepair(
+    fence: StorageFileWriteFence,
+    now: number,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    if (!Number.isSafeInteger(now) || now < 0) {
+      throw new RangeError("storage_file_write_fence_now_invalid");
+    }
+    if (!this.db.batch) {
+      throw new Error("storage_file_write_fence_batch_unavailable");
+    }
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          "INSERT INTO storage_file_orphan_repairs (r2_key, user_id, client_id, created_at, updated_at) SELECT r2_key, user_id, client_id, created_at, ? FROM storage_file_write_fences WHERE r2_key = ? AND user_id = ? AND client_id = ? AND created_at = ? AND expires_at = ? ON CONFLICT(r2_key) DO UPDATE SET updated_at = MAX(storage_file_orphan_repairs.updated_at, excluded.updated_at) WHERE storage_file_orphan_repairs.user_id = excluded.user_id AND storage_file_orphan_repairs.client_id = excluded.client_id",
+        )
+        .bind(
+          now,
+          fence.r2Key,
+          fence.userId,
+          fence.clientId,
+          fence.createdAt,
+          fence.expiresAt,
+        ),
+      this.db
+        .prepare(
+          "DELETE FROM storage_file_write_fences WHERE r2_key = ? AND user_id = ? AND client_id = ? AND created_at = ? AND expires_at = ? AND EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE r2_key = ? AND user_id = ? AND client_id = ?)",
+        )
+        .bind(
+          fence.r2Key,
+          fence.userId,
+          fence.clientId,
+          fence.createdAt,
+          fence.expiresAt,
+          fence.r2Key,
+          fence.userId,
+          fence.clientId,
+        ),
+    ]);
+    if (results.length !== 2 || results.some((result) => !result.success)) {
+      throw new Error("storage_file_write_fence_conversion_failed");
+    }
+    return mutationChanges(results[1]!) === 1;
+  }
+
   async listStorageFileOrphanRepairs(
     limit: number,
   ): Promise<StorageFileOrphanRepair[]> {
@@ -1204,14 +1432,15 @@ export class D1AuthStore implements AuthStore {
   ): Promise<StorageFileOrphanRepairDisposition> {
     const row = await this.db
       .prepare(
-        "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE r2_key = ? AND user_id = ? AND client_id = ?) THEN 'missing' WHEN EXISTS (SELECT 1 FROM storage_files WHERE r2_key = ?) THEN 'referenced' ELSE 'orphan' END AS disposition",
+        "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE r2_key = ?1 AND user_id = ?2 AND client_id = ?3) THEN 'missing' WHEN EXISTS (SELECT 1 FROM storage_files WHERE r2_key = ?1 AND (user_id <> ?2 OR client_id <> ?3)) THEN 'conflict' WHEN EXISTS (SELECT 1 FROM storage_files WHERE r2_key = ?1) THEN 'referenced' ELSE 'orphan' END AS disposition",
       )
-      .bind(repair.r2Key, repair.userId, repair.clientId, repair.r2Key)
+      .bind(repair.r2Key, repair.userId, repair.clientId)
       .first<Row>();
     const disposition = row?.disposition;
     if (
       disposition !== "missing" &&
       disposition !== "referenced" &&
+      disposition !== "conflict" &&
       disposition !== "orphan"
     ) {
       throw new Error("storage_file_orphan_repair_classification_failed");
