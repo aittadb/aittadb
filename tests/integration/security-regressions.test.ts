@@ -7,6 +7,7 @@ import {
   approveAuthorizationRequest,
   createClientRegistration,
   issueTokens,
+  verifyAccessToken,
 } from "../../src/oauth";
 import { MemoryAuthStore } from "../../src/store/memory";
 import type {
@@ -482,6 +483,12 @@ test("ID tokens cannot act as access tokens and UserInfo requires openid", async
   assert.equal(idUserInfo?.status, 401);
   const idStorage = await bearerGet(app, "/storage/records", idToken);
   assert.equal(idStorage?.status, 401);
+  const idFileStorage = await bearerGet(app, "/storage/files", idToken);
+  assert.equal(idFileStorage?.status, 401);
+  await assert.rejects(
+    verifyAccessToken(idToken, config, store, registration.client.id),
+    /invalid_token_use/,
+  );
   const idIntrospection = await introspect(
     app,
     registration.client.id,
@@ -489,6 +496,29 @@ test("ID tokens cannot act as access tokens and UserInfo requires openid", async
     idToken,
   );
   assert.deepEqual(await idIntrospection?.json(), { active: false });
+
+  const accessIntrospection = await introspect(
+    app,
+    registration.client.id,
+    registration.secret!,
+    accessToken,
+  );
+  const accessIntrospectionJson = (await accessIntrospection?.json()) as {
+    active: boolean;
+    aud?: string;
+    token_use?: string;
+  };
+  assert.equal(accessIntrospectionJson.active, true);
+  assert.equal(accessIntrospectionJson.aud, registration.client.id);
+  assert.equal(accessIntrospectionJson.token_use, "access");
+
+  const refreshIntrospection = await introspect(
+    app,
+    registration.client.id,
+    registration.secret!,
+    String(tokens.refresh_token),
+  );
+  assert.deepEqual(await refreshIntrospection?.json(), { active: false });
 
   const nonOidc = await issueTokens({
     config,

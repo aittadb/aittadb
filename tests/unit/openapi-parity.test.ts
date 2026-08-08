@@ -269,6 +269,12 @@ test("OpenAPI documents implemented security controls", () => {
     String(openApiOperation("/oauth/token", "post").description),
     /before any authorization code, device code, or refresh token is consumed/,
   );
+  const introspectionDescription = String(
+    openApiOperation("/oauth/introspect", "post").description,
+  );
+  assert.match(introspectionDescription, /token_use is access/);
+  assert.match(introspectionDescription, /audience is the authenticated/);
+  assert.match(introspectionDescription, /ID tokens, opaque refresh tokens/);
   for (const [path, method] of [
     ["/storage/files", "post"],
     ["/storage/files/{key}", "post"],

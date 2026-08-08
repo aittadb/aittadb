@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { loadConfig } from "../../src/config";
 import { MemoryAuthStore } from "../../src/store/memory";
 import { createClientRegistration, issueTokens } from "../../src/oauth";
-import { nowSeconds, sha256 } from "../../src/crypto";
+import { nowSeconds, publicJwk, sha256, verifyJwt } from "../../src/crypto";
 import { BROWSER_SESSION_CLIENT_ID } from "../../src/system-client";
 import {
   cookieValue,
@@ -1535,6 +1535,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
 
 test("authorization code with PKCE enforces exact redirect URI and one-time code use", async () => {
   const env = await testEnv();
+  const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const verifier =
@@ -1622,7 +1623,24 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
       }),
     }),
   );
-  assert.ok(((await token?.json()) as { access_token: string }).access_token);
+  const tokenJson = (await token?.json()) as {
+    access_token: string;
+    id_token: string;
+  };
+  assert.ok(tokenJson.access_token);
+  assert.ok(tokenJson.id_token);
+  const verifiedIdToken = await verifyJwt(
+    tokenJson.id_token,
+    [publicJwk(config.jwtPrivateJwk, config.jwtKeyId)],
+    {
+      issuer: config.issuerUrl,
+      audience: client.id,
+      now: nowSeconds(),
+    },
+  );
+  assert.equal(verifiedIdToken.claims.aud, client.id);
+  assert.equal(verifiedIdToken.claims.nonce, "n");
+  assert.equal(verifiedIdToken.claims.token_use, "id");
 
   const secondUse = await app.fetch(
     new Request("https://aittadb.example.test/oauth/token", {

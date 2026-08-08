@@ -498,6 +498,8 @@ export const openApiSpec = {
       },
       post: {
         summary: "Token introspection for confidential clients",
+        description:
+          "Only a signed, unexpired AittaDB access-token JWT whose token_use is access and whose audience is the authenticated confidential client can be active. ID tokens, opaque refresh tokens, tokens for another client, revoked tokens, and invalid JWTs return active false without disclosing why.",
         security: [{ clientSecretBasic: [] }],
         requestBody: {
           required: true,
@@ -1443,7 +1445,13 @@ export const openApiSpec = {
   },
   components: {
     securitySchemes: {
-      bearer: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+      bearer: {
+        type: "http",
+        scheme: "bearer",
+        bearerFormat: "JWT",
+        description:
+          "AittaDB access-token JWT only. ID tokens and refresh tokens are not bearer authorization credentials.",
+      },
       clientSecretBasic: { type: "http", scheme: "basic" },
     },
     schemas: {
