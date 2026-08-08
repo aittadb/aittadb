@@ -122,7 +122,7 @@ OpenAPI statically describes every operation a version can support: paths, metho
 
 Hypermedia describes the current resource and what this caller can do next. A particular response supplies the actual target and only the controls valid in that context. A client can use AittaDB from its entry resource without first loading OpenAPI.
 
-Collection clients follow the concrete `next` link returned by the current representation rather than constructing cursor URLs. For an unchanged collection, this produces bounded forward traversal in which every authorized item appears exactly once; HTML exposes the same transition as its next-page link.
+Collection clients follow the concrete `next` link returned by the current representation rather than constructing cursor URLs. For an unchanged record or file collection, this produces bounded forward traversal in which every authorized logical item appears exactly once; HTML exposes the same transition as its next-page link. File collection controls expose logical metadata and item URLs, never physical object-store keys.
 
 ## Protocol Representations
 

@@ -833,7 +833,7 @@ export const openApiSpec = {
       get: {
         summary:
           "List file metadata for the access token's local user and OAuth client",
-        description: `Requires storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. File bytes are stored in R2 and searchable metadata is stored in D1. Results use encrypted cursor pagination and report aggregate record-and-file usage only for the authenticated local-user and OAuth-client namespace. ${tokenBoundCorsDescription}`,
+        description: `Requires storage.read for API use. An HTML request without a bearer token renders this collection's list and item-navigation interface. File bytes are stored in R2 and searchable logical metadata is stored in D1; physical R2 keys are never returned. Results use encrypted cursor pagination and report aggregate record-and-file usage only for the authenticated local-user and OAuth-client namespace. ${tokenBoundCorsDescription}`,
         parameters: [
           storageBrowserKeyParameter,
           storagePageSizeParameter,
