@@ -81,6 +81,44 @@ test("OpenAPI documents the statistics feature gate", () => {
   assert.match(String(statistics.description), /before querying D1/);
 });
 
+test("OpenAPI documents the File Storage feature gate", () => {
+  for (const [path, method] of [
+    ["/storage/files", "get"],
+    ["/storage/files", "post"],
+    ["/storage/files/{key}", "get"],
+    ["/storage/files/{key}", "post"],
+    ["/storage/files/{key}", "put"],
+    ["/storage/files/{key}", "delete"],
+  ] as const) {
+    const unavailable = asObject(
+      operationResponses(path, method)["503"],
+      `${method.toUpperCase()} ${path} unavailable response`,
+    );
+    assert.match(String(unavailable.description), /File Storage feature/);
+    assert.match(String(unavailable.description), /before client lookup/);
+    assert.match(String(unavailable.description), /D1 file-metadata work/);
+    assert.match(String(unavailable.description), /R2 access/);
+    const content = asObject(unavailable.content, "unavailable content");
+    assert.ok("application/json" in content);
+    assert.ok("application/vnd.aittadb+json; version=0.1" in content);
+    assert.ok("text/html" in content);
+  }
+
+  const featureProperties = asObject(
+    asObject(
+      openApiSchema("ServiceMetadataData").properties,
+      "service properties",
+    ).features,
+    "feature availability",
+  );
+  const files = asObject(
+    asObject(featureProperties.properties, "feature properties").files,
+    "files feature",
+  );
+  assert.match(String(files.description), /file routes return 503/);
+  assert.match(String(files.description), /before D1 metadata, R2, or cleanup/);
+});
+
 test("delegated storage checks cannot fall back to an implicit inventory", async () => {
   const { handlerSource } = await routeSources();
   assert.throws(

@@ -108,7 +108,7 @@ export async function storageBrowserEndpoint(
           collectionPath(kind),
           request,
           signedIn,
-          config.features.records,
+          siblingStorageEnabled(config, kind),
         );
       }
       return redirect(`${collectionPath(kind)}/${encodeStorageKey(key)}`, 303);
@@ -137,7 +137,7 @@ export async function storageBrowserEndpoint(
               url.pathname,
               request,
               true,
-              config.features.records,
+              siblingStorageEnabled(config, kind),
             )
           : accessToken;
       }
@@ -161,7 +161,7 @@ export async function storageBrowserEndpoint(
           target.pathname,
           request,
           true,
-          config.features.records,
+          siblingStorageEnabled(config, kind),
         );
       }
       response.headers.set("set-cookie", csrfCookie(csrf));
@@ -173,7 +173,7 @@ export async function storageBrowserEndpoint(
         kind,
         resource.type === "item" ? resource.key : "",
         false,
-        config.features.records,
+        siblingStorageEnabled(config, kind),
       );
     }
   }
@@ -185,7 +185,7 @@ export async function storageBrowserEndpoint(
         kind,
         resource.type === "item" ? resource.key : "",
         hasBrowserSession(request, identityProvider),
-        config.features.records,
+        siblingStorageEnabled(config, kind),
       );
     }
     const operation = browserOperation(kind, resource, "GET");
@@ -197,7 +197,7 @@ export async function storageBrowserEndpoint(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
-      config.features.records,
+      siblingStorageEnabled(config, kind),
     );
   }
 
@@ -261,7 +261,7 @@ async function handleRecordForm(
       "records",
       url.pathname,
       request,
-      config.features.records,
+      config.features.files,
     );
   }
   if (form.get("ui") !== "1")
@@ -281,7 +281,7 @@ async function handleRecordForm(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
-      config.features.records,
+      config.features.files,
     );
   }
   const authorized = await browserStorageHeaders(
@@ -301,7 +301,7 @@ async function handleRecordForm(
       url.pathname,
       request,
       hasBrowserSession(request, identityProvider),
-      config.features.records,
+      config.features.files,
     );
   }
   const { headers } = authorized;
@@ -326,7 +326,7 @@ async function handleRecordForm(
     target.pathname,
     request,
     hasBrowserSession(request, identityProvider),
-    config.features.records,
+    config.features.files,
   );
 }
 
@@ -522,7 +522,7 @@ async function renderStorageResponse(
   retryHref: string,
   request?: Request,
   signedIn = false,
-  recordsEnabled = true,
+  siblingStorageEnabled = true,
 ): Promise<Response> {
   if (request && !acceptsHtml(request)) return response;
   if (!isJsonMediaType(response.headers.get("content-type") ?? "")) {
@@ -541,7 +541,9 @@ async function renderStorageResponse(
     resourceHref: retryHref,
     csrf,
     signedIn,
-    recordsEnabled,
+    ...(kind === "records"
+      ? { filesEnabled: siblingStorageEnabled }
+      : { recordsEnabled: siblingStorageEnabled }),
   });
   const headers = new Headers(response.headers);
   if (request) headers.set("set-cookie", csrfCookie(csrf));
@@ -591,13 +593,25 @@ function storageFormResponse(
   kind: StorageKind,
   key: string,
   signedIn: boolean,
-  recordsEnabled: boolean,
+  siblingStorageEnabled: boolean,
 ): Response {
   const csrf = csrfTokenForRequest(request);
   const page =
     kind === "records"
-      ? recordStorageFormPage(csrf, key, signedIn)
-      : fileStorageFormPage(csrf, key, signedIn, undefined, recordsEnabled);
+      ? recordStorageFormPage(
+          csrf,
+          key,
+          signedIn,
+          undefined,
+          siblingStorageEnabled,
+        )
+      : fileStorageFormPage(
+          csrf,
+          key,
+          signedIn,
+          undefined,
+          siblingStorageEnabled,
+        );
   return html(page, { headers: { "set-cookie": csrfCookie(csrf) } });
 }
 
@@ -679,6 +693,10 @@ function collectionPath(kind: StorageKind): string {
   return `/storage/${kind}`;
 }
 
+function siblingStorageEnabled(config: AppConfig, kind: StorageKind): boolean {
+  return kind === "records" ? config.features.files : config.features.records;
+}
+
 function canonicalStorageUrl(url: URL): URL {
   const target = new URL(url);
   const cursor = target.searchParams.get("cursor");
@@ -706,7 +724,7 @@ function storageFormReadError(
   kind: StorageKind,
   retryHref: string,
   request: Request,
-  recordsEnabled: boolean,
+  siblingStorageEnabled: boolean,
 ): Promise<Response> {
   const tooLarge =
     error instanceof Error && error.message === "request_too_large";
@@ -723,7 +741,7 @@ function storageFormReadError(
     retryHref,
     request,
     false,
-    recordsEnabled,
+    siblingStorageEnabled,
   );
 }
 

@@ -932,6 +932,8 @@ function storageCollectionLinks(
   page: StorageCollectionPage,
 ) {
   const other = kind === "records" ? "files" : "records";
+  const otherEnabled =
+    kind === "records" ? config.features.files : config.features.records;
   return [
     link("self", storagePageHref(config, kind, page.pageSize, page.cursor), {
       type: HYPERMEDIA_MEDIA_TYPE,
@@ -945,7 +947,7 @@ function storageCollectionLinks(
           ),
         ]
       : []),
-    ...(kind === "files" && !config.features.records
+    ...(!otherEnabled
       ? []
       : [
           link(`storage-${other}`, `${config.issuerUrl}/storage/${other}`, {

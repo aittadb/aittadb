@@ -13,8 +13,9 @@ export function recordStorageFormPage(
   key = "",
   signedIn = false,
   payload?: Record<string, unknown>,
+  filesEnabled = true,
 ): string {
-  return storageFormPage("records", csrf, key, signedIn, payload);
+  return storageFormPage("records", csrf, key, signedIn, payload, filesEnabled);
 }
 
 export function fileStorageFormPage(
@@ -33,7 +34,7 @@ function storageFormPage(
   key: string,
   signedIn: boolean,
   payload?: Record<string, unknown>,
-  recordsEnabled = true,
+  siblingStorageEnabled = true,
 ): string {
   const records = kind === "records";
   const collection = `/storage/${kind}`;
@@ -86,7 +87,7 @@ function storageFormPage(
         href: "/session",
         label: signedIn ? "My signed-in session" : "Sign in with ChatGPT",
       },
-      ...(records || recordsEnabled
+      ...(siblingStorageEnabled
         ? [
             {
               href: records ? "/storage/files" : "/storage/records",
@@ -311,12 +312,19 @@ export function storageResultPage(options: {
   csrf: string;
   signedIn: boolean;
   recordsEnabled?: boolean;
+  filesEnabled?: boolean;
 }): string {
   const payload = objectValue(options.payload) ?? {};
   const key =
     storagePayloadKey(payload) || keyFromResourceHref(options.resourceHref);
   return options.kind === "records"
-    ? recordStorageFormPage(options.csrf, key, options.signedIn, payload)
+    ? recordStorageFormPage(
+        options.csrf,
+        key,
+        options.signedIn,
+        payload,
+        options.filesEnabled,
+      )
     : fileStorageFormPage(
         options.csrf,
         key,

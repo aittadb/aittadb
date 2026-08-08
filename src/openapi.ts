@@ -100,6 +100,12 @@ const recordsUnavailableResponse = {
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
+const filesUnavailableResponse = {
+  description:
+    "The File Storage feature is disabled by deployment configuration. The request is rejected before client lookup, authentication, rate limiting, request-body parsing, D1 file-metadata work, R2 access, or cleanup scheduling. On enabled deployments, this status can also report the documented storage-write switch or R2 unavailability.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
 const storageQuotaExceededResponse = {
   description:
     "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
@@ -846,6 +852,7 @@ export const openApiSpec = {
           "401": { description: "Invalid bearer token" },
           "403": { description: "Missing storage.read scope" },
           "429": rateLimitedResponse(true),
+          "503": filesUnavailableResponse,
         },
       },
       post: {
@@ -928,11 +935,7 @@ export const openApiSpec = {
           "405": { description: "Browser representation marker missing" },
           "413": { description: "Multipart form or file exceeds the limit" },
           "429": rateLimitedResponse(true),
-          "503": {
-            description:
-              "Storage writes are disabled by deployment configuration or the R2 bucket is unavailable",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
+          "503": filesUnavailableResponse,
           "507": storageQuotaExceededResponse,
         },
       },
@@ -973,11 +976,7 @@ export const openApiSpec = {
           },
           "404": { description: "File not found" },
           "429": rateLimitedResponse(true),
-          "503": {
-            description:
-              "R2 is unavailable when the request asks for file bytes",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
+          "503": filesUnavailableResponse,
         },
       },
       post: {
@@ -1065,11 +1064,7 @@ export const openApiSpec = {
           "413": { description: "Multipart form or file exceeds the limit" },
           "415": { description: "Upload was not submitted as multipart data" },
           "429": rateLimitedResponse(true),
-          "503": {
-            description:
-              "Storage writes are disabled by deployment configuration or the R2 bucket is unavailable",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
+          "503": filesUnavailableResponse,
           "507": storageQuotaExceededResponse,
         },
       },
@@ -1097,11 +1092,7 @@ export const openApiSpec = {
           "413": { description: "File exceeds the AittaDB limit" },
           "409": storageConflictResponse,
           "429": rateLimitedResponse(true),
-          "503": {
-            description:
-              "Storage writes are disabled by deployment configuration or the R2 bucket is unavailable",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
+          "503": filesUnavailableResponse,
           "507": storageQuotaExceededResponse,
         },
       },
@@ -1120,10 +1111,7 @@ export const openApiSpec = {
           },
           "409": storageConflictResponse,
           "429": rateLimitedResponse(true),
-          "503": {
-            description: "R2 is unavailable for an existing file object",
-            content: hypermediaContent("#/components/schemas/HypermediaError"),
-          },
+          "503": filesUnavailableResponse,
         },
       },
     },
@@ -1686,7 +1674,12 @@ export const openApiSpec = {
                 description:
                   "When false, record routes return 503 feature_unavailable before repository work and record controls are omitted from runtime discovery.",
               },
-              files: { type: "boolean", default: true },
+              files: {
+                type: "boolean",
+                default: true,
+                description:
+                  "When false, file routes return 503 feature_unavailable before D1 metadata, R2, or cleanup work and file controls are omitted from runtime discovery.",
+              },
               statistics: {
                 type: "boolean",
                 default: true,

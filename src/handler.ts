@@ -167,6 +167,18 @@ export function createAittaDBWithStore(
           config,
         );
       }
+      if (!config.features.files && isFilesRoute(url.pathname)) {
+        const negotiationError = usesApplicationNegotiation(request, url)
+          ? hypermediaNegotiationError(request)
+          : null;
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "File Storage"),
+          config,
+        );
+      }
       const corsHeaders = isCorsControlledRoute(url.pathname)
         ? await corsHeadersForRequest(request, url, config, store)
         : new Headers();
@@ -328,7 +340,11 @@ async function route(
         ...(config.features.records
           ? ["D1-backed JSON records isolated by AittaDB user and client"]
           : []),
-        "R2-backed files with D1 metadata isolated by AittaDB user and client",
+        ...(config.features.files
+          ? [
+              "R2-backed files with D1 metadata isolated by AittaDB user and client",
+            ]
+          : []),
       ],
       plannedCapabilities: ["Persistent events and long-polling delivery"],
     };
@@ -358,9 +374,13 @@ async function route(
             }),
           ]
         : []),
-      link("storage-files", `${config.issuerUrl}/storage/files`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.files
+        ? [
+            link("storage-files", `${config.issuerUrl}/storage/files`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       link("documentation", `${config.issuerUrl}/docs`, { type: "text/html" }),
       link("describedby", `${config.issuerUrl}/openapi.json`, {
         type: "application/json",
@@ -429,7 +449,7 @@ async function route(
             ),
           ]
         : []),
-      ...(signedIn
+      ...(signedIn && config.features.files
         ? [
             action(
               "open-files",
@@ -1110,9 +1130,13 @@ async function localSessionEndpoint(
             }),
           ]
         : []),
-      link("storage-files", `${config.issuerUrl}/storage/files`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.files
+        ? [
+            link("storage-files", `${config.issuerUrl}/storage/files`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       ...(isAdmin
         ? [
             link("client-administration", `${config.issuerUrl}/admin/clients`, {
@@ -1166,13 +1190,17 @@ async function localSessionEndpoint(
             ),
           ]
         : []),
-      action(
-        "manage-session-files",
-        "Manage files",
-        "GET",
-        `${config.issuerUrl}/storage/files`,
-        { authorization: { scheme: "sites-session" }, fields: [] },
-      ),
+      ...(config.features.files
+        ? [
+            action(
+              "manage-session-files",
+              "Manage files",
+              "GET",
+              `${config.issuerUrl}/storage/files`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
       ...(isAdmin
         ? [
             action(
@@ -1194,7 +1222,14 @@ async function localSessionEndpoint(
     ],
   });
   return acceptsHtml(request)
-    ? html(sessionPage(user, isAdmin, config.features.records))
+    ? html(
+        sessionPage(
+          user,
+          isAdmin,
+          config.features.records,
+          config.features.files,
+        ),
+      )
     : hypermediaJson(request, document, {
         headers: { "set-cookie": csrfCookie(csrf) },
       });
@@ -2572,6 +2607,12 @@ export function isAittaDBRoute(pathname: string): boolean {
 function isRecordsRoute(pathname: string): boolean {
   return (
     pathname === "/storage/records" || pathname.startsWith("/storage/records/")
+  );
+}
+
+function isFilesRoute(pathname: string): boolean {
+  return (
+    pathname === "/storage/files" || pathname.startsWith("/storage/files/")
   );
 }
 
