@@ -127,7 +127,9 @@ test("token entry represents every grant and progressively requires only its act
     const control = requiredControl(htmlForm, name);
     const field = requiredField(action, name);
     assert.equal(control.condition, condition);
+    assert.equal(control.required, false);
     assert.equal(control.requiredWhenVisible, true);
+    assert.equal(field.required, true);
     assert.deepEqual(field.visible_when, splitCondition(condition));
   }
 
@@ -143,11 +145,16 @@ test("token entry represents every grant and progressively requires only its act
     authorization_code: ["code", "redirect_uri", "code_verifier"],
     refresh_token: ["refresh_token"],
   };
-  for (const grant of grants) {
+  for (const grant of [...grants, "unsupported_grant"]) {
     conditional.grantType.value = grant;
     conditional.form.dispatch("change");
     for (const [name, control] of conditional.controls) {
       const active = activeByGrant[grant]?.includes(name) ?? false;
+      assert.equal(
+        isFieldRequiredForGrant(requiredField(action, name), grant),
+        active,
+        `${name} hypermedia requirement for ${grant}`,
+      );
       assert.equal(control.disabled, !active, `${name} disabled for ${grant}`);
       assert.equal(control.required, active, `${name} required for ${grant}`);
       assert.equal(
@@ -305,49 +312,41 @@ test("protocol errors retain OAuth and OIDC media types and top-level fields", a
   }
 });
 
-test(
-  "token hypermedia marks every conditionally required grant credential as required",
-  {
-    todo: "Production hypermedia has visible_when but omits required=true for grant-specific credentials",
-  },
-  async () => {
-    const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
-    const { document } = await entryRepresentations(app, "/oauth/token");
-    const action = requiredAction(document, "exchange-oauth-grant");
-    for (const name of [
-      "device_code",
-      "code",
-      "redirect_uri",
-      "code_verifier",
-      "refresh_token",
-    ]) {
-      assert.equal(requiredField(action, name).required, true, name);
-    }
-  },
-);
+test("token hypermedia marks every grant credential conditionally required", async () => {
+  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  const { document } = await entryRepresentations(app, "/oauth/token");
+  const action = requiredAction(document, "exchange-oauth-grant");
+  for (const name of [
+    "device_code",
+    "code",
+    "redirect_uri",
+    "code_verifier",
+    "refresh_token",
+  ]) {
+    const field = requiredField(action, name);
+    assert.equal(field.required, true, name);
+    assert.ok(field.visible_when, `${name} remains conditional`);
+  }
+});
 
-test(
-  "PKCE HTML fields expose the hypermedia length constraints",
-  {
-    todo: "Production HTML omits minlength/maxlength for code_challenge and code_verifier",
-  },
-  async () => {
-    const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
-    for (const [path, actionName, fieldName] of [
-      ["/authorize", "begin-authorization-code", "code_challenge"],
-      ["/oauth/token", "exchange-oauth-grant", "code_verifier"],
-    ] as const) {
-      const { html, document } = await entryRepresentations(app, path);
-      const field = requiredField(
-        requiredAction(document, actionName),
-        fieldName,
-      );
-      const control = requiredControl(requiredForm(html, path), fieldName);
-      assert.equal(control.minLength, field.min_length);
-      assert.equal(control.maxLength, field.max_length);
-    }
-  },
-);
+test("PKCE HTML fields expose their exact hypermedia length constraints", async () => {
+  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  for (const [path, actionName, fieldName, minLength, maxLength] of [
+    ["/authorize", "begin-authorization-code", "code_challenge", 43, 43],
+    ["/oauth/token", "exchange-oauth-grant", "code_verifier", 43, 128],
+  ] as const) {
+    const { html, document } = await entryRepresentations(app, path);
+    const field = requiredField(
+      requiredAction(document, actionName),
+      fieldName,
+    );
+    const control = requiredControl(requiredForm(html, path), fieldName);
+    assert.equal(field.min_length, minLength);
+    assert.equal(field.max_length, maxLength);
+    assert.equal(control.minLength, minLength);
+    assert.equal(control.maxLength, maxLength);
+  }
+});
 
 async function entryRepresentations(
   app: AittaDBApp,
@@ -507,6 +506,18 @@ function splitCondition(condition: string): { field: string; value: string } {
     field: condition.slice(0, separator),
     value: condition.slice(separator + 1),
   };
+}
+
+function isFieldRequiredForGrant(
+  field: HypermediaField,
+  grantType: string,
+): boolean {
+  if (!field.required) return false;
+  if (!field.visible_when) return true;
+  return (
+    field.visible_when.field === "grant_type" &&
+    field.visible_when.value === grantType
+  );
 }
 
 function parseForms(html: string): HtmlForm[] {

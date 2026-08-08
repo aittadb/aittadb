@@ -195,7 +195,7 @@ export function endpointActions(issuer: string): {
           field("code_challenge", "S256 code challenge", "string", "query", {
             required: true,
             min_length: 43,
-            max_length: 128,
+            max_length: 43,
           }),
           field(
             "code_challenge_method",
@@ -269,6 +269,7 @@ export function endpointActions(issuer: string): {
             description: "Confidential clients only.",
           }),
           field("device_code", "Device code", "string", "body", {
+            required: true,
             secret: true,
             visible_when: {
               field: "grant_type",
@@ -276,19 +277,23 @@ export function endpointActions(issuer: string): {
             },
           }),
           field("code", "Authorization code", "string", "body", {
+            required: true,
             secret: true,
             visible_when: { field: "grant_type", value: "authorization_code" },
           }),
           field("redirect_uri", "Redirect URI", "string", "body", {
+            required: true,
             visible_when: { field: "grant_type", value: "authorization_code" },
           }),
           field("code_verifier", "PKCE code verifier", "string", "body", {
+            required: true,
             secret: true,
             min_length: 43,
             max_length: 128,
             visible_when: { field: "grant_type", value: "authorization_code" },
           }),
           field("refresh_token", "Refresh token", "string", "body", {
+            required: true,
             secret: true,
             visible_when: { field: "grant_type", value: "refresh_token" },
           }),

@@ -281,7 +281,7 @@ export const openApiSpec = {
           {
             name: "code_challenge",
             in: "query",
-            schema: { type: "string" },
+            schema: { type: "string", minLength: 43, maxLength: 43 },
             required: false,
           },
           {
@@ -370,7 +370,7 @@ export const openApiSpec = {
       get: {
         summary: "Token exchange operation resource",
         description:
-          "Returns hypermedia controls or an HTML form for the production token operation. Grant-specific fields are conditional in HTML and described by action fields in JSON.",
+          "Returns hypermedia controls or an HTML form for the production token operation. A grant-specific action field with required=true is required only while its visible_when condition matches the selected grant; inactive HTML controls are disabled and not required.",
         responses: {
           "200": {
             description: "Token operation",
@@ -406,7 +406,11 @@ export const openApiSpec = {
                   device_code: { type: "string" },
                   code: { type: "string" },
                   redirect_uri: { type: "string", format: "uri" },
-                  code_verifier: { type: "string" },
+                  code_verifier: {
+                    type: "string",
+                    minLength: 43,
+                    maxLength: 128,
+                  },
                   refresh_token: { type: "string" },
                   ui: { type: "string", const: "1" },
                   csrf_token: { type: "string" },
@@ -1490,7 +1494,11 @@ export const openApiSpec = {
             type: "string",
             enum: ["path", "query", "header", "body"],
           },
-          required: { type: "boolean" },
+          required: {
+            type: "boolean",
+            description:
+              "Whether the field is required while active. When visible_when is present, the requirement applies only when that condition matches.",
+          },
           secret: { type: "boolean" },
           value: true,
           min: { type: "number" },
@@ -1504,6 +1512,8 @@ export const openApiSpec = {
           },
           visible_when: {
             $ref: "#/components/schemas/HypermediaFieldCondition",
+            description:
+              "Condition that activates and displays this field. An inactive field is not required even when required is true.",
           },
           description: { type: "string" },
         },
