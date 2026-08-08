@@ -173,7 +173,7 @@ const storageQuotaExceededResponse = {
 
 const storageConflictResponse = {
   description:
-    "The file changed concurrently. The stale operation did not replace newer metadata and its uncommitted R2 object was retired.",
+    "The file changed concurrently. The stale mutation did not replace or delete the newer winner; any unreferenced physical object was retired immediately or queued for private bounded repair.",
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
@@ -1199,7 +1199,7 @@ export const openApiSpec = {
       },
       put: {
         summary: "Create or replace one file in R2",
-        description: `Requires storage.write. The caller's key is metadata only; AittaDB generates the physical R2 object key. Raw bytes are bounded from the observed request stream; Content-Length is only an early-rejection hint. Writes are subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
+        description: `Requires storage.write. The caller's key is metadata only; AittaDB generates the physical R2 object key. Replacement uses copy-on-write bytes and a D1 compare-and-set against the observed physical key, so a stale writer receives 409 without changing a newer winner. Raw bytes are bounded from the observed request stream; Content-Length is only an early-rejection hint. Writes are subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         requestBody: {
@@ -1232,7 +1232,7 @@ export const openApiSpec = {
       },
       delete: {
         summary: "Delete one file from R2 and D1 metadata",
-        description: `Requires storage.delete. Deletion remains available when new storage writes are disabled but needs R2 when metadata identifies an existing object. ${tokenBoundCorsDescription}`,
+        description: `Requires storage.delete. Metadata deletion compares the observed physical key in D1, so a stale delete receives 409 without deleting a newer winner. Deletion remains available when new storage writes are disabled but needs R2 when metadata identifies an existing object. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         responses: {

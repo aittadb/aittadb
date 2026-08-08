@@ -561,7 +561,7 @@ async function deleteStorageFileConsistently(
     if (present === true) {
       try {
         if (!(await store.upsertStorageFileMetadata(file, null))) {
-          await deleteR2Object(bucket, file.r2Key);
+          await retireUncommittedStorageObject(bucket, store, file);
           return false;
         }
       } catch (restoreError) {
@@ -602,7 +602,7 @@ async function retireReplacedStorageObject(
       if (
         !(await store.upsertStorageFileMetadata(previous, replacement.r2Key))
       ) {
-        await deleteR2Object(bucket, previous.r2Key);
+        await retireUncommittedStorageObject(bucket, store, previous);
         return false;
       }
     } catch (restoreError) {
