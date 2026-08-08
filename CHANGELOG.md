@@ -40,6 +40,7 @@
 - Defined AittaDB as a general-purpose database/application-backend server built from reusable vendor-neutral primitives, kept client and application implementations outside this repository, and added a tested decision rule against application-specific or speculative architecture.
 - Reframed public licensing copy around AittaDB's source-available FSL-1.1-MIT release, its automatic two-year MIT conversion, and the commercially available immediate MIT license, while retaining the OpenAI no-affiliation boundary as secondary trust information.
 - Shortened the browser home hero to one capability sentence and one compact trust note with a README CTA, while preserving the detailed licensing, platform, and credential boundary in hypermedia and project documentation.
+- Proved quota-rejected file reservations use the same owner-bound repair path as other failed R2 retirements: the losing write commits no metadata, persistent compensation creates one private bounded repair item, and retry converges without exposing physical keys. Isolated commit `70e1a4a` and integrated commit `c7b37f0` passed CI runs `31264366690`, `31264479561`, and `31264477454`; full validation passed 142 unit tests, 133 integration tests, OpenAPI, Swagger, migration, audit, and production-build checks (readiness confidence: 98/100).
 
 ### Retired planning umbrellas
 
