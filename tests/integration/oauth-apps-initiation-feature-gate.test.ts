@@ -91,7 +91,7 @@ test("disabled OAuth Apps omits initiation controls and preserves AittaDB's sign
   const root = (await rootResponse!.json()) as ResourceDocument;
   assert.equal((root.data.features as { oauthApps: boolean }).oauthApps, false);
   assertMissingInitiationControls(root);
-  assert.ok(root.links.some((item) => item.rel.includes("oauth-token")));
+  assert.ok(root.links.every((item) => !item.rel.includes("oauth-token")));
   assert.ok(root.links.some((item) => item.rel.includes("session")));
 
   const session = await app.fetch(

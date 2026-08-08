@@ -356,7 +356,11 @@ test("client origins drive CORS and disabled clients invalidate UserInfo", async
 test("token CORS is client-bound and rejects foreign origins before code consumption", async () => {
   const allowedOrigin = "https://allowed.example.test";
   const foreignOrigin = "https://foreign.example.test";
-  const fixture = await storageFixture({}, ["openid"], [allowedOrigin]);
+  const fixture = await storageFixture(
+    { FEATURE_OAUTH_APPS_ENABLED: "true" },
+    ["openid"],
+    [allowedOrigin],
+  );
   const verifier = "v".repeat(43);
   const code = "one-time-authorization-code";
   const codeHash = await sha256(code);
@@ -671,7 +675,9 @@ test("every endpoint rate family rejects at its global ceiling before protected 
       );
       const app = createTestAittaDB(
         await testEnv(
-          ["admin", "authorize", "device"].includes(endpointCase.family)
+          ["admin", "authorize", "device", "token"].includes(
+            endpointCase.family,
+          )
             ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
             : {},
         ),
@@ -712,7 +718,9 @@ test("rate-counter failures stay generic for every endpoint family", async (t) =
       );
       const response = await createTestAittaDB(
         await testEnv(
-          ["admin", "authorize", "device"].includes(endpointCase.family)
+          ["admin", "authorize", "device", "token"].includes(
+            endpointCase.family,
+          )
             ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
             : {},
         ),

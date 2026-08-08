@@ -186,6 +186,23 @@ export function createAittaDBWithStore(
           config,
         );
       }
+      if (!config.features.oauthApps && url.pathname === "/oauth/token") {
+        const negotiationError =
+          request.method === "GET" ? hypermediaNegotiationError(request) : null;
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : request.method === "POST"
+              ? oauthError(
+                  "temporarily_unavailable",
+                  "OAuth Apps is disabled for this deployment",
+                  503,
+                )
+              : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
       if (!config.features.records && isRecordsRoute(url.pathname)) {
         const negotiationError = hypermediaNegotiationError(request);
         return finalizeResponse(
@@ -532,9 +549,13 @@ async function route(
             ),
           ]
         : []),
-      link("oauth-token", endpoints.token.href, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.oauthApps
+        ? [
+            link("oauth-token", endpoints.token.href, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       ...(showAdmin
         ? [
             link("client-administration", `${config.issuerUrl}/admin/clients`, {

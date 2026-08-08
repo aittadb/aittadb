@@ -537,7 +537,7 @@ test("ID tokens cannot act as access tokens and UserInfo requires openid", async
 });
 
 test("revocation is client-bound and handles access tokens and refresh-token hint fallback", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);

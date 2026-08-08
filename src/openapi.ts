@@ -121,6 +121,25 @@ const oauthAppsInitiationUnavailableResponse = {
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
+const oauthAppsTokenUnavailableResponse = {
+  description:
+    "Downstream OAuth Apps are disabled by deployment configuration. Token GET and POST operations are rejected before request-body reading, CORS client lookup, rate limiting, client authentication, credential lookup or consumption, cleanup scheduling, or durable mutation. POST returns a no-store OAuth temporarily_unavailable error; AittaDB's private signed-in session remains available.",
+  content: {
+    "application/json": {
+      schema: {
+        oneOf: [
+          { $ref: "#/components/schemas/OAuthError" },
+          { $ref: "#/components/schemas/HypermediaError" },
+        ],
+      },
+    },
+    [hypermediaVendorType]: {
+      schema: { $ref: "#/components/schemas/HypermediaError" },
+    },
+    "text/html": { schema: { type: "string" } },
+  },
+} as const;
+
 const storageQuotaExceededResponse = {
   description:
     "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
@@ -419,7 +438,7 @@ export const openApiSpec = {
       get: {
         summary: "Token exchange operation resource",
         description:
-          "Returns hypermedia controls or an HTML form for the production token operation. A grant-specific action field with required=true is required only while its visible_when condition matches the selected grant; inactive HTML controls are disabled and not required.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Returns hypermedia controls or an HTML form for the production token operation. A grant-specific action field with required=true is required only while its visible_when condition matches the selected grant; inactive HTML controls are disabled and not required.",
         responses: {
           "200": {
             description: "Token operation",
@@ -427,13 +446,14 @@ export const openApiSpec = {
               "#/components/schemas/ProtocolEndpointDocument",
             ),
           },
+          "503": oauthAppsTokenUnavailableResponse,
         },
       },
       post: {
         summary:
           "OAuth 2.0 token endpoint for device, authorization_code, and refresh_token grants",
         description:
-          "A cross-origin preflight is allowed only for an exact origin registered on an active OAuth client. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject every grant before reading the body or accessing client and credential state. When enabled, a cross-origin preflight is allowed only for an exact origin registered on an active OAuth client. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -485,6 +505,7 @@ export const openApiSpec = {
           "403": { description: "Browser CSRF or same-origin rejection" },
           "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
+          "503": oauthAppsTokenUnavailableResponse,
         },
       },
     },
