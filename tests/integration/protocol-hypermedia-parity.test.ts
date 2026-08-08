@@ -62,7 +62,10 @@ interface HtmlForm {
 }
 
 test("OAuth entry resources keep HTML forms equivalent to hypermedia actions", async () => {
-  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  const app = createTestAittaDB(
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
+    new MemoryAuthStore(),
+  );
   const cases = [
     {
       path: "/authorize",
@@ -97,7 +100,10 @@ test("OAuth entry resources keep HTML forms equivalent to hypermedia actions", a
 });
 
 test("token entry represents every grant and progressively requires only its active fields", async () => {
-  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  const app = createTestAittaDB(
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
+    new MemoryAuthStore(),
+  );
   const { html, document } = await entryRepresentations(app, "/oauth/token");
   const action = requiredAction(document, "exchange-oauth-grant");
   const htmlForm = requiredForm(html, "/oauth/token");
@@ -168,7 +174,10 @@ test("token entry represents every grant and progressively requires only its act
 });
 
 test("introspection preserves Basic authentication while its HTML adapter uses body credentials", async () => {
-  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  const app = createTestAittaDB(
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
+    new MemoryAuthStore(),
+  );
   const { html, document } = await entryRepresentations(
     app,
     "/oauth/introspect",
@@ -201,7 +210,10 @@ test("introspection preserves Basic authentication while its HTML adapter uses b
 });
 
 test("UserInfo advertises standard bearer GET and equivalent safe browser operations", async () => {
-  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  const app = createTestAittaDB(
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
+    new MemoryAuthStore(),
+  );
   const { html, document } = await entryRepresentations(app, "/userinfo");
   const htmlForm = requiredForm(html, "/userinfo");
   const bearer = requiredAction(document, "read-userinfo");
@@ -238,7 +250,7 @@ test("UserInfo advertises standard bearer GET and equivalent safe browser operat
   }
 
   const anonymous = createTestAittaDB(
-    await testEnv(),
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
     new MemoryAuthStore(),
     null,
   );
@@ -268,7 +280,11 @@ test("UserInfo advertises standard bearer GET and equivalent safe browser operat
 });
 
 test("protocol errors retain OAuth and OIDC media types and top-level fields", async () => {
-  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore(), null);
+  const app = createTestAittaDB(
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
+    new MemoryAuthStore(),
+    null,
+  );
   const requests = [
     new Request(`${ISSUER}/authorize?client_id=unknown`, {
       headers: { accept: VENDOR },
@@ -313,7 +329,10 @@ test("protocol errors retain OAuth and OIDC media types and top-level fields", a
 });
 
 test("token hypermedia marks every grant credential conditionally required", async () => {
-  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  const app = createTestAittaDB(
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
+    new MemoryAuthStore(),
+  );
   const { document } = await entryRepresentations(app, "/oauth/token");
   const action = requiredAction(document, "exchange-oauth-grant");
   for (const name of [
@@ -330,7 +349,10 @@ test("token hypermedia marks every grant credential conditionally required", asy
 });
 
 test("PKCE HTML fields expose their exact hypermedia length constraints", async () => {
-  const app = createTestAittaDB(await testEnv(), new MemoryAuthStore());
+  const app = createTestAittaDB(
+    await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" }),
+    new MemoryAuthStore(),
+  );
   for (const [path, actionName, fieldName, minLength, maxLength] of [
     ["/authorize", "begin-authorization-code", "code_challenge", 43, 43],
     ["/oauth/token", "exchange-oauth-grant", "code_verifier", 43, 128],

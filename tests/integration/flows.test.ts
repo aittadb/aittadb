@@ -828,7 +828,7 @@ test("public statistics expose only the aggregate local identity count", async (
 });
 
 test("device and consent transactions negotiate equivalent hypermedia controls", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(
@@ -973,7 +973,9 @@ test("device and consent transactions negotiate equivalent hypermedia controls",
     ["approve-authorization", "deny-authorization"],
   );
 
-  const anonymousEnv = await testEnv();
+  const anonymousEnv = await testEnv({
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  });
   const anonymousApp = createTestAittaDB(anonymousEnv, store, null);
   const anonymousConsent = await anonymousApp.fetch(
     new Request(consentLocation, { headers: { accept: "application/json" } }),
@@ -991,7 +993,10 @@ test("device and consent transactions negotiate equivalent hypermedia controls",
 });
 
 test("browser protocol representations execute real device, token, UserInfo, introspection, and revocation operations", async () => {
-  const env = await testEnv({ DEVICE_POLL_INTERVAL_SECONDS: "1" });
+  const env = await testEnv({
+    DEVICE_POLL_INTERVAL_SECONDS: "1",
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(
@@ -1290,7 +1295,10 @@ test("browser protocol representations execute real device, token, UserInfo, int
 });
 
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {
-  const env = await testEnv({ DEVICE_POLL_INTERVAL_SECONDS: "1" });
+  const env = await testEnv({
+    DEVICE_POLL_INTERVAL_SECONDS: "1",
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(
@@ -1571,7 +1579,7 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
 });
 
 test("authorization code with PKCE enforces exact redirect URI and one-time code use", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);

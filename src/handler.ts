@@ -173,6 +173,19 @@ export function createAittaDBWithStore(
           config,
         );
       }
+      if (
+        !config.features.oauthApps &&
+        isExternalOAuthInitiationRoute(url.pathname)
+      ) {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
       if (!config.features.records && isRecordsRoute(url.pathname)) {
         const negotiationError = hypermediaNegotiationError(request);
         return finalizeResponse(
@@ -507,12 +520,18 @@ async function route(
       link("jwks", `${config.issuerUrl}/.well-known/jwks.json`, {
         type: "application/json",
       }),
-      link("oauth-authorization", endpoints.authorize.href, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
-      link("oauth-device-authorization", endpoints.deviceAuthorization.href, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.oauthApps
+        ? [
+            link("oauth-authorization", endpoints.authorize.href, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+            link(
+              "oauth-device-authorization",
+              endpoints.deviceAuthorization.href,
+              { type: HYPERMEDIA_MEDIA_TYPE },
+            ),
+          ]
+        : []),
       link("oauth-token", endpoints.token.href, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
@@ -2779,6 +2798,16 @@ function isPreBodyBrowserMutation(request: Request, url: URL): boolean {
     acceptsHtml(request) ||
     contentType.includes("application/x-www-form-urlencoded") ||
     contentType.includes("multipart/form-data")
+  );
+}
+
+function isExternalOAuthInitiationRoute(pathname: string): boolean {
+  return (
+    pathname === "/authorize" ||
+    pathname === "/oauth/device_authorization" ||
+    pathname === "/device" ||
+    pathname === "/device/decision" ||
+    pathname === "/consent"
   );
 }
 

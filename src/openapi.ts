@@ -115,6 +115,12 @@ const oauthAppsAdministrationUnavailableResponse = {
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
+const oauthAppsInitiationUnavailableResponse = {
+  description:
+    "Downstream OAuth Apps are disabled by deployment configuration. Authorization Code and Device Grant initiation and their browser continuations are rejected before client lookup, request-body reading, CORS client lookup, rate limiting, Sites identity lookup, cleanup scheduling, or durable mutation. AittaDB's private signed-in session remains available.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
 const storageQuotaExceededResponse = {
   description:
     "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
@@ -288,6 +294,8 @@ export const openApiSpec = {
       get: {
         summary:
           "OAuth 2.0 Authorization Code with PKCE authorization endpoint",
+        description:
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments return feature_unavailable locally without trusting a redirect URI or creating authorization state.",
         parameters: [
           {
             name: "response_type",
@@ -338,6 +346,7 @@ export const openApiSpec = {
               "Continues to same-origin consent or redirects an OAuth error",
           },
           "429": rateLimitedResponse(),
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
     },
@@ -345,7 +354,7 @@ export const openApiSpec = {
       get: {
         summary: "Device Authorization Grant operation resource",
         description:
-          "Returns hypermedia controls or an HTML form that posts to the production device authorization operation. API clients may follow the advertised POST action.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Returns hypermedia controls or an HTML form that posts to the production device authorization operation. API clients may follow the advertised POST action.",
         responses: {
           "200": {
             description: "Device authorization operation",
@@ -353,10 +362,13 @@ export const openApiSpec = {
               "#/components/schemas/ProtocolEndpointDocument",
             ),
           },
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
       post: {
         summary: "OAuth 2.0 Device Authorization Grant endpoint",
+        description:
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject the request before reading its body, authenticating a client, rate limiting, or creating a device grant.",
         requestBody: {
           description: browserMutationOriginDescription,
           content: {
@@ -399,6 +411,7 @@ export const openApiSpec = {
           "403": { description: "Browser CSRF or same-origin rejection" },
           "413": boundedFormTooLargeResponse,
           "429": rateLimitedResponse(),
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
     },
@@ -1208,7 +1221,7 @@ export const openApiSpec = {
       get: {
         summary: "Enter an RFC 8628 user code",
         description:
-          "Returns the same device-code entry resource as hypermedia JSON or accessible HTML. The subsequent review requires ChatGPT sign-in supplied by the trusted Sites runtime.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Returns the same device-code entry resource as hypermedia JSON or accessible HTML. The subsequent review requires ChatGPT sign-in supplied by the trusted Sites runtime.",
         parameters: [
           {
             name: "user_code",
@@ -1224,12 +1237,13 @@ export const openApiSpec = {
               "#/components/schemas/DeviceCodeEntryDocument",
             ),
           },
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
       post: {
         summary: "Review a pending device authorization request",
         description:
-          "CSRF-protected same-origin transition. A valid code is resolved server-side and the trusted Sites identity is required; browser-supplied identity values are never accepted.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. CSRF-protected same-origin transition. A valid code is resolved server-side and the trusted Sites identity is required; browser-supplied identity values are never accepted.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -1267,6 +1281,7 @@ export const openApiSpec = {
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "413": boundedFormTooLargeResponse,
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
     },
@@ -1274,7 +1289,7 @@ export const openApiSpec = {
       post: {
         summary: "Approve or deny a pending device request",
         description:
-          "One-time CSRF-protected decision by the trusted Sites-signed-in user. Terminal, expired, and unknown grants are rejected without exposing credentials.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. One-time CSRF-protected decision by the trusted Sites-signed-in user. Terminal, expired, and unknown grants are rejected without exposing credentials.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -1316,6 +1331,7 @@ export const openApiSpec = {
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "413": boundedFormTooLargeResponse,
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
     },
@@ -1323,7 +1339,7 @@ export const openApiSpec = {
       get: {
         summary: "Review an authorization-code consent request",
         description:
-          "Returns consent controls when remembered consent does not already cover the exact client and local scopes. Existing exact consent immediately continues through a one-time authorization-code redirect.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Returns consent controls when remembered consent does not already cover the exact client and local scopes. Existing exact consent immediately continues through a one-time authorization-code redirect.",
         parameters: [
           {
             name: "request_id",
@@ -1352,12 +1368,13 @@ export const openApiSpec = {
             description: "Trusted Sites browser identity is required",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
       post: {
         summary: "Approve or deny authorization consent",
         description:
-          "CSRF-protected same-origin decision followed by a standards-defined redirect to the exact registered client redirect URI. The redirect carries a one-time code or OAuth error, never an access token.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. CSRF-protected same-origin decision followed by a standards-defined redirect to the exact registered client redirect URI. The redirect carries a one-time code or OAuth error, never an access token.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -1397,6 +1414,7 @@ export const openApiSpec = {
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "413": boundedFormTooLargeResponse,
+          "503": oauthAppsInitiationUnavailableResponse,
         },
       },
     },

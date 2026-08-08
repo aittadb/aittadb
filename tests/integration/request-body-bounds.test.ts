@@ -44,7 +44,7 @@ const TARGETS: readonly BodyTarget[] = [
 ];
 
 test("accepted URL-encoded and JSON bodies reject every oversized length variant before repository access", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const observed = observedStore();
   const app = createTestAittaDB(env, observed.store, null);
 
@@ -109,7 +109,7 @@ test("accepted URL-encoded and JSON bodies reject every oversized length variant
 });
 
 test("malformed accepted request streams fail before parsing or repository access", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const observed = observedStore();
   const app = createTestAittaDB(env, observed.store, null);
 

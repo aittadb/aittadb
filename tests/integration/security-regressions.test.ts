@@ -136,7 +136,7 @@ test("authorization requests and one-time credentials have one concurrent winner
 });
 
 test("consent approval and denial cannot be replayed through HTTP", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(
@@ -190,7 +190,7 @@ test("consent approval and denial cannot be replayed through HTTP", async () => 
 });
 
 test("remembered-consent GET has one redirect winner under concurrent and sequential replay", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const identity = {
     email: "remembered@example.test",
@@ -258,7 +258,7 @@ test("remembered-consent GET has one redirect winner under concurrent and sequen
 });
 
 test("concurrent explicit approval and denial have one redirect winner", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(

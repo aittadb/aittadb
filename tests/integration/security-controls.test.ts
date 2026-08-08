@@ -607,7 +607,7 @@ test("administrator allowlisting retains the documented upstream email reassignm
 });
 
 test("anonymous authorization request creation is rate limited and cleaned up", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const registration = await createClientRegistration(
@@ -671,7 +671,7 @@ test("every endpoint rate family rejects at its global ceiling before protected 
       );
       const app = createTestAittaDB(
         await testEnv(
-          endpointCase.family === "admin"
+          ["admin", "authorize", "device"].includes(endpointCase.family)
             ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
             : {},
         ),
@@ -712,7 +712,7 @@ test("rate-counter failures stay generic for every endpoint family", async (t) =
       );
       const response = await createTestAittaDB(
         await testEnv(
-          endpointCase.family === "admin"
+          ["admin", "authorize", "device"].includes(endpointCase.family)
             ? { FEATURE_OAUTH_APPS_ENABLED: "true" }
             : {},
         ),
