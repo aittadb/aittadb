@@ -54,7 +54,19 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiRootJson.data.service, "AittaDB");
   assert.match(
     apiRootJson.data.description,
+    /third-party, non-official project/i,
+  );
+  assert.match(
+    apiRootJson.data.description,
     /hosted application backend for third-party apps/i,
+  );
+  assert.match(
+    apiRootJson.data.description,
+    /depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets/,
+  );
+  assert.match(
+    apiRootJson.data.description,
+    /never forwards ChatGPT credentials/,
   );
   assert.equal(apiRootJson.data.hostingPlatform, "OpenAI-hosted ChatGPT Sites");
   assert.equal(
@@ -173,13 +185,23 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     browserRootHtml,
     /hosted application backend for third-party apps/i,
   );
-  assert.match(browserRootHtml, /Persistent events are planned/);
-  assert.match(
+  const rootTrustNotice = /<p class="note">([\s\S]*?)<\/p>/.exec(
     browserRootHtml,
-    /deploy an independent instance in their own ChatGPT Sites project/,
+  )?.[1];
+  assert.ok(rootTrustNotice);
+  assert.doesNotMatch(rootTrustNotice, /Persistent events are planned/);
+  assert.match(
+    rootTrustNotice,
+    /deploy a separate AittaDB instance in their own ChatGPT Sites project/,
   );
-  assert.match(browserRootHtml, /creates its own identities and credentials/);
-  assert.match(browserRootHtml, /remains independent from OpenAI/);
+  assert.match(rootTrustNotice, /third-party project/);
+  assert.match(rootTrustNotice, /not an official OpenAI product/);
+  assert.match(
+    rootTrustNotice,
+    /current implementation depends on Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets/,
+  );
+  assert.match(rootTrustNotice, /never forwards ChatGPT credentials/);
+  assert.doesNotMatch(rootTrustNotice, /remains independent from OpenAI/);
   assert.match(browserRootHtml, /Session issuer/);
   assert.match(browserRootHtml, /Hosting platform/);
   assert.match(browserRootHtml, /OpenAI-hosted ChatGPT Sites/);

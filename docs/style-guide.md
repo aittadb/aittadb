@@ -8,7 +8,7 @@ This style guide describes style-level alignment only. Do not copy ChatGPT produ
 
 Use one shared application-backend shell for all normal HTML responses:
 
-- A full-bleed visual panel that communicates the sign-in, independent identity, session, and application-data boundary.
+- A full-bleed visual panel that communicates the sign-in, separate AittaDB identity, session, and application-data boundary.
 - One focused content panel for the current task.
 - A consistent AittaDB wordmark and footer linking to `https://github.com/aittadb/aittadb`.
 - No broad site navigation, marketing sections, testimonials, pricing, blog content, dashboard, or user profile.
@@ -23,13 +23,13 @@ Lead with **hosted application backend for third-party apps**. Follow with the c
 
 Use **Identity / Data / Files / Events** as the compact product-capability label. Whenever the page explains capabilities in prose, make clear that Events is planned while identity, data, and files are available now.
 
-Describe AittaDB as deployed on OpenAI-hosted ChatGPT Sites. Distinguish the platform relationship from AittaDB itself, which remains independent.
+Describe AittaDB as a third-party, non-official project deployed on OpenAI-hosted ChatGPT Sites. State plainly that the current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Do not use organizational independence language in a way that implies technical independence from the platform.
 
 The first user-facing reference to the upstream authentication must say "ChatGPT sign-in inside ChatGPT Sites." Later references on the same page may say "ChatGPT sign-in." Do not present the standalone phrase "Sites identity" to users.
 
 Always pair the upstream description with the boundary: AittaDB creates a separate user with an immutable UUID, issues its own tokens, and stores application data only inside AittaDB. Those tokens are not OpenAI or ChatGPT tokens, and AittaDB never forwards ChatGPT credentials. This wording explains the real sign-in source without implying affiliation or a general ChatGPT OAuth service.
 
-State that AittaDB is independent and not affiliated with, endorsed by, or an official product of OpenAI in natural prose. Keep the boolean `officialOpenAIProduct` flag for JSON clients, but do not render "Official OpenAI product: no" as a browser metadata row.
+State in natural prose that AittaDB is a third-party project and is not affiliated with, endorsed by, or an official product of OpenAI. Keep the boolean `officialOpenAIProduct` flag for JSON clients, but do not render "Official OpenAI product: no" as a browser metadata row.
 
 Label the downstream credential source as **Session issuer**, never **Token authority**. The latter can be mistaken for AI-model token accounting. Supporting copy may name OAuth, OIDC, and JWT credentials explicitly.
 

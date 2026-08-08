@@ -119,14 +119,14 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is a hosted application backend for third-party apps, services, and agents. It runs inside ChatGPT Sites, maps the server-side ChatGPT sign-in signal to a separate AittaDB user, issues AittaDB's own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1 and files in R2. Persistent events and long-polling delivery are planned and are not part of the current MVP. AittaDB is independent: its credentials and stored data are not OpenAI or ChatGPT credentials or data, and it never forwards ChatGPT credentials. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
+      "AittaDB is a third-party, non-official project providing a hosted application backend for third-party apps, services, and agents. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1 and files in R2. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. Persistent events and long-polling delivery are planned and are not part of the current MVP. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
   },
   paths: {
     "/": {
       get: {
         summary: "Service metadata or browser overview",
         description:
-          "Returns hypermedia service metadata to API clients and a concise browser overview when the request prefers HTML.",
+          "Returns hypermedia service metadata, including AittaDB's third-party status and current ChatGPT Sites platform dependency, or a concise browser overview when the request prefers HTML.",
         responses: {
           "200": {
             description: "AittaDB service metadata",
@@ -1599,11 +1599,18 @@ export const openApiSpec = {
           hostingPlatform: {
             type: "string",
             const: "OpenAI-hosted ChatGPT Sites",
+            description:
+              "The current implementation depends on this platform for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets.",
           },
           issuer: { type: "string", format: "uri" },
           docs: { type: "string", format: "uri" },
           openapi: { type: "string", format: "uri" },
-          officialOpenAIProduct: { type: "boolean", const: false },
+          officialOpenAIProduct: {
+            type: "boolean",
+            const: false,
+            description:
+              "False because AittaDB is a third-party project, not an official OpenAI product; this does not imply technical independence from ChatGPT Sites.",
+          },
           upstreamSignIn: {
             type: "object",
             required: [

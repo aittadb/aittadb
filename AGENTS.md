@@ -8,7 +8,7 @@ AittaDB is a hosted application backend for third-party applications, services, 
 
 Current capabilities are identity mapping, OAuth/OIDC/JWT sessions, D1-backed JSON records, and R2-backed files with D1 metadata. Persistent events and long-polling are planned, not implemented. Do not describe planned behavior as available.
 
-AittaDB is independent and is not affiliated with, endorsed by, or an official product of OpenAI. It is deployed on ChatGPT Sites, but its local users, credentials, grants, sessions, and stored data belong only to AittaDB. Never call it "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or imply that AittaDB credentials are OpenAI or ChatGPT credentials.
+AittaDB is a third-party project, not affiliated with, endorsed by, or an official product of OpenAI. The current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, sign-in, D1, R2, configuration, and secrets. AittaDB alone owns its local users, credentials, grants, sessions, and stored data. Never call it "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or imply that AittaDB credentials are OpenAI or ChatGPT credentials.
 
 AittaDB does not expose or forward ChatGPT cookies, credentials, tokens, or sessions. It does not access ChatGPT conversations, files, Projects, Library, connectors, subscriptions, workspace roles, billing, or API quota. Its scopes authorize only AittaDB claims, sessions, and storage.
 
@@ -55,7 +55,7 @@ Never trust browser JavaScript for identity or accept arbitrary `oai-authenticat
 
 AittaDB alone issues downstream access tokens, refresh tokens, ID tokens, authorization codes, device codes, consents, and sessions. Supported scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, and `storage.delete`. The data model may permit future custom scopes, but do not invent more MVP scopes.
 
-Lead public descriptions with "hosted application backend for third-party apps", followed by ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, JSON records, and files. Use "ChatGPT sign-in inside ChatGPT Sites" on first user-facing reference. Do not use unexplained "Sites identity" or "Token authority" copy. Use "Session issuer" where needed. Keep `officialOpenAIProduct: false` in machine metadata; explain independence naturally in HTML rather than as a yes/no row.
+Lead public descriptions with "hosted application backend for third-party apps", then ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, JSON records, and files. On first reference, call AittaDB third-party and non-official and state its current Sites dependency; never imply technical independence. Do not use unexplained "Sites identity" or "Token authority" copy. Use "Session issuer" where needed. Keep `officialOpenAIProduct: false` in machine metadata, not a browser row.
 
 ## Repository Structure
 
@@ -208,7 +208,7 @@ Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing,
 
 Maintain `README.md`, `AGENTS.md`, `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.env.example`, architecture, style, performance, privacy baseline, threat model, deployment, self-hosting limits, OpenAPI, schema/migrations, CLI Device Grant example, browser/native PKCE example, curl examples, key generation/rotation, downstream JWT verification, fork setup, and Sites-specific behavior.
 
-README must prominently state experimental status, independence, the Sites identity-header dependency, separate local identity/credentials, no official ChatGPT OAuth service, self-hosting adapter replacement, and FSL-to-MIT conversion. Keep implementation claims current.
+README must prominently state experimental and third-party/non-official status, current Sites platform and identity-header dependencies, separate local identity/credentials, no official ChatGPT OAuth service, self-hosting adapter replacement, and FSL-to-MIT conversion. Keep claims current.
 
 ## Commands
 

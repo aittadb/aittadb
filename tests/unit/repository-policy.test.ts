@@ -8,6 +8,7 @@ const CHANGELOG_PATH = new URL("../../CHANGELOG.md", import.meta.url);
 const PLAN_PATH = new URL("../../PLAN.md", import.meta.url);
 const README_PATH = new URL("../../README.md", import.meta.url);
 const ROADMAP_PATH = new URL("../../ROADMAP.md", import.meta.url);
+const STYLE_GUIDE_PATH = new URL("../../docs/style-guide.md", import.meta.url);
 const MAX_AGENTS_BYTES = 32_000;
 
 test("AGENTS.md stays within the Codex instruction budget", async () => {
@@ -123,6 +124,34 @@ test("AGENTS.md requires evidence-based readiness confidence", async () => {
   assert.match(
     policy,
     /Capture every material residual finding in `PLAN\.md`, `ROADMAP\.md`, or `BACKLOG\.md`/,
+  );
+});
+
+test("public copy distinguishes project status from the current Sites dependency", async () => {
+  const [agents, readme, styleGuide] = await Promise.all([
+    readFile(AGENTS_PATH, "utf8"),
+    readFile(README_PATH, "utf8"),
+    readFile(STYLE_GUIDE_PATH, "utf8"),
+  ]);
+
+  for (const [name, contents] of [
+    ["AGENTS.md", agents],
+    ["README.md", readme],
+    ["docs/style-guide.md", styleGuide],
+  ] as const) {
+    assert.match(contents, /third-party/i, `${name} must state project status`);
+    assert.match(
+      contents,
+      /current implementation depends on OpenAI-hosted ChatGPT Sites/i,
+      `${name} must state the current Sites dependency`,
+    );
+    assert.doesNotMatch(contents, /remains independent from OpenAI/i);
+    assert.doesNotMatch(contents, /AittaDB is independent/i);
+  }
+
+  assert.match(
+    readme,
+    /Persistent events and long-polling delivery as a planned capability/,
   );
 });
 

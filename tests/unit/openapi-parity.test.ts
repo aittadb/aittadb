@@ -128,6 +128,40 @@ test("OpenAPI guard locates legacy _links members without rejecting links", () =
   ]);
 });
 
+test("OpenAPI distinguishes third-party status from the current Sites dependency", () => {
+  assert.match(
+    openApiSpec.info.description,
+    /third-party, non-official project/,
+  );
+  assert.match(
+    openApiSpec.info.description,
+    /depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets/,
+  );
+  assert.doesNotMatch(openApiSpec.info.description, /AittaDB is independent/);
+
+  const rootDescription = String(openApiOperation("/", "get").description);
+  assert.match(rootDescription, /third-party status/);
+  assert.match(rootDescription, /platform dependency/);
+
+  const serviceProperties = asObject(
+    openApiSchema("ServiceMetadataData").properties,
+    "ServiceMetadataData properties",
+  );
+  const hostingPlatform = asObject(
+    serviceProperties.hostingPlatform,
+    "hostingPlatform",
+  );
+  const officialOpenAIProduct = asObject(
+    serviceProperties.officialOpenAIProduct,
+    "officialOpenAIProduct",
+  );
+  assert.match(String(hostingPlatform.description), /depends on this platform/);
+  assert.match(
+    String(officialOpenAIProduct.description),
+    /does not imply technical independence/,
+  );
+});
+
 test("OpenAPI documents implemented security controls", () => {
   assert.doesNotMatch(JSON.stringify(openApiSpec), /\bADMIN_[A-Z_]+\b/);
 
