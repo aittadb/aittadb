@@ -73,6 +73,9 @@ const storageCursorParameter = {
 const tokenBoundCorsDescription =
   "For a cross-origin bearer request, Origin must exactly match an allowed origin registered on the active OAuth client identified by the token audience. A preflight is admitted only for an origin registered to at least one active client; the eventual request is still checked against its token's client. Wildcards are not accepted.";
 
+const browserMutationOriginDescription =
+  "For an HTML/browser form representation, AittaDB validates the shared same-origin policy before reading the request body, applying rate limits, consulting repositories, accessing R2, or scheduling maintenance. CSRF is then validated independently after the bounded form body is parsed. Standards-defined machine requests and raw bearer storage uploads remain governed by their protocol authentication and CORS rules.";
+
 function rateLimitedResponse(includeHypermedia = false) {
   return {
     description:
@@ -349,6 +352,7 @@ export const openApiSpec = {
       post: {
         summary: "OAuth 2.0 Device Authorization Grant endpoint",
         requestBody: {
+          description: browserMutationOriginDescription,
           content: {
             "application/x-www-form-urlencoded": {
               schema: {
@@ -412,6 +416,7 @@ export const openApiSpec = {
         description:
           "A cross-origin preflight is allowed only for an exact origin registered on an active OAuth client. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential.",
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -481,6 +486,7 @@ export const openApiSpec = {
         description:
           "The owning public or confidential client authenticates as at the token endpoint. Access tokens are revoked by verified jti; opaque refresh tokens revoke their family. An omitted or incorrect token_type_hint is treated only as a lookup hint, and success never discloses prior token state.",
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -531,6 +537,7 @@ export const openApiSpec = {
           "Only a signed, unexpired AittaDB access-token JWT whose token_use is access and whose audience is the authenticated confidential client can be active. ID tokens, opaque refresh tokens, tokens for another client, revoked tokens, and invalid JWTs return active false without disclosing why.",
         security: [{ clientSecretBasic: [] }],
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -604,6 +611,7 @@ export const openApiSpec = {
         description:
           "Uses either the current signed-in browser session or an explicit bearer token from a CSRF-protected same-origin form, then invokes the same UserInfo validation as GET. The current-session credential is short-lived, internal, and never returned to the page. Non-browser clients should use GET with Authorization: Bearer.",
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -682,6 +690,7 @@ export const openApiSpec = {
         description:
           "CSRF-protected same-origin form action for this exact collection URL. The fixed _method=GET override invokes the canonical collection GET. Item reads, writes, and deletes post only to /storage/records/{key}. Current-session mode creates a minimal short-lived internal access token for the signed-in local UUID and reserved browser client; token mode uses the submitted AittaDB access token. Neither credential is returned to HTML.",
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -751,6 +760,7 @@ export const openApiSpec = {
           "CSRF-protected same-origin adapter on this exact item URL. _method selects the canonical GET, PUT, or DELETE operation; the logical key comes only from the URL and cannot be overridden by a form field. Current-session and explicit AittaDB access-token modes preserve the canonical storage scope and ownership checks.",
         parameters: [storageKeyParameter],
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -890,6 +900,7 @@ export const openApiSpec = {
         description: `A bearer API request uploads raw bytes and creates a file under a server-generated logical UUID key. It returns 201 Created and the exact item Location. The same URL also accepts the CSRF-protected browser multipart upload form and the no-JavaScript collection-read adapter. Multipart parsing requires a trusted ChatGPT Sites identity first, including when the form later selects explicit-token mode; raw bearer API uploads do not require a Sites browser session. Caller-selected logical keys use PUT /storage/files/{key} instead. File creation is subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/octet-stream": {
@@ -1019,6 +1030,7 @@ export const openApiSpec = {
           "CSRF-protected same-origin adapter on this exact item URL. URL-encoded _method=GET or DELETE invokes the canonical download or deletion. Multipart _method=PUT requires a trusted ChatGPT Sites identity before parsing and uploads bytes through the canonical file PUT. The logical key comes only from the URL and cannot be overridden by a form field.",
         parameters: [storageKeyParameter],
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -1208,6 +1220,7 @@ export const openApiSpec = {
         description:
           "CSRF-protected same-origin transition. A valid code is resolved server-side and the trusted Sites identity is required; browser-supplied identity values are never accepted.",
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -1252,6 +1265,7 @@ export const openApiSpec = {
         description:
           "One-time CSRF-protected decision by the trusted Sites-signed-in user. Terminal, expired, and unknown grants are rejected without exposing credentials.",
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -1334,6 +1348,7 @@ export const openApiSpec = {
         description:
           "CSRF-protected same-origin decision followed by a standards-defined redirect to the exact registered client redirect URI. The redirect carries a one-time code or OAuth error, never an access token.",
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {
@@ -1407,6 +1422,7 @@ export const openApiSpec = {
           "Available only when FEATURE_OAUTH_APPS_ENABLED is true. CSRF-protected same-origin administration for creation, enable/disable, confidential-secret rotation, and active-grant revocation. Every operation requires trusted ChatGPT sign-in inside ChatGPT Sites and an AittaDB local UUID present in the configured local-subject allowlist. The server enforces the same state/type policy advertised by HTML and hypermedia controls. Every advertised action carries a one-time submission token; its hash is claimed atomically before mutation so replay cannot repeat the operation. JSON receives an immediate no-store result. HTML uses Post/Redirect/Get and a short-lived encrypted HttpOnly result cookie whose token hash is consumed atomically on the redirected GET. Generated confidential secrets are tied to the affected client, never enter a URL or durable plaintext storage, and disappear after that result is consumed.",
         "x-aittadb-sites-identity-required": true,
         requestBody: {
+          description: browserMutationOriginDescription,
           required: true,
           content: {
             "application/x-www-form-urlencoded": {

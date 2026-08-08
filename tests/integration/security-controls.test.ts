@@ -820,6 +820,7 @@ function rateLimitedEndpointCases(): ReadonlyArray<{
         accept: "application/json",
         "cf-connecting-ip": "192.0.2.77",
         "content-type": "application/x-www-form-urlencoded",
+        origin: issuer,
       },
       body: form(data),
     });

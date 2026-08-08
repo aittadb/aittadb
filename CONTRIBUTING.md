@@ -16,4 +16,6 @@ The project uses handwritten, prepared D1 SQL rather than Drizzle ORM. Update `d
 
 Swagger UI is pinned in `package.json` and self-hosted from `public/vendor/swagger-ui/`. After changing `swagger-ui-dist`, run `npm run swagger:sync`; CI verifies the checked-in assets with `npm run swagger:check`.
 
+When adding a state-changing browser form adapter, add its route to the centralized pre-body origin classification and the table-driven route proof in the same task. Do not defer origin detection until after reading a hidden form field; machine OAuth and raw bearer storage protocols must remain independently usable.
+
 Clean-checkout validation uses `.openai/hosting.example.json` when the ignored checkout-local `.openai/hosting.json` does not exist. Create the local file with your own Sites project ID before running or deploying an actual Sites instance; the template is only a non-secret build fallback.

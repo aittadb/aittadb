@@ -1265,7 +1265,10 @@ test("browser protocol representations execute real device, token, UserInfo, int
     }),
   );
   assert.equal(wrongOrigin?.status, 403);
-  assert.match(await wrongOrigin!.text(), /Origin is not allowed/);
+  assert.match(
+    await wrongOrigin!.text(),
+    /Same-origin form submission is required/,
+  );
 
   const apiGetToken = await app.fetch(
     new Request("https://aittadb.example.test/oauth/token", {

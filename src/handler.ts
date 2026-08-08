@@ -195,6 +195,14 @@ export function createAittaDBWithStore(
           config,
         );
       }
+      const browserOriginRejection = rejectInvalidBrowserMutationOrigin(
+        request,
+        url,
+        config.issuerUrl,
+      );
+      if (browserOriginRejection) {
+        return finalizeResponse(request, browserOriginRejection, config);
+      }
       const prebuffered = await prebufferAcceptedRequestBody(request, url);
       if (prebuffered instanceof Response) {
         return finalizeResponse(request, prebuffered, config);
@@ -2720,6 +2728,57 @@ function isRecordsRoute(pathname: string): boolean {
 function isFilesRoute(pathname: string): boolean {
   return (
     pathname === "/storage/files" || pathname.startsWith("/storage/files/")
+  );
+}
+
+const BROWSER_ONLY_MUTATION_ROUTES = new Set([
+  "/userinfo",
+  "/device",
+  "/device/decision",
+  "/consent",
+  "/admin/clients",
+]);
+
+const DUAL_PROTOCOL_BROWSER_ROUTES = new Set([
+  "/oauth/device_authorization",
+  "/oauth/token",
+  "/oauth/revoke",
+  "/oauth/introspect",
+]);
+
+function rejectInvalidBrowserMutationOrigin(
+  request: Request,
+  url: URL,
+  canonicalOrigin: string,
+): Response | null {
+  if (
+    !isPreBodyBrowserMutation(request, url) ||
+    requireSameOrigin(request, canonicalOrigin)
+  ) {
+    return null;
+  }
+  return negotiatedFormError(
+    request,
+    "invalid_request",
+    "Same-origin form submission is required",
+    403,
+  );
+}
+
+function isPreBodyBrowserMutation(request: Request, url: URL): boolean {
+  if (request.method !== "POST") return false;
+  if (BROWSER_ONLY_MUTATION_ROUTES.has(url.pathname)) return true;
+  if (DUAL_PROTOCOL_BROWSER_ROUTES.has(url.pathname)) {
+    return acceptsHtml(request);
+  }
+  if (!isRecordsRoute(url.pathname) && !isFilesRoute(url.pathname)) {
+    return false;
+  }
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  return (
+    acceptsHtml(request) ||
+    contentType.includes("application/x-www-form-urlencoded") ||
+    contentType.includes("multipart/form-data")
   );
 }
 
