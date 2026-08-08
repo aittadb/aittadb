@@ -67,7 +67,7 @@ const storageCursorParameter = {
   required: false,
   schema: { type: "string", minLength: 1 },
   description:
-    "Opaque encrypted continuation cursor from the preceding collection response's next link. Authenticated encryption binds it to the resource kind, local user, and OAuth client; it exposes no logical key, timestamp, local-user identifier, OAuth-client identifier, or signing secret and must not be constructed or reused across namespaces. Rotating the private signing-key material immediately invalidates outstanding cursors.",
+    "Opaque encrypted continuation cursor from the preceding collection response's next link. For a collection that is not mutated during traversal, following only returned next links visits every authorized item exactly once in bounded pages. Authenticated encryption binds the cursor to the resource kind, local user, and OAuth client; it exposes no logical key, timestamp, local-user identifier, OAuth-client identifier, or signing secret and must not be constructed or reused across namespaces. Rotating the private signing-key material immediately invalidates outstanding cursors.",
 } as const;
 
 const tokenBoundCorsDescription =
