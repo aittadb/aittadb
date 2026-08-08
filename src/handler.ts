@@ -214,6 +214,20 @@ export function createAittaDBWithStore(
         );
       }
 
+      const multipartIdentityRejection = rejectUntrustedBrowserFileMultipart(
+        request,
+        url,
+        identityProvider,
+      );
+      if (multipartIdentityRejection) {
+        return finalizeResponse(
+          request,
+          multipartIdentityRejection,
+          config,
+          corsHeaders,
+        );
+      }
+
       if (
         url.pathname === "/statistics" &&
         request.method === "GET" &&
@@ -2615,6 +2629,22 @@ function isFilesRoute(pathname: string): boolean {
   return (
     pathname === "/storage/files" || pathname.startsWith("/storage/files/")
   );
+}
+
+function rejectUntrustedBrowserFileMultipart(
+  request: Request,
+  url: URL,
+  identityProvider: UpstreamIdentityProvider,
+): Response | null {
+  if (
+    request.method !== "POST" ||
+    !isFilesRoute(url.pathname) ||
+    !request.headers.get("content-type")?.includes("multipart/form-data")
+  ) {
+    return null;
+  }
+  const identity = requireSitesIdentity(request, identityProvider);
+  return identity instanceof Response ? identity : null;
 }
 
 export function isAssetRoute(pathname: string): boolean {
