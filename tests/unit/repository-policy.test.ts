@@ -235,8 +235,15 @@ test("public copy distinguishes licensing from the current Sites dependency", as
     appPage,
     /Identity, sessions, JSON data, and files for connected applications/,
   );
-  assert.match(appPage, /runs on OpenAI-hosted[\s\S]+ChatGPT Sites/);
-  assert.match(appPage, /never forwards ChatGPT[\s\S]+credentials/);
+  assert.match(
+    appPage,
+    /ChatGPT provides browser sign-in[\s\S]+inside ChatGPT Sites/,
+  );
+  assert.match(appPage, /creates a separate local identity/);
+  assert.match(appPage, /issues[\s\S]+its own credentials/);
+  assert.match(appPage, /never receives or forwards ChatGPT credentials/);
+  assert.doesNotMatch(appPage, /AittaDB runs on OpenAI-hosted/);
+  assert.doesNotMatch(appPage, /ChatGPT OAuth/i);
   assert.doesNotMatch(appPage, /third-party, non-official project/);
   assert.doesNotMatch(appPage, /independent application/i);
   assert.doesNotMatch(appPage, /Persistent Events are planned/i);

@@ -17,9 +17,10 @@ export default function Page() {
         Identity, sessions, JSON data, and files for connected applications.
       </p>
       <p>
-        Source-available under FSL-1.1-MIT. AittaDB runs on OpenAI-hosted
-        ChatGPT Sites, issues its own credentials, and never forwards ChatGPT
-        credentials. See <Link href="/docs">API docs</Link>,{" "}
+        Source-available under FSL-1.1-MIT. ChatGPT provides browser sign-in
+        inside ChatGPT Sites; AittaDB creates a separate local identity, issues
+        its own credentials, and never receives or forwards ChatGPT credentials.
+        See <Link href="/docs">API docs</Link>,{" "}
         <Link href="/health">health metadata</Link>, or the{" "}
         <Link href="https://github.com/aittadb/aittadb#licensing">
           project repository

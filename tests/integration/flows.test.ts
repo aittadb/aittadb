@@ -210,9 +210,21 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.doesNotMatch(rootTrustNotice, /Persistent events are planned/);
   assert.match(rootTrustNotice, /Source-available under FSL-1\.1-MIT/);
   assert.match(rootTrustNotice, /FSL-1\.1-MIT/);
-  assert.match(rootTrustNotice, /runs on OpenAI-hosted ChatGPT Sites/);
+  assert.match(
+    rootTrustNotice,
+    /ChatGPT provides browser sign-in inside ChatGPT Sites/,
+  );
+  assert.match(rootTrustNotice, /creates a separate local identity/);
   assert.match(rootTrustNotice, /issues its own credentials/);
-  assert.match(rootTrustNotice, /never forwards ChatGPT credentials/);
+  assert.match(
+    rootTrustNotice,
+    /never receives or forwards ChatGPT credentials/,
+  );
+  assert.doesNotMatch(
+    rootTrustNotice,
+    /AittaDB runs on OpenAI-hosted ChatGPT Sites/,
+  );
+  assert.doesNotMatch(rootTrustNotice, /ChatGPT OAuth/i);
   assert.doesNotMatch(rootTrustNotice, /available commercially/);
   assert.doesNotMatch(
     rootTrustNotice,
