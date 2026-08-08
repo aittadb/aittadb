@@ -4,7 +4,6 @@ import {
   hypermediaJson,
   isJsonMediaType,
   oauthError,
-  readBoundedBody,
   readBoundedRequestBody,
 } from "./http";
 import {
@@ -795,16 +794,13 @@ async function readBytes(
   request: Request,
   maxBytes: number,
 ): Promise<ArrayBuffer | Response> {
-  const length = Number(request.headers.get("content-length") || "0");
-  if (Number.isFinite(length) && length > maxBytes)
-    return oauthError("invalid_request", "Storage file is too large", 413);
-  let body: ArrayBuffer;
   try {
-    body = await readBoundedBody(request.body, maxBytes);
-  } catch {
-    return oauthError("invalid_request", "Storage file is too large", 413);
+    return await readBoundedRequestBody(request, maxBytes);
+  } catch (error) {
+    return error instanceof Error && error.message === "request_too_large"
+      ? oauthError("invalid_request", "Storage file is too large", 413)
+      : oauthError("invalid_request", "Malformed request body");
   }
-  return body;
 }
 
 function decodeStorageKey(pathname: string, prefix: string): string | null {

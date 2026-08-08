@@ -139,6 +139,12 @@ const boundedRecordTooLargeResponse = {
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
+const boundedFileTooLargeResponse = {
+  description:
+    "Canonical raw file bytes exceed 10 MiB. A valid declared overflow is rejected without reading the stream; missing, malformed, or undersized Content-Length values do not bypass the observed-byte limit, and overflow stops before R2 or D1 file-metadata mutation.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
@@ -977,7 +983,7 @@ export const openApiSpec = {
           "405": { description: "Browser representation marker missing" },
           "413": {
             description:
-              "URL-encoded or multipart form, or canonical file bytes, exceed the applicable finite limit",
+              "The URL-encoded or multipart browser wrapper exceeds its finite limit, or canonical raw file bytes exceed 10 MiB. Raw-byte overflow is stream-bounded before R2 or D1 file-metadata mutation.",
           },
           "429": rateLimitedResponse(true),
           "503": filesUnavailableResponse,
@@ -1120,7 +1126,7 @@ export const openApiSpec = {
       },
       put: {
         summary: "Create or replace one file in R2",
-        description: `Requires storage.write. The caller's key is metadata only; AittaDB generates the physical R2 object key. Writes are subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
+        description: `Requires storage.write. The caller's key is metadata only; AittaDB generates the physical R2 object key. Raw bytes are bounded from the observed request stream; Content-Length is only an early-rejection hint. Writes are subject to finite deployment-wide, local-user, and user-and-client namespace item and byte limits and to the deployment storage-write switch. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         parameters: [storageKeyParameter],
         requestBody: {
@@ -1139,7 +1145,12 @@ export const openApiSpec = {
               false,
             ),
           },
-          "413": { description: "File exceeds the AittaDB limit" },
+          "400": {
+            description:
+              "The canonical raw-file request stream failed before the file could be buffered",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "413": boundedFileTooLargeResponse,
           "409": storageConflictResponse,
           "429": rateLimitedResponse(true),
           "503": filesUnavailableResponse,
