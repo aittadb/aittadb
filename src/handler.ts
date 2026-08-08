@@ -224,6 +224,17 @@ export function createAittaDBWithStore(
           config,
         );
       }
+      if (!config.features.oauthApps && url.pathname === "/userinfo") {
+        const negotiationError =
+          request.method === "GET" ? hypermediaNegotiationError(request) : null;
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
       if (!config.features.records && isRecordsRoute(url.pathname)) {
         const negotiationError = hypermediaNegotiationError(request);
         return finalizeResponse(
@@ -501,7 +512,9 @@ async function route(
       features: config.features,
       capabilities: [
         "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
-        "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
+        ...(config.features.oauthApps
+          ? ["AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions"]
+          : ["AittaDB-issued private sessions and verifiable JWT credentials"]),
         ...(config.features.records
           ? ["D1-backed JSON records isolated by AittaDB user and client"]
           : []),
@@ -694,7 +707,7 @@ async function route(
     request.method === "GET"
   ) {
     const configuration = oidcConfiguration(config.issuerUrl, {
-      includeTokenLifecycleEndpoints: config.features.oauthApps,
+      oauthAppsEnabled: config.features.oauthApps,
     });
     return prefersRawJson(request, url)
       ? json(configuration)
@@ -1298,9 +1311,13 @@ async function localSessionEndpoint(
       link("privacy-policy", `${config.issuerUrl}/privacy`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
-      link("userinfo", `${config.issuerUrl}/userinfo`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.oauthApps
+        ? [
+            link("userinfo", `${config.issuerUrl}/userinfo`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       ...(config.features.records
         ? [
             link("storage-records", `${config.issuerUrl}/storage/records`, {
@@ -1329,34 +1346,41 @@ async function localSessionEndpoint(
       ),
     ],
     actions: [
-      action(
-        "read-userinfo-with-session",
-        "Read current identity claims",
-        "POST",
-        `${config.issuerUrl}/userinfo`,
-        {
-          type: "application/x-www-form-urlencoded",
-          authorization: { scheme: "sites-session" },
-          fields: [
-            field("ui", "Browser operation", "string", "body", {
-              required: true,
-              value: "1",
-            }),
-            field("csrf_token", "CSRF token", "string", "body", {
-              required: true,
-              secret: true,
-              value: csrf,
-            }),
-            field("auth_mode", "Authentication", "string", "body", {
-              required: true,
-              value: "session",
-              options: [
-                { value: "session", title: "Current signed-in session" },
-              ],
-            }),
-          ],
-        },
-      ),
+      ...(config.features.oauthApps
+        ? [
+            action(
+              "read-userinfo-with-session",
+              "Read current identity claims",
+              "POST",
+              `${config.issuerUrl}/userinfo`,
+              {
+                type: "application/x-www-form-urlencoded",
+                authorization: { scheme: "sites-session" },
+                fields: [
+                  field("ui", "Browser operation", "string", "body", {
+                    required: true,
+                    value: "1",
+                  }),
+                  field("csrf_token", "CSRF token", "string", "body", {
+                    required: true,
+                    secret: true,
+                    value: csrf,
+                  }),
+                  field("auth_mode", "Authentication", "string", "body", {
+                    required: true,
+                    value: "session",
+                    options: [
+                      {
+                        value: "session",
+                        title: "Current signed-in session",
+                      },
+                    ],
+                  }),
+                ],
+              },
+            ),
+          ]
+        : []),
       ...(config.features.records
         ? [
             action(
@@ -1406,6 +1430,7 @@ async function localSessionEndpoint(
           showAdmin,
           config.features.records,
           config.features.files,
+          config.features.oauthApps,
         ),
       )
     : hypermediaJson(request, document, {

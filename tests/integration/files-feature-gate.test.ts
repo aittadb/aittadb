@@ -111,6 +111,7 @@ test("disabled File Storage rejects every route before D1, R2, or cleanup work",
 test("disabled File Storage disappears from HTML and hypermedia discovery only", async () => {
   const env = await testEnv({
     FEATURE_FILES_ENABLED: "false",
+    FEATURE_OAUTH_APPS_ENABLED: "true",
     PRIVACY_CONTROLLER_NAME: "AittaDB Test Operator",
     PRIVACY_CONTACT_EMAIL: "privacy@example.test",
   });

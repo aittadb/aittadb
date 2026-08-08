@@ -155,6 +155,7 @@ export function sessionPage(
   showAdmin = false,
   recordsEnabled = true,
   filesEnabled = true,
+  userInfoEnabled = true,
 ): string {
   const recordOperation = recordsEnabled
     ? `<a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a>`
@@ -162,12 +163,16 @@ export function sessionPage(
   const fileOperation = filesEnabled
     ? `<a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a>`
     : "";
+  const userInfoOperation = userInfoEnabled
+    ? `<a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>`
+    : "";
   return pageDocument({
     title: "My AittaDB session",
     eyebrow: "Authenticated identity",
     heading: "My AittaDB session",
-    summary:
-      "Use the AittaDB identity created from your ChatGPT sign-in to access private data or approve a registered application's request.",
+    summary: userInfoEnabled
+      ? "Use the AittaDB identity created from your ChatGPT sign-in to access private data or approve a registered application's request."
+      : "Use the AittaDB identity created from your ChatGPT sign-in to access private data in this deployment.",
     visualEyebrow: "Identity boundary",
     visualHeading:
       recordsEnabled && filesEnabled
@@ -179,7 +184,7 @@ export function sessionPage(
             : "Your AittaDB identity and sessions.",
     visualSummary:
       "ChatGPT establishes the upstream sign-in. AittaDB uses its own immutable user ID for sessions and persistent storage.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}${fileOperation}<a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace${userInfoEnabled ? " and identity claims" : ""}.${userInfoEnabled ? " Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes." : ""}</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}${fileOperation}${userInfoOperation}${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
       ...(recordsEnabled
         ? [{ href: "/storage/records", label: "Open my records" }]

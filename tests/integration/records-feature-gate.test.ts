@@ -94,6 +94,7 @@ test("disabled JSON Records rejects every route before repository work", async (
 test("disabled JSON Records disappears from HTML and hypermedia discovery only", async () => {
   const env = await testEnv({
     FEATURE_RECORDS_ENABLED: "false",
+    FEATURE_OAUTH_APPS_ENABLED: "true",
     PRIVACY_CONTROLLER_NAME: "AittaDB Test Operator",
     PRIVACY_CONTACT_EMAIL: "privacy@example.test",
   });

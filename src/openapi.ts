@@ -159,6 +159,12 @@ const oauthAppsLifecycleUnavailableResponse = {
   },
 } as const;
 
+const oauthAppsOidcUnavailableResponse = {
+  description:
+    "Downstream OAuth Apps are disabled by deployment configuration. UserInfo GET and POST operations are rejected before request-body reading, bearer-token parsing or verification, Sites identity lookup, CORS client lookup, rate limiting, cleanup scheduling, or durable work. Issuer metadata retains only the issuer and public ES256 verification-key metadata needed to validate AittaDB's private session JWTs.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
 const storageQuotaExceededResponse = {
   description:
     "The write would exceed a finite deployment-wide, local-user, or user-and-client namespace item or byte limit.",
@@ -298,6 +304,8 @@ export const openApiSpec = {
     "/.well-known/openid-configuration": {
       get: {
         summary: "OpenID Provider metadata",
+        description:
+          "When downstream OAuth Apps are enabled, this is the complete issuer discovery document. When disabled, it intentionally contains only issuer, jwks_uri, and the supported ES256 verification algorithm; it advertises no grants, authorization endpoint, token endpoint, lifecycle endpoint, scopes, claims, or UserInfo operation.",
         parameters: [representationFormatParameter],
         responses: {
           "200": {
@@ -313,6 +321,8 @@ export const openApiSpec = {
     "/.well-known/jwks.json": {
       get: {
         summary: "JSON Web Key Set",
+        description:
+          "Always publishes only the configured public P-256 verification JWK, including when downstream OAuth Apps are disabled, so AittaDB's own session JWTs remain externally verifiable. The private JWK is never returned and this route performs no D1 work.",
         parameters: [representationFormatParameter],
         responses: {
           "200": {
@@ -643,7 +653,7 @@ export const openApiSpec = {
     "/userinfo": {
       get: {
         summary: "OpenID Connect UserInfo",
-        description: `API clients send an AittaDB bearer access token containing the openid scope. The token audience must identify an existing active OAuth client; ID tokens, tokens for disabled or missing clients, and access tokens without openid are rejected with the same generic invalid-token response. A browser requesting HTML without a bearer token receives a same-origin form that can use either the current ChatGPT-signed-in AittaDB session or an explicit access token. ${tokenBoundCorsDescription}`,
+        description: `Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject the operation before bearer lookup or durable work and do not advertise it in discovery or session representations. API clients send an AittaDB bearer access token containing the openid scope. The token audience must identify an existing active OAuth client; ID tokens, tokens for disabled or missing clients, and access tokens without openid are rejected with the same generic invalid-token response. A browser requesting HTML without a bearer token receives a same-origin form that can use either the current ChatGPT-signed-in AittaDB session or an explicit access token. ${tokenBoundCorsDescription}`,
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -671,12 +681,13 @@ export const openApiSpec = {
               "Invalid bearer token, missing openid scope, unknown audience client, or disabled audience client",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
+          "503": oauthAppsOidcUnavailableResponse,
         },
       },
       post: {
         summary: "Browser-only UserInfo form submission",
         description:
-          "Uses either the current signed-in browser session or an explicit bearer token from a CSRF-protected same-origin form, then invokes the same UserInfo validation as GET. The current-session credential is short-lived, internal, and never returned to the page. Non-browser clients should use GET with Authorization: Bearer.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Uses either the current signed-in browser session or an explicit bearer token from a CSRF-protected same-origin form, then invokes the same UserInfo validation as GET. The current-session credential is short-lived, internal, and never returned to the page. Disabled deployments reject before reading the form or looking up identity or tokens. Non-browser clients should use GET with Authorization: Bearer.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -723,6 +734,7 @@ export const openApiSpec = {
           "405": { description: "Browser representation marker missing" },
           "400": { description: "Malformed request body" },
           "413": boundedFormTooLargeResponse,
+          "503": oauthAppsOidcUnavailableResponse,
         },
       },
     },
@@ -2572,21 +2584,23 @@ export const openApiSpec = {
 
 export function oidcConfiguration(
   issuer: string,
-  options: { includeTokenLifecycleEndpoints?: boolean } = {},
+  options: { oauthAppsEnabled?: boolean } = {},
 ) {
-  const includeTokenLifecycleEndpoints =
-    options.includeTokenLifecycleEndpoints ?? true;
+  const oauthAppsEnabled = options.oauthAppsEnabled ?? true;
+  if (!oauthAppsEnabled) {
+    return {
+      issuer,
+      jwks_uri: `${issuer}/.well-known/jwks.json`,
+      id_token_signing_alg_values_supported: ["ES256"],
+    };
+  }
   return {
     issuer,
     authorization_endpoint: `${issuer}/authorize`,
     device_authorization_endpoint: `${issuer}/oauth/device_authorization`,
     token_endpoint: `${issuer}/oauth/token`,
-    ...(includeTokenLifecycleEndpoints
-      ? {
-          revocation_endpoint: `${issuer}/oauth/revoke`,
-          introspection_endpoint: `${issuer}/oauth/introspect`,
-        }
-      : {}),
+    revocation_endpoint: `${issuer}/oauth/revoke`,
+    introspection_endpoint: `${issuer}/oauth/introspect`,
     userinfo_endpoint: `${issuer}/userinfo`,
     jwks_uri: `${issuer}/.well-known/jwks.json`,
     response_types_supported: ["code"],

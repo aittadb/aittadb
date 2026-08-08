@@ -101,7 +101,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   });
   assert.deepEqual(apiRootJson.data.capabilities, [
     "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
-    "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
+    "AittaDB-issued private sessions and verifiable JWT credentials",
     "D1-backed JSON records isolated by AittaDB user and client",
     "R2-backed files with D1 metadata isolated by AittaDB user and client",
   ]);
@@ -2716,7 +2716,7 @@ test("browser storage representations execute real scoped D1 and R2 operations",
 });
 
 test("current signed-in session drives UserInfo and isolated record and file operations", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);

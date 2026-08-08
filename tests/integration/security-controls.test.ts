@@ -304,7 +304,7 @@ test("storage read and write limits are enforced per authenticated namespace", a
 
 test("client origins drive CORS and disabled clients invalidate UserInfo", async () => {
   const fixture = await storageFixture(
-    {},
+    { FEATURE_OAUTH_APPS_ENABLED: "true" },
     ["openid", "email", "storage.read"],
     ["https://allowed.example.test"],
   );
