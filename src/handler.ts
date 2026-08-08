@@ -191,6 +191,37 @@ export function createAittaDBWithStore(
         );
       }
 
+      if (
+        url.pathname === "/statistics" &&
+        request.method === "GET" &&
+        !config.features.statistics
+      ) {
+        return finalizeResponse(
+          request,
+          hypermediaError(
+            request,
+            "feature_unavailable",
+            "Service statistics are disabled by deployment configuration",
+            503,
+            {
+              links: [
+                link("service", config.issuerUrl, {
+                  type: HYPERMEDIA_MEDIA_TYPE,
+                }),
+                link("health", `${config.issuerUrl}/health`, {
+                  type: HYPERMEDIA_MEDIA_TYPE,
+                }),
+                link("documentation", `${config.issuerUrl}/docs`, {
+                  type: "text/html",
+                }),
+              ],
+            },
+          ),
+          config,
+          corsHeaders,
+        );
+      }
+
       try {
         if (!store && needsStore(url.pathname))
           return finalizeResponse(
@@ -295,9 +326,13 @@ async function route(
       link("health", `${config.issuerUrl}/health`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
-      link("statistics", `${config.issuerUrl}/statistics`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.statistics
+        ? [
+            link("statistics", `${config.issuerUrl}/statistics`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       link("privacy-policy", `${config.issuerUrl}/privacy`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
@@ -349,13 +384,17 @@ async function route(
           : `${config.issuerUrl}/session`,
         { authorization: { scheme: "sites-session" }, fields: [] },
       ),
-      action(
-        "read-statistics",
-        "View service statistics",
-        "GET",
-        `${config.issuerUrl}/statistics`,
-        { authorization: { scheme: "none" }, fields: [] },
-      ),
+      ...(config.features.statistics
+        ? [
+            action(
+              "read-statistics",
+              "View service statistics",
+              "GET",
+              `${config.issuerUrl}/statistics`,
+              { authorization: { scheme: "none" }, fields: [] },
+            ),
+          ]
+        : []),
       action(
         "read-privacy-policy",
         "Read Privacy Policy",

@@ -173,7 +173,7 @@ export const openApiSpec = {
       get: {
         summary: "Privacy-preserving public service statistics",
         description:
-          "Returns only the aggregate number of durable local AittaDB identities in this deployment. It never returns names, email addresses, subjects, activity, client dimensions, storage data, or deployment secrets. Responses are not cached.",
+          "Returns only the aggregate number of durable local AittaDB identities in this deployment when FEATURE_STATISTICS_ENABLED is true. When disabled, the operation returns a content-negotiated 503 feature_unavailable response before any aggregate query. It never returns names, email addresses, subjects, activity, client dimensions, storage data, or deployment secrets. Responses are not cached.",
         responses: {
           "200": {
             description: "Aggregate local identity count",
@@ -182,7 +182,8 @@ export const openApiSpec = {
             ),
           },
           "503": {
-            description: "D1 is unavailable",
+            description:
+              "Statistics are disabled by deployment configuration, which returns feature_unavailable before any aggregate query, or D1 is unavailable",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "406": notAcceptableResponse,
@@ -1678,7 +1679,12 @@ export const openApiSpec = {
             properties: {
               records: { type: "boolean", default: true },
               files: { type: "boolean", default: true },
-              statistics: { type: "boolean", default: true },
+              statistics: {
+                type: "boolean",
+                default: true,
+                description:
+                  "When false, service discovery omits statistics controls and GET /statistics returns feature_unavailable before querying D1.",
+              },
               oauthApps: { type: "boolean", default: false },
             },
             additionalProperties: false,

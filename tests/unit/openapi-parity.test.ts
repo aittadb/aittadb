@@ -44,6 +44,43 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
   }
 });
 
+test("OpenAPI documents the statistics feature gate", () => {
+  const operation = openApiOperation("/statistics", "get");
+  assert.match(
+    String(operation.description),
+    /FEATURE_STATISTICS_ENABLED is true/,
+  );
+  assert.match(String(operation.description), /before any aggregate query/);
+
+  const unavailable = asObject(
+    operationResponses("/statistics", "get")["503"],
+    "statistics unavailable response",
+  );
+  assert.match(String(unavailable.description), /feature_unavailable/);
+  assert.match(String(unavailable.description), /before any aggregate query/);
+  const content = asObject(
+    unavailable.content,
+    "statistics unavailable content",
+  );
+  assert.ok("application/json" in content);
+  assert.ok("application/vnd.aittadb+json; version=0.1" in content);
+  assert.ok("text/html" in content);
+
+  const featureProperties = asObject(
+    asObject(
+      openApiSchema("ServiceMetadataData").properties,
+      "service properties",
+    ).features,
+    "feature availability",
+  );
+  const statistics = asObject(
+    asObject(featureProperties.properties, "feature properties").statistics,
+    "statistics feature",
+  );
+  assert.match(String(statistics.description), /GET \/statistics/);
+  assert.match(String(statistics.description), /before querying D1/);
+});
+
 test("delegated storage checks cannot fall back to an implicit inventory", async () => {
   const { handlerSource } = await routeSources();
   assert.throws(
