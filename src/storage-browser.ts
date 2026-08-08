@@ -505,17 +505,17 @@ async function renderStorageResponse(
     .json()
     .catch(() => null)) as Record<string, unknown> | null;
   if (!payload) return response;
+  const csrf = request ? csrfTokenForRequest(request) : "";
   const page = storageResultPage({
     kind,
     operation,
     payload,
     resourceHref: retryHref,
-    csrf: request ? csrfTokenForRequest(request) : "",
+    csrf,
     signedIn,
   });
   const headers = new Headers(response.headers);
-  if (request)
-    headers.set("set-cookie", csrfCookie(csrfTokenForRequest(request)));
+  if (request) headers.set("set-cookie", csrfCookie(csrf));
   return html(page, {
     status: response.status,
     statusText: response.statusText,
