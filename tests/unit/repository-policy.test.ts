@@ -133,6 +133,38 @@ test("AGENTS.md requires evidence-based readiness confidence", async () => {
   );
 });
 
+test("AGENTS.md keeps AittaDB primitive-first and inside its server boundary", async () => {
+  const policy = await readFile(AGENTS_PATH, "utf8");
+
+  assert.match(
+    policy,
+    /general-purpose hosted database server and application-backend service/,
+  );
+  assert.match(policy, /small, independent, reusable primitives/);
+  assert.match(
+    policy,
+    /Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories/,
+  );
+  assert.match(policy, /Application workflows[\s\S]+belong outside AittaDB/);
+  assert.match(
+    policy,
+    /Before adding work, answer:[\s\S]+every new abstraction needed now/,
+  );
+  assert.match(
+    policy,
+    /mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository/,
+  );
+  assert.match(
+    policy,
+    /If a request conflicts, stop before implementation[\s\S]+smallest general-purpose enabling primitive/,
+  );
+  assert.match(
+    policy,
+    /Describe the primitive, not its motivating application/,
+  );
+  assert.doesNotMatch(policy, /MVP branch is `codex\/initial-implementation`/);
+});
+
 test("public copy distinguishes project status from the current Sites dependency", async () => {
   const [agents, appPage, handler, protocolPages, readme, styleGuide] =
     await Promise.all([

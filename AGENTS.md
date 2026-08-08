@@ -4,9 +4,13 @@ This file is authoritative for humans and AI agents working in this repository. 
 
 ## Purpose and Product Boundary
 
-AittaDB is a hosted application backend for third-party applications, services, and agents. It runs on the OpenAI-hosted ChatGPT Sites platform, maps a trusted server-side ChatGPT sign-in signal to a separate local AittaDB user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records and files.
+AittaDB is a general-purpose hosted database server and application-backend service for third-party applications, services, and agents. Develop it as a focused server product of small, independent, reusable primitives exposed through stable HTTP protocols. On OpenAI-hosted ChatGPT Sites it maps trusted server-side sign-in to a local AittaDB user, issues its own OAuth/OIDC/JWT credentials, and provides isolated data.
 
 Current capabilities are identity mapping, OAuth/OIDC/JWT sessions, D1-backed JSON records, and R2-backed files with D1 metadata. Persistent events and long-polling are planned, not implemented. Do not describe planned behavior as available.
+
+The server boundary includes identity/authentication; user, client, application, and namespace isolation; records and objects; events and delivery; conditional writes, versions, cursors, idempotency, bounded atomic operations, quotas, rate limits, expiry, retention, cleanup, hypermedia, OpenAPI, and protocol/operational documentation. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories. This repository may document protocol use, but must not own those implementations.
+
+Application workflows such as billing, memberships, infrastructure provisioning, messaging, or games belong outside AittaDB and compose its public primitives. Examples may motivate/evaluate a primitive, but must not determine provider-specific routes, schemas, configuration, scopes, or business rules here.
 
 AittaDB is a third-party project, not affiliated with, endorsed by, or an official product of OpenAI. The current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, sign-in, D1, R2, configuration, and secrets. Local users, credentials, grants, sessions, and stored data belong to that AittaDB deployment, not OpenAI or ChatGPT. Never call it "OpenAI Auth", "ChatGPT OAuth", an official "Sign in with ChatGPT" OAuth service, or imply that AittaDB credentials are OpenAI or ChatGPT credentials.
 
@@ -20,7 +24,7 @@ GitHub at `https://github.com/aittadb/aittadb` is canonical. Work in the current
 
 The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
-Use feature branches. The MVP branch is `codex/initial-implementation`. Never push directly to `main`, merge, deploy, publish, save a production version/checkpoint, rotate hosted secrets, or change Sites access settings without the user's explicit approval. A task-specific approval does not authorize unrelated operational changes.
+Use feature branches. Never push directly to `main`, merge, deploy, publish, save a production version/checkpoint, rotate hosted secrets, or change Sites access settings without the user's explicit approval. A task-specific approval does not authorize unrelated operational changes.
 
 ## Runtime Contract
 
@@ -75,59 +79,55 @@ Update this section in the same task if ownership moves.
 
 ## Unit Interfaces
 
-Keep dependencies narrow and explicit:
+Every server unit is a reusable primitive with a small vendor-neutral contract, bounded execution, authorization/isolation, defined failures, and natural composition. Keep dependencies narrow:
 
-- HTTP handlers parse/limit requests, negotiate representations, apply CORS/security controls, and call domain services.
-- `UpstreamIdentityProvider` parses the trusted signal; production injects the Sites provider and mocks remain under `tests/`.
+- HTTP handlers parse/limit/negotiate, apply CORS/security, and call domain services.
+- `UpstreamIdentityProvider` parses trusted identity; production injects Sites and tests inject mocks.
 - User repository owns email lookup, generated immutable UUIDs, and user metadata.
 - Client repository owns client type, name, exact redirects, origins, scopes, disablement, secret hashes, and rotation.
-- OAuth services own RFC 8628, Authorization Code with PKCE, token exchange, scope checks, consent, revocation, and introspection.
-- OIDC services own discovery, JWKS, ID-token claims, nonce, UserInfo, issuer metadata, and verification.
+- OAuth owns RFC 8628, Authorization Code/PKCE, exchange, scopes, consent, revocation, and introspection.
+- OIDC owns discovery, JWKS, ID claims, nonce, UserInfo, issuer metadata, and verification.
 - Token repository owns hashed codes, device grants, refresh families/tokens, revocations, and expiration cleanup.
 - Consent, audit, and rate-limit repositories own their narrowly keyed durable records.
 - Storage repository owns records and file metadata keyed by local UUID plus OAuth client ID. R2 bytes use generated physical keys.
-- Storage browser adapter parses protected HTML forms and sends synthetic requests to canonical `storageEndpoint`; it never duplicates scope, ownership, key, D1, or R2 logic.
-- Browser-session adapter maps current trusted identity to a minimal short-lived internal access token for reserved client `aittadb-browser-session-v1`; it never logs, renders, returns, or persists that plaintext token.
-- System-client policy keeps that reserved client migration-seeded, hidden, immutable through administration, and rejected from external OAuth grants.
+- Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
+- Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
 - Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.
 - Configuration owns parsing, defaults, required-secret checks, and production/test separation.
-- Representation negotiation owns HTML versus JSON/binary only; browser pages always execute real route/domain logic, never a demo model.
+- Representation negotiation chooses HTML or JSON/binary; pages execute real route/domain logic, never demos.
 
-Use dependency injection where it materially improves tests. Keep protocol-independent logic separate from HTTP and storage behind repository interfaces.
+Use dependency injection where useful. Separate protocol-independent logic from HTTP and keep storage behind repository interfaces.
 
 ## TypeScript and Coding Rules
 
-Use TypeScript `strict`; avoid `any`. Parse unknown input with explicit guards and structured APIs. Prefer small modules, pure domain functions, existing local patterns, and conservative changes. Add abstractions only when they remove real complexity. Use succinct comments only for non-obvious blocks.
+Use TypeScript `strict`; avoid `any`. Parse unknown input with explicit guards and structured APIs. Prefer small modules, pure domain functions, existing local patterns, and conservative changes. Use succinct comments only for non-obvious blocks.
+
+Before adding work, answer: (1) is it a database-server or application-backend primitive; (2) does it solve one demonstrated problem; (3) can unrelated applications use it without application- or provider-specific behavior; (4) can an existing primitive be extended; (5) is its contract smaller than the motivating application feature; (6) can that external application build the use case entirely through public AittaDB protocols; and (7) is every new abstraction needed now? If the proposal is mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation, identify the conflict, propose the smallest general-purpose enabling primitive, and request an explicit architecture decision only when no suitable primitive exists.
+
+Prefer the smallest design that completely solves the demonstrated server requirement. Reuse a primitive before adding an abstraction. Add no framework, plugin/extension system, generic query language, workflow engine, or configuration layer without a concrete requirement that cannot be handled simply. Do not generalize one example without an independent server contract, merely rename or relocate complexity, or add infrastructure outside the database-server role. Prefer explicit data models, narrow interfaces, and short sequences of composable operations. Keep runtime behavior deterministic, bounded, observable, and testable; preserve public contracts unless a necessary change is explicitly versioned. Simplicity never weakens correctness, durability, security, privacy, authorization, or failure handling.
 
 Use prepared SQL with one statement per `prepare()` and bound untrusted values. Never construct SQL identifiers or clauses from caller input. Use documented integer Unix seconds or ISO text consistently. Use Web-standard `Request`, `Response`, URL, streams, and Web Crypto in deployed code.
 
 ## Cryptography and Authentication
 
-- JWTs use ES256 with P-256 through Web Crypto.
-- Load the private JWK only from a hosted secret; publish only the derived public JWK.
-- Require configured `kid`; never generate a key at runtime startup.
-- Include immutable local UUID `sub` and unique `jti`.
-- Default access-token lifetime is 600 seconds.
-- Validate signature, exact algorithm, `kid`, `iss`, `aud`, `exp`, `iat`, and `nbf` when present. Reject wrong algorithms and unknown keys.
+- JWTs use ES256/P-256 through Web Crypto. Load the private JWK only from a hosted secret, publish only its public form, require configured `kid`, and never generate startup keys.
+- Include immutable local UUID `sub`, unique `jti`, and a default 600-second access lifetime. Validate signature, exact algorithm, `kid`, `iss`, `aud`, `exp`, `iat`, and optional `nbf`; reject wrong algorithms and unknown keys.
 - Omit `email_verified` or set it false unless Sites explicitly documents that assurance.
-- Authorization, device, and refresh credentials are cryptographically random. Store only hashes for bearer-equivalent opaque values and confidential client secrets.
-- Rotate refresh tokens on every successful use. Reuse revokes the family.
+- Authorization/device/refresh credentials are random; store only hashes for bearer-equivalent values and client secrets. Rotate refresh tokens on use; reuse revokes the family.
 - Access-token consumers require `token_use=access` and a valid `jti`; ID tokens never authorize UserInfo, introspection, storage, or administration. UserInfo also requires the `openid` scope.
-- D1 and memory one-time transitions use affected-row-gated compare-and-set operations. Never separate a read-time pending/unused check from the write that consumes an authorization request, authorization code, approved device grant, or refresh token.
+- One-time D1/memory transitions use affected-row-gated compare-and-set; never separate pending/unused reads from consumption writes.
 - Generated client secrets appear once, are SHA-256 hashed, and are compared without timing-dependent early exit.
 - Never log or put access, refresh, device, authorization, client, CSRF, cookie, or signing credentials in URLs or client bundles.
 
 OAuth rules:
 
-- Implement RFC 8628 Device Authorization Grant and Authorization Code with PKCE `S256`; no implicit or resource-owner-password grants.
-- Public clients use no secret; confidential clients authenticate.
-- Enforce exact registered redirect URI and allowed scope matching.
-- Authorization codes are high-entropy, one-time, and short-lived.
+- Implement RFC 8628 and Authorization Code with PKCE `S256`; never implicit or password grants. Public clients use no secret; confidential clients authenticate.
+- Enforce exact redirects/scopes; authorization codes are high-entropy, short-lived, and one-time.
 - Preserve `state` and OIDC `nonce`.
 - Require explicit consent unless remembered consent exactly covers client and scopes.
-- Device polling enforces interval, `slow_down`, pending, denied, expired, client binding, and one-time approval. Persist device and user codes only as hashes; reconstruct a short user-code display only from the already-matching same-origin browser submission.
+- Device polling enforces interval, `slow_down`, pending/denied/expired, client binding, and one-time approval. Persist code hashes only; reconstruct display solely from the matching same-origin submission.
 - Use standard OAuth content types and errors. Token success remains protocol-standard.
-- Introspection is for authorized confidential clients and active access tokens only. Revocation authenticates the owning client, handles access and refresh tokens even when the hint is omitted or wrong, revokes refresh families, records access-token `jti`, and preserves standard non-disclosure behavior.
+- Introspection is confidential-client-only and reports active access tokens. Revocation authenticates the owner, handles access/refresh tokens despite missing/wrong hints, revokes families, records access-token `jti`, and remains non-disclosing.
 
 Admin operations require the current trusted ChatGPT Sites session mapped to a canonical local UUIDv4 in `ADMIN_SUBJECTS`. There is no email allowlist, administrator password/key, key header, unlock form, or separate admin cookie. Non-admin representations expose no client data/actions; mutations still require same-origin and CSRF. Support list/create, public/confidential type, display name, exact redirects, scopes, origins, disable, secret rotation, grant revocation, and redacted mutation audits. No unrestricted dynamic registration. Subject allowlisting inherits upstream email-reassignment risk.
 
@@ -152,31 +152,19 @@ Current-session storage uses the reserved browser client, so it is durable but i
 
 The root is public and returns concise hypermedia JSON or a polished service entry page. It is an operation map, not marketing or a fake demo. Do not add a hero marketing site, pricing, testimonials, blog, dashboard, general account/profile pages, or nonessential navigation. `/session` is a focused protected identity/operations view.
 
-Follow `docs/hypermedia-json-rest-api.md`. An application resource URI has equivalent HTML and JSON representations selected only by `Accept`, never `User-Agent`; `Content-Type` describes submitted input. Do not create separate API/web route trees. The `0.1` preview JSON contract uses `data`, semantic `links`, and currently authorized `actions`, the `application/vnd.aittadb+json; version=0.1` media type, an `application/json` compatibility representation, and the `AittaDB-API-Version` header. Once stable `1.0` is published, breaking contract changes require a new version.
+Follow `docs/hypermedia-json-rest-api.md`. One resource URI has equivalent HTML and JSON selected by `Accept`, never `User-Agent`; `Content-Type` describes input. Do not split API/web routes. Preview `0.1` JSON uses `data`, semantic `links`, authorized `actions`, media type `application/vnd.aittadb+json; version=0.1`, JSON compatibility, and `AittaDB-API-Version`; stable breaking changes require a new version.
 
-Build one representation-independent resource/operation model and render it as machine controls or semantic HTML. Actions carry stable names, methods, targets, encodings, typed fields, locations, constraints, choices, and current/default values. Use server-supplied concrete targets or declared URI templates; clients must not need hard-coded route construction. Omit controls unavailable for the current identity, scopes, permissions, resource state, or protocol state, while always enforcing authorization server-side. OpenAPI describes all possible versioned operations; hypermedia describes what this caller can do now.
+Build one resource/operation model and render machine controls or semantic HTML. Actions provide stable names plus concrete/templated targets, methods, encodings, typed fields, constraints, choices, and values. Omit unavailable controls by identity, scope, permission, resource, or protocol state, but always enforce authorization server-side. OpenAPI describes possible versioned operations; hypermedia describes what this caller can do now.
 
-Every application endpoint provides useful HTML when `text/html` is preferred and hypermedia JSON for JSON clients, while OAuth/OIDC discovery, JWKS, authorization, token, revocation, introspection, and UserInfo wire formats remain standards-compliant. Protocol entry resources may advertise their forms without wrapping successful protocol payloads. JSON errors carry semantic recovery controls where valid. Every HTML action executes real production validation and durable state. No mock users, grants, tokens, storage, or browser-only authorization shortcuts.
+Every application endpoint supplies useful HTML and hypermedia JSON. OAuth/OIDC discovery, JWKS, authorization, token, revocation, introspection, and UserInfo retain standard wire formats; entry resources may advertise forms. Errors include valid recovery controls. HTML executes real validation and durable state, never mock users, credentials, storage, or browser-only authorization.
 
-Browser state-changing forms require same-origin plus CSRF checks. Accept the configured issuer origin behind Sites dispatch; `Origin: null` is allowed only with `Sec-Fetch-Site: same-origin`. Use one validated host-only, secure, `HttpOnly`, `SameSite=Lax` CSRF cookie during its bounded window so concurrent tabs work. Missing, malformed, mismatched, or cross-origin submissions fail closed. Never weaken protocol validation for HTML.
+Browser mutations require same-origin and CSRF. Accept the issuer origin behind Sites dispatch; allow `Origin: null` only with `Sec-Fetch-Site: same-origin`. Use a bounded host-only secure `HttpOnly`, `SameSite=Lax` CSRF cookie that supports concurrent tabs. Missing, malformed, mismatched, or cross-origin submissions fail closed.
 
-Storage HTML is resource-oriented:
+Storage HTML stays resource-oriented: collections render bounded lists/empty states, item navigation, and create/upload; item GET renders only actions valid for its URL key. Browser POST adapts to that same URL via validated `_method`; keys never come from override fields. No-JavaScript `?key=` navigation redirects only to an encoded same-origin item path. Never mix unrelated URLs in an operation selector or render JSON dumps as HTML results.
 
-- Collection `GET` renders list and item-navigation controls.
-- Item `GET /storage/{kind}/{key}` renders read/download, replace/upload, and delete actions for that URL key only.
-- Protected browser actions `POST` to that same resource URL with `_method=GET`, `PUT`, or `DELETE`; reject method/resource mismatches.
-- Item keys come only from the URL, never an override field.
-- No-JavaScript navigation submits collection `?key=...`; validate it and redirect only to the encoded same-origin item path.
-- Do not use one operation selector to mix unrelated resource URLs.
-- Render authorized collection state as an accessible list/table or explicit empty state; render item state and outcomes as human-readable fields, never as a JSON dump inside the HTML shell.
+`/auth-ui.js` only progressively hides/disables inactive fields, links required state to visibility, and upgrades navigation. HTML works without JavaScript; server validation is authoritative. Assets are same-origin, CSP-compatible, and perform no D1 work. Use semantic accessible responsive HTML, visible focus, clear errors, minimal JavaScript, no third-party runtime assets/trackers, and scoped shell CSS that does not break Swagger. Follow `docs/style-guide.md`.
 
-`/auth-ui.js` is same-origin progressive enhancement only. It hides/disables inactive authentication and grant fields, links `required` state to visibility, and upgrades item navigation. Initial HTML remains complete and usable without JavaScript; server validation is authoritative. `/auth-ui.css` and the script must remain CSP-compatible and perform no D1 work.
-
-Use semantic HTML, keyboard access, visible focus, meaningful labels, screen-reader compatibility, clear errors, responsive layout, no unnecessary JavaScript, and no third-party runtime fonts, imagery, trackers, or scripts. Follow `docs/style-guide.md`. Keep AittaDB shell selectors scoped so Swagger operations and Schemas controls are not restyled.
-
-Vinext currently imports `image-size` only for build-time image metadata, while all upstream `image-size` releases through `2.0.2` have unpatched denial-of-service advisories. Keep the reviewed `vendor/image-size-compat` package override and its `image-dimensions` delegate until Vinext adopts a patched dependency; verify it with `npm ls image-size`, its focused malformed-container tests, and `npm audit --audit-level=high` before changing or removing it.
-
-Brand contract: self-host Inter with `system-ui, "Segoe UI", sans-serif`; Aitta weight 750 in `#0B234A`, DB weight 750 in `#F04A32`, teal accent `#159CA6`. Use `public/aittadb-mark.svg`, decorative `public/aittadb-boundary.jpg` with empty alt, and `public/og.png`. All pages use the shared shell and GitHub footer unless a protocol/binary constraint prevents it.
+Retain the reviewed `vendor/image-size-compat` override while Vinext's build-only dependency remains vulnerable; verify `npm ls image-size`, focused malformed-container tests, and the high-severity audit before changing it. Self-host Inter with system fallbacks; use the AittaDB navy/red-orange/teal contract and checked-in mark, boundary image, and social card. Shared HTML uses the common shell and GitHub footer unless protocol/binary output forbids it.
 
 ## Database and Migrations
 
@@ -198,7 +186,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 Generate local ES256 keys only through the documented script/Make target. Secret key files are ignored. Never print a generated private key in agent conversation, commit it, or place it in public hosting metadata. Bootstrap administration by signing in at `/session`, then configuring that deployment-local UUID in `ADMIN_SUBJECTS`; never substitute email addresses or display names. The upstream email-reassignment risk remains explicit.
 
-`/privacy` is the public policy resource in HTML and versioned hypermedia JSON. Public `PRIVACY_CONTROLLER_*`/`PRIVACY_CONTACT_*` values take precedence; otherwise resolve only the first `ADMIN_SUBJECTS` UUID with `getUser()` and publish only its stored email plus optional name, never the UUID, allowlist, provenance, or other fields. Invalid or unresolved contact data returns generic `503`. Every HTML page links to the policy. Keep its data inventory, retention, Sites hosting/DPA role, residency caveat, cookie behavior, rights, and operator-review warning synchronized with implementation and OpenAPI.
+`/privacy` is public HTML and versioned hypermedia JSON. `PRIVACY_CONTROLLER_*`/`PRIVACY_CONTACT_*` values take precedence; otherwise resolve only the first `ADMIN_SUBJECTS` UUID and publish its stored email plus optional name, never UUIDs, allowlists, provenance, or other fields. Invalid/unresolved data returns generic `503`. Link every HTML page and keep the policy and OpenAPI synchronized with actual data, retention, hosting, residency, cookies, rights, and operator-review behavior.
 
 Redact PII and every credential from logs. Use generic auth errors that do not reveal account existence. Minimal audit events may contain event type, local UUID, client ID, request ID, carefully bounded coarse request metadata, and timestamps. OAuth, identity, storage, and token responses use `Cache-Control: no-store` where sensitive.
 
@@ -231,17 +219,17 @@ Keep commands synchronized with `package.json`, CI, README, and contributor docs
 
 ## PLAN.md Workflow
 
-Before implementing any repository-affecting user request, first capture it in root `PLAN.md` by adding a new unchecked task or amending the relevant unchecked task. Do this for follow-ups received during work before acting on them; conversational questions that require no repository change need no task. PLAN is the unfinished-work queue: use one flat list of unchecked `TASK-NNN` items with no nesting, phases, epics, or separate implementation/test/doc tasks. Stable identifiers are never reused; choose the next identifier by scanning both PLAN and the completed-task archive in `CHANGELOG.md`. Each item is the smallest practical dependency-ordered, focused-commit unit and explicitly includes its contract, implementation, tests, docs, failure paths, configuration/migration/OpenAPI/AGENTS changes, and acceptance evidence.
+Before implementing any repository-affecting user request, first capture it in root `PLAN.md` by adding or amending an unchecked task. Follow-ups precede action; questions needing no repository change need no task. PLAN is the unfinished-work queue: one flat unchecked `TASK-NNN` list with identifiers stable across PLAN and `CHANGELOG.md`. Each dependency-ordered focused-commit item delivers one server primitive with contract, implementation, tests, docs, failures, configuration/migration/OpenAPI/AGENTS changes, and evidence. Describe the primitive, not its motivating application; apply the boundary rule across plans, architecture, OpenAPI, migrations, tests, and implementation.
 
-Process in order unless a discovered dependency is documented. Add missing work as a new unchecked flat item at the correct position before doing it. After the entire definition of done passes, atomically remove the task from PLAN and append its stable identifier and unchanged full description under the current release's completed-plan-task archive in `CHANGELOG.md`. Never archive partial work; PLAN must contain no completed checkboxes, and CHANGELOG preserves the audit history.
+Process in order unless a documented dependency requires otherwise. Add missing work before doing it. After the full definition of done passes, atomically remove the task from PLAN and append its stable identifier and unchanged full description to the current `CHANGELOG.md` completed-task archive. Never archive partial work or keep completed checkboxes in PLAN.
 
-Parallelize independent reads, checks, and disjoint work when practical. Implementation subagents MUST edit only isolated Git worktrees. Treat the primary worktree as the integration checkout: rebase or otherwise preserve only reviewed, complete, validated agent commits into it; never import partial agent work. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly in the primary worktree.
+Parallelize independent work when practical. Implementation subagents MUST edit only isolated Git worktrees. The primary worktree integrates only reviewed, complete, validated agent commits; never import partial work. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly there.
 
-Prefer the smallest implementation that materially reduces risk and leaves a coherent working repository; do not speculate beyond the requested or evidenced problem. Whenever deciding that a feature, task, deployment, or release is ready, report an evidence-based readiness confidence from `0/100` to `100/100`, name the decisive evidence and material residual uncertainty, and rarely use `100/100`. The score informs judgment but never replaces security gates or the definition of done. Capture every material residual finding in `PLAN.md`, `ROADMAP.md`, or `BACKLOG.md` before handoff.
+Prefer the smallest coherent risk-reducing implementation. For feature/task/deployment/release readiness, report evidence-based readiness confidence from `0/100` to `100/100`, decisive evidence, and residual uncertainty; rarely use `100/100`. It never replaces security gates or the definition of done. Capture every material residual finding in `PLAN.md`, `ROADMAP.md`, or `BACKLOG.md` before handoff.
 
-`ROADMAP.md` lists future product direction as one flat stable `ROADMAP-NNN` checkbox list. `BACKLOG.md` lists uncommitted, unscheduled ideas as one flat stable `BACKLOG-NNN` checkbox list. Neither implies availability or authorizes implementation. Before implementing an item from either file, capture the integrated delivery unit in `PLAN.md`; update its source item only after the PLAN definition of done passes or the idea is explicitly retired with a documented replacement.
+`ROADMAP.md` is a flat stable `ROADMAP-NNN` future-direction list; `BACKLOG.md` is a flat stable `BACKLOG-NNN` unscheduled-idea list. Neither implies availability or authority to implement. Move work into PLAN first; update the source only after completion or documented retirement.
 
-Backup, restore, and synchronization designs must remain inside the authenticated user and authorized client namespace. They must exclude AittaDB's OAuth/identity/internal tables, other namespaces, physical R2 keys, environment and binding data, signing keys, secrets, and deployment metadata. Provider capacity is unknown; require bounded, resumable, idempotent, integrity-checked operations with documented conflict, deletion, recovery, quota, and partial-failure semantics before implementation.
+Backup/restore/sync stays inside the authorized user/client namespace and excludes internal auth tables, other namespaces, physical keys, bindings, secrets, and deployment data. Capacity is unknown; require bounded, resumable, idempotent, integrity-checked operations with explicit conflict, deletion, recovery, quota, and partial-failure semantics.
 
 ## Definition of Done
 
