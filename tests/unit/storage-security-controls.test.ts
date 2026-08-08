@@ -401,6 +401,196 @@ test("D1 cleanup removes expired OAuth state in bounded batches", async () => {
   database.sqlite.close();
 });
 
+test("every bounded D1 cleanup query has an explicit deterministic order", async () => {
+  const database = await migratedDatabase();
+  const prepared: string[] = [];
+  const observedD1: D1Database = {
+    prepare(query: string): D1PreparedStatement {
+      prepared.push(query);
+      return database.d1.prepare(query);
+    },
+  };
+
+  await new D1AuthStore(observedD1).cleanup(10_000_000);
+
+  const cleanupQueries = prepared.filter((query) =>
+    query.startsWith("DELETE FROM"),
+  );
+  assert.equal(cleanupQueries.length, 9);
+  for (const pattern of [
+    /DELETE FROM authorization_codes .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
+    /DELETE FROM authorization_requests .* ORDER BY ar\.expires_at ASC, ar\.rowid ASC LIMIT \?\)/,
+    /DELETE FROM device_grants .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
+    /DELETE FROM refresh_tokens .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
+    /DELETE FROM refresh_token_families .* ORDER BY rtf\.created_at ASC, rtf\.rowid ASC LIMIT \?\)/,
+    /DELETE FROM revoked_access_tokens .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
+    /DELETE FROM audit_events .* ORDER BY created_at ASC, rowid ASC LIMIT \?\)/,
+    /DELETE FROM rate_limit_counters .* ORDER BY window_start ASC, rowid ASC LIMIT \?\)/,
+    /DELETE FROM admin_operation_submissions .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
+  ]) {
+    assert.equal(
+      cleanupQueries.some((query) => pattern.test(query)),
+      true,
+      `Missing deterministic cleanup query matching ${pattern}`,
+    );
+  }
+  database.sqlite.close();
+});
+
+test("D1 cleanup selects the oldest eligible 500 rows in every category", async (t) => {
+  const now = 10_000_000;
+  const cases = [
+    {
+      name: "authorization codes",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO authorization_codes
+          (code_hash, auth_request_id, client_id, redirect_uri, user_id, scope, nonce, expires_at, consumed_at)
+        SELECT 'code-' || value, 'request-' || value, 'client', 'https://client.example/cb',
+          'user', 'openid', NULL, value, NULL
+        FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT code_hash AS value FROM authorization_codes",
+      expected: "code-501",
+    },
+    {
+      name: "authorization requests",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO authorization_requests
+          (id, client_id, redirect_uri, scope, state, nonce, code_challenge, created_at, expires_at, user_id, status)
+        SELECT 'request-' || value, 'client', 'https://client.example/cb', 'openid',
+          NULL, NULL, 'challenge', 0, value, NULL, 'pending'
+        FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT id AS value FROM authorization_requests",
+      expected: "request-501",
+    },
+    {
+      name: "device grants",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO device_grants
+          (id, device_code_hash, user_code_hash, user_code_display, client_id, scope, status,
+           user_id, created_at, expires_at, interval_seconds, last_poll_at, slow_down_count)
+        SELECT 'grant-' || value, 'device-' || value, 'user-code-' || value, '', 'client',
+          'openid', 'pending', NULL, 0, value, 5, NULL, 0
+        FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT id AS value FROM device_grants",
+      expected: "grant-501",
+    },
+    {
+      name: "refresh tokens",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO refresh_token_families (id, user_id, client_id, status, created_at)
+        SELECT 'family-' || value, 'user', 'client', 'active', ${now}
+        FROM sequence ORDER BY value DESC;
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO refresh_tokens
+          (id, family_id, token_hash, user_id, client_id, scope, expires_at, used_at, revoked_at)
+        SELECT 'token-' || value, 'family-' || value, 'token-hash-' || value, 'user',
+          'client', 'openid', value, NULL, NULL
+        FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT id AS value FROM refresh_tokens",
+      expected: "token-501",
+    },
+    {
+      name: "refresh-token families",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO refresh_token_families (id, user_id, client_id, status, created_at)
+        SELECT 'family-' || value, 'user', 'client', 'active', value
+        FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT id AS value FROM refresh_token_families",
+      expected: "family-501",
+    },
+    {
+      name: "revoked access-token identifiers",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO revoked_access_tokens (jti, expires_at, revoked_at)
+        SELECT 'jti-' || value, value, 0 FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT jti AS value FROM revoked_access_tokens",
+      expected: "jti-501",
+    },
+    {
+      name: "audit events",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO audit_events (type, data_json, created_at)
+        SELECT 'audit-' || value, '{}', value FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT type AS value FROM audit_events",
+      expected: "audit-501",
+    },
+    {
+      name: "rate-limit counters",
+      insert: `
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO rate_limit_counters (key, count, window_start)
+        SELECT 'counter-' || value, 1, value FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT key AS value FROM rate_limit_counters",
+      expected: "counter-501",
+    },
+    {
+      name: "admin-operation submissions",
+      insert: `
+        INSERT INTO users (id, email, display_name, created_at, updated_at)
+        VALUES ('user', 'cleanup@example.test', 'Cleanup User', 0, 0);
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO admin_operation_submissions
+          (token_hash, user_id, created_at, expires_at, result_consumed_at)
+        SELECT 'submission-' || value, 'user', 0, value, NULL
+        FROM sequence ORDER BY value DESC;
+      `,
+      select: "SELECT token_hash AS value FROM admin_operation_submissions",
+      expected: "submission-501",
+    },
+  ] as const;
+
+  for (const cleanupCase of cases) {
+    await t.test(cleanupCase.name, async () => {
+      const database = await migratedDatabase();
+      database.sqlite.exec(cleanupCase.insert);
+      await new D1AuthStore(database.d1).cleanup(now);
+      assert.deepEqual(
+        database.sqlite
+          .prepare(cleanupCase.select)
+          .all()
+          .map((row) => String(row.value)),
+        [cleanupCase.expected],
+      );
+      database.sqlite.close();
+    });
+  }
+});
+
 test("refresh-family cleanup preserves new empty families for a grace period", async () => {
   const database = await migratedDatabase();
   database.sqlite.exec(

@@ -24,6 +24,23 @@ interface StorageFixture {
   accessToken: string;
 }
 
+class ControlledRateStore extends MemoryAuthStore {
+  readonly rateKeys: string[] = [];
+
+  constructor(
+    private readonly decide: (key: string) => boolean | Error = () => true,
+  ) {
+    super();
+  }
+
+  override async rateLimit(key: string): Promise<boolean> {
+    this.rateKeys.push(key);
+    const decision = this.decide(key);
+    if (decision instanceof Error) throw decision;
+    return decision;
+  }
+}
+
 test("storage quotas reject excess writes, expose only namespace usage, and free capacity on delete", async () => {
   const fixture = await storageFixture({
     STORAGE_NAMESPACE_MAX_ITEMS: "2",
@@ -271,6 +288,18 @@ test("storage read and write limits are enforced per authenticated namespace", a
   const readLimited = await storageRequest(fixture, "/storage/records");
   assert.equal(readLimited.status, 429);
   assert.equal(readLimited.headers.get("retry-after"), "60");
+  assert.equal(
+    Array.from(fixture.store.counters.keys()).some((key) =>
+      key.startsWith("storage:read:"),
+    ),
+    true,
+  );
+  assert.equal(
+    Array.from(fixture.store.counters.keys()).some((key) =>
+      key.startsWith("storage:write:"),
+    ),
+    true,
+  );
 });
 
 test("client origins drive CORS and disabled clients invalidate UserInfo", async () => {
@@ -632,6 +661,74 @@ test("anonymous authorization request creation is rate limited and cleaned up", 
   assert.equal(store.authRequests.size, 0);
 });
 
+test("every endpoint rate family rejects at its global ceiling before protected work", async (t) => {
+  const endpointCases = rateLimitedEndpointCases();
+
+  for (const endpointCase of endpointCases) {
+    await t.test(endpointCase.name, async () => {
+      const store = new ControlledRateStore(
+        (key) => key !== `${endpointCase.family}:global`,
+      );
+      const app = createTestAittaDB(await testEnv(), store);
+      const response = await app.fetch(endpointCase.request());
+
+      assert.equal(response?.status, 429);
+      assert.equal(response?.headers.get("retry-after"), "60");
+      const payload = (await response?.json()) as {
+        error: string;
+        error_description: string;
+      };
+      assert.equal(payload.error, "slow_down");
+      assert.equal(payload.error_description, "Rate limit exceeded");
+      assert.equal(
+        store.rateKeys[0]?.startsWith(`${endpointCase.family}:ip:`),
+        true,
+      );
+      assert.equal(store.rateKeys[1], `${endpointCase.family}:global`);
+      assert.equal(store.authRequests.size, 0);
+      assert.equal(store.devices.size, 0);
+      assert.equal(store.adminOperationSubmissions.size, 0);
+      assert.equal(store.audits.length, 0);
+    });
+  }
+});
+
+test("rate-counter failures stay generic for every endpoint family", async (t) => {
+  const failureMarker = "private-rate-counter-failure";
+
+  for (const endpointCase of rateLimitedEndpointCases()) {
+    await t.test(endpointCase.name, async () => {
+      const store = new ControlledRateStore((key) =>
+        key === `${endpointCase.family}:global`
+          ? new Error(failureMarker)
+          : true,
+      );
+      const response = await createTestAittaDB(await testEnv(), store).fetch(
+        endpointCase.request(),
+      );
+
+      assert.equal(response?.status, 500);
+      const body = await response!.text();
+      const payload = JSON.parse(body) as {
+        error: string;
+        error_description: string;
+      };
+      assert.equal(payload.error, "server_error");
+      assert.equal(payload.error_description, "Unexpected server error");
+      assert.equal(body.includes(failureMarker), false);
+      assert.equal(
+        store.rateKeys[0]?.startsWith(`${endpointCase.family}:ip:`),
+        true,
+      );
+      assert.equal(store.rateKeys[1], `${endpointCase.family}:global`);
+      assert.equal(store.authRequests.size, 0);
+      assert.equal(store.devices.size, 0);
+      assert.equal(store.adminOperationSubmissions.size, 0);
+      assert.equal(store.audits.length, 0);
+    });
+  }
+});
+
 async function storageFixture(
   extraEnv: Partial<RuntimeEnv> = {},
   scopes: string[] = ["storage.read", "storage.write", "storage.delete"],
@@ -696,6 +793,123 @@ function storageRequest(
       }),
     ),
   );
+}
+
+function rateLimitedEndpointCases(): ReadonlyArray<{
+  name: string;
+  family: string;
+  request: () => Request;
+}> {
+  const issuer = "https://aittadb.example.test";
+  const postForm = (path: string, data: Record<string, string>) =>
+    new Request(`${issuer}${path}`, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "cf-connecting-ip": "192.0.2.77",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: form(data),
+    });
+  const apiGet = (path: string) =>
+    new Request(`${issuer}${path}`, {
+      headers: {
+        accept: "application/json",
+        "cf-connecting-ip": "192.0.2.77",
+      },
+    });
+
+  return [
+    {
+      name: "authorization-request creation",
+      family: "authorize",
+      request: () => apiGet("/authorize?client_id=rate-test-client"),
+    },
+    {
+      name: "device authorization",
+      family: "device",
+      request: () =>
+        postForm("/oauth/device_authorization", {
+          client_id: "rate-test-client",
+          scope: "openid",
+        }),
+    },
+    {
+      name: "device polling",
+      family: "token",
+      request: () =>
+        postForm("/oauth/token", {
+          grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+          client_id: "rate-test-client",
+          device_code: "device-code",
+        }),
+    },
+    {
+      name: "token client authentication",
+      family: "token",
+      request: () =>
+        postForm("/oauth/token", {
+          grant_type: "authorization_code",
+          client_id: "rate-test-client",
+          code: "authorization-code",
+        }),
+    },
+    {
+      name: "revocation client authentication",
+      family: "revoke",
+      request: () =>
+        postForm("/oauth/revoke", {
+          client_id: "rate-test-client",
+          token: "token",
+        }),
+    },
+    {
+      name: "introspection client authentication",
+      family: "introspect",
+      request: () =>
+        postForm("/oauth/introspect", {
+          client_id: "rate-test-client",
+          token: "token",
+        }),
+    },
+    {
+      name: "administration",
+      family: "admin",
+      request: () => apiGet("/admin/clients"),
+    },
+    {
+      name: "administrative mutation submission",
+      family: "admin",
+      request: () =>
+        postForm("/admin/clients", {
+          submission_token: "submission-token-before-rate-gate",
+          name: "Rate-gated client",
+          type: "public",
+          redirect_uris: "https://client.example.test/callback",
+          scopes: "openid",
+          origins: "https://client.example.test",
+        }),
+    },
+    {
+      name: "storage reads",
+      family: "storage",
+      request: () => apiGet("/storage/records"),
+    },
+    {
+      name: "storage writes",
+      family: "storage",
+      request: () =>
+        new Request(`${issuer}/storage/records/rate-test`, {
+          method: "PUT",
+          headers: {
+            accept: "application/json",
+            "cf-connecting-ip": "192.0.2.77",
+            "content-type": "application/json",
+          },
+          body: "{}",
+        }),
+    },
+  ];
 }
 
 function putRecord(

@@ -112,48 +112,48 @@ export class D1AuthStore implements AuthStore {
   async cleanup(now: number): Promise<void> {
     const deletions: Array<[string, ...unknown[]]> = [
       [
-        "DELETE FROM authorization_codes WHERE rowid IN (SELECT rowid FROM authorization_codes WHERE expires_at <= ? LIMIT ?)",
+        "DELETE FROM authorization_codes WHERE rowid IN (SELECT rowid FROM authorization_codes WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?)",
         now,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM authorization_requests WHERE rowid IN (SELECT ar.rowid FROM authorization_requests ar WHERE ar.expires_at <= ? AND NOT EXISTS (SELECT 1 FROM authorization_codes ac WHERE ac.auth_request_id = ar.id AND ac.expires_at > ?) LIMIT ?)",
+        "DELETE FROM authorization_requests WHERE rowid IN (SELECT ar.rowid FROM authorization_requests ar WHERE ar.expires_at <= ? AND NOT EXISTS (SELECT 1 FROM authorization_codes ac WHERE ac.auth_request_id = ar.id AND ac.expires_at > ?) ORDER BY ar.expires_at ASC, ar.rowid ASC LIMIT ?)",
         now,
         now,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM device_grants WHERE rowid IN (SELECT rowid FROM device_grants WHERE expires_at <= ? LIMIT ?)",
+        "DELETE FROM device_grants WHERE rowid IN (SELECT rowid FROM device_grants WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?)",
         now,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM refresh_tokens WHERE rowid IN (SELECT rowid FROM refresh_tokens WHERE expires_at <= ? LIMIT ?)",
+        "DELETE FROM refresh_tokens WHERE rowid IN (SELECT rowid FROM refresh_tokens WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?)",
         now,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM refresh_token_families WHERE rowid IN (SELECT rtf.rowid FROM refresh_token_families rtf WHERE rtf.created_at <= ? AND NOT EXISTS (SELECT 1 FROM refresh_tokens rt WHERE rt.family_id = rtf.id) LIMIT ?)",
+        "DELETE FROM refresh_token_families WHERE rowid IN (SELECT rtf.rowid FROM refresh_token_families rtf WHERE rtf.created_at <= ? AND NOT EXISTS (SELECT 1 FROM refresh_tokens rt WHERE rt.family_id = rtf.id) ORDER BY rtf.created_at ASC, rtf.rowid ASC LIMIT ?)",
         now - REFRESH_FAMILY_ORPHAN_GRACE_SECONDS,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM revoked_access_tokens WHERE rowid IN (SELECT rowid FROM revoked_access_tokens WHERE expires_at <= ? LIMIT ?)",
+        "DELETE FROM revoked_access_tokens WHERE rowid IN (SELECT rowid FROM revoked_access_tokens WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?)",
         now,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM audit_events WHERE rowid IN (SELECT rowid FROM audit_events WHERE created_at <= ? LIMIT ?)",
+        "DELETE FROM audit_events WHERE rowid IN (SELECT rowid FROM audit_events WHERE created_at <= ? ORDER BY created_at ASC, rowid ASC LIMIT ?)",
         now - AUDIT_RETENTION_SECONDS,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM rate_limit_counters WHERE rowid IN (SELECT rowid FROM rate_limit_counters WHERE window_start <= ? LIMIT ?)",
+        "DELETE FROM rate_limit_counters WHERE rowid IN (SELECT rowid FROM rate_limit_counters WHERE window_start <= ? ORDER BY window_start ASC, rowid ASC LIMIT ?)",
         now - RATE_COUNTER_RETENTION_SECONDS,
         CLEANUP_BATCH_SIZE,
       ],
       [
-        "DELETE FROM admin_operation_submissions WHERE rowid IN (SELECT rowid FROM admin_operation_submissions WHERE expires_at <= ? ORDER BY expires_at ASC, token_hash ASC LIMIT ?)",
+        "DELETE FROM admin_operation_submissions WHERE rowid IN (SELECT rowid FROM admin_operation_submissions WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?)",
         now,
         CLEANUP_BATCH_SIZE,
       ],
