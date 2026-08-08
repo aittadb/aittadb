@@ -35,6 +35,10 @@ export interface RuntimeEnv {
   DEVICE_POLL_INTERVAL_SECONDS?: string;
   REFRESH_TOKEN_TTL_SECONDS?: string;
   ALLOWED_CORS_ORIGINS?: string;
+  FEATURE_RECORDS_ENABLED?: string;
+  FEATURE_FILES_ENABLED?: string;
+  FEATURE_STATISTICS_ENABLED?: string;
+  FEATURE_OAUTH_APPS_ENABLED?: string;
   STORAGE_WRITES_ENABLED?: string;
   STORAGE_GLOBAL_MAX_ITEMS?: string;
   STORAGE_GLOBAL_MAX_BYTES?: string;
@@ -76,6 +80,13 @@ export interface StorageLimits {
   namespaceMaxBytes: number;
 }
 
+export interface FeatureAvailability {
+  records: boolean;
+  files: boolean;
+  statistics: boolean;
+  oauthApps: boolean;
+}
+
 export interface AppConfig {
   issuerUrl: string;
   jwtPrivateJwk: JsonWebKey;
@@ -86,6 +97,7 @@ export interface AppConfig {
   devicePollIntervalSeconds: number;
   refreshTokenTtlSeconds: number;
   allowedCorsOrigins: readonly string[];
+  features: FeatureAvailability;
   storageLimits: StorageLimits;
   storageDefaultPageSize: number;
   storageMaxPageSize: number;

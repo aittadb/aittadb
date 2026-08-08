@@ -161,6 +161,27 @@ test("OpenAPI distinguishes licensing posture from the current Sites dependency"
     serviceProperties.officialOpenAIProduct,
     "officialOpenAIProduct",
   );
+  const features = asObject(serviceProperties.features, "features");
+  assert.deepEqual(features.required, [
+    "records",
+    "files",
+    "statistics",
+    "oauthApps",
+  ]);
+  const featureProperties = asObject(
+    features.properties,
+    "features properties",
+  );
+  assert.equal(asObject(featureProperties.records, "records").default, true);
+  assert.equal(asObject(featureProperties.files, "files").default, true);
+  assert.equal(
+    asObject(featureProperties.statistics, "statistics").default,
+    true,
+  );
+  assert.equal(
+    asObject(featureProperties.oauthApps, "oauthApps").default,
+    false,
+  );
   assert.match(String(hostingPlatform.description), /depends on this platform/);
   assert.match(
     String(officialOpenAIProduct.description),

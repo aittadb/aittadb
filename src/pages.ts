@@ -57,6 +57,12 @@ export function serviceHomePage(
       credentialsForwarded: boolean;
     };
     sessionIssuer: string;
+    features: {
+      records: boolean;
+      files: boolean;
+      statistics: boolean;
+      oauthApps: boolean;
+    };
     capabilities: readonly string[];
     plannedCapabilities: readonly string[];
   },
@@ -65,6 +71,14 @@ export function serviceHomePage(
   const sessionOperationCopy = options.signedIn
     ? "View your AittaDB identity and open your private records and files."
     : "Sign in to view your AittaDB identity and reach your private records and files.";
+  const featureStatus = [
+    ["Records", metadata.features.records],
+    ["Files", metadata.features.files],
+    ["Statistics", metadata.features.statistics],
+    ["OAuth Apps", metadata.features.oauthApps],
+  ]
+    .map(([name, enabled]) => `${name} ${enabled ? "on" : "off"}`)
+    .join(" · ");
 
   return pageDocument({
     title: metadata.service,
@@ -81,7 +95,7 @@ export function serviceHomePage(
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Persistent storage</span><strong>D1 records + R2 files</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> AittaDB runs on OpenAI-hosted ChatGPT Sites, issues its own credentials, and never forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/statistics"><strong>Service statistics</strong><span>View the public aggregate identity count without exposing personal information.</span></a><a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> AittaDB runs on OpenAI-hosted ChatGPT Sites, issues its own credentials, and never forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/statistics"><strong>Service statistics</strong><span>View the public aggregate identity count without exposing personal information.</span></a><a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
       options.signedIn
         ? {

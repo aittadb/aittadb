@@ -42,6 +42,12 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       };
       sessionIssuer: string;
       officialOpenAIProduct: boolean;
+      features: {
+        records: boolean;
+        files: boolean;
+        statistics: boolean;
+        oauthApps: boolean;
+      };
       capabilities: string[];
       plannedCapabilities: string[];
     };
@@ -87,6 +93,12 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiRootJson.data.upstreamSignIn.credentialsForwarded, false);
   assert.equal(apiRootJson.data.sessionIssuer, "AittaDB");
   assert.equal(apiRootJson.data.officialOpenAIProduct, false);
+  assert.deepEqual(apiRootJson.data.features, {
+    records: true,
+    files: true,
+    statistics: true,
+    oauthApps: false,
+  });
   assert.deepEqual(apiRootJson.data.capabilities, [
     "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
     "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
@@ -211,7 +223,11 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /Session issuer/);
   assert.match(browserRootHtml, /Hosting platform/);
   assert.match(browserRootHtml, /OpenAI-hosted ChatGPT Sites/);
-  assert.match(browserRootHtml, /Persistent storage/);
+  assert.match(browserRootHtml, /Feature availability/);
+  assert.match(
+    browserRootHtml,
+    /Records on · Files on · Statistics on · OAuth Apps off/,
+  );
   assert.doesNotMatch(browserRootHtml, /Official OpenAI product/);
   assert.match(browserRootHtml, />Licensing and platform details<\/a>/);
   assert.match(browserRootHtml, /Identity \/ Data \/ Files \/ Events/);

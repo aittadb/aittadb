@@ -77,6 +77,12 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       DEFAULT_REFRESH_TOKEN_TTL,
     ),
     allowedCorsOrigins: splitList(env.ALLOWED_CORS_ORIGINS),
+    features: {
+      records: readBoolean(env.FEATURE_RECORDS_ENABLED, true),
+      files: readBoolean(env.FEATURE_FILES_ENABLED, true),
+      statistics: readBoolean(env.FEATURE_STATISTICS_ENABLED, true),
+      oauthApps: readBoolean(env.FEATURE_OAUTH_APPS_ENABLED, false),
+    },
     storageLimits: {
       writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),
       globalMaxItems: readPositiveInt(

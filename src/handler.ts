@@ -280,6 +280,7 @@ async function route(
         credentialsForwarded: false,
       },
       sessionIssuer: "AittaDB",
+      features: config.features,
       capabilities: [
         "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
         "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",

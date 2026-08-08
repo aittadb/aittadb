@@ -1628,6 +1628,7 @@ export const openApiSpec = {
           "officialOpenAIProduct",
           "upstreamSignIn",
           "sessionIssuer",
+          "features",
           "capabilities",
           "plannedCapabilities",
         ],
@@ -1669,6 +1670,19 @@ export const openApiSpec = {
             additionalProperties: false,
           },
           sessionIssuer: { type: "string", const: "AittaDB" },
+          features: {
+            type: "object",
+            description:
+              "Effective deployment feature availability. These booleans are server-controlled and never reveal configuration values or secrets.",
+            required: ["records", "files", "statistics", "oauthApps"],
+            properties: {
+              records: { type: "boolean", default: true },
+              files: { type: "boolean", default: true },
+              statistics: { type: "boolean", default: true },
+              oauthApps: { type: "boolean", default: false },
+            },
+            additionalProperties: false,
+          },
           capabilities: { type: "array", items: { type: "string" } },
           plannedCapabilities: {
             type: "array",
