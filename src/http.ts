@@ -12,6 +12,8 @@ import {
   type HypermediaLink,
 } from "./hypermedia";
 
+const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
+
 export function json(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
@@ -269,7 +271,7 @@ export function csrfCookie(value: string): string {
 
 export function csrfTokenForRequest(request: Request): string {
   const existing = parseCookies(request).get("aittadb_csrf");
-  return existing && /^[A-Za-z0-9_-]{32}$/.test(existing)
+  return existing && CSRF_TOKEN_PATTERN.test(existing)
     ? existing
     : randomToken(24);
 }
@@ -279,7 +281,13 @@ export function csrfTokenMatches(
   submittedValue: string | null,
 ): boolean {
   const cookie = parseCookies(request).get("aittadb_csrf");
-  return Boolean(cookie && submittedValue && cookie === submittedValue);
+  return Boolean(
+    cookie &&
+    submittedValue &&
+    CSRF_TOKEN_PATTERN.test(cookie) &&
+    CSRF_TOKEN_PATTERN.test(submittedValue) &&
+    cookie === submittedValue,
+  );
 }
 
 export function acceptsHtml(request: Request): boolean {

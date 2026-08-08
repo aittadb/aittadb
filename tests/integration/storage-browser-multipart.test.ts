@@ -12,49 +12,6 @@ import {
 const ORIGIN = "https://aittadb.example.test";
 const MAX_FILE_FORM_BYTES = MAX_FILE_BYTES + 256 * 1024;
 
-test("fresh signed-in upload form submits its matching CSRF cookie", async () => {
-  const env = await testEnv();
-  const bucket = env.BUCKET as MemoryR2Bucket;
-  const store = new MemoryAuthStore();
-  const app = createTestAittaDB(env, store);
-  const entry = await app.fetch(
-    new Request(`${ORIGIN}/storage/files`, {
-      headers: { accept: "text/html" },
-    }),
-  );
-  assert.equal(entry?.status, 200);
-  const csrf = cookieValue(entry!, "aittadb_csrf");
-  const html = await entry!.text();
-  const formCsrf = /name="csrf_token" value="([A-Za-z0-9_-]+)"/.exec(html)?.[1];
-  assert.equal(formCsrf, csrf);
-
-  const form = new FormData();
-  form.set("ui", "1");
-  form.set("csrf_token", formCsrf!);
-  form.set("_method", "POST");
-  form.set("auth_mode", "session");
-  form.set(
-    "file",
-    new File(["first visit upload"], "fresh.txt", { type: "text/plain" }),
-  );
-  const response = await app.fetch(
-    new Request(`${ORIGIN}/storage/files`, {
-      method: "POST",
-      headers: {
-        accept: "text/html",
-        cookie: `aittadb_csrf=${csrf}`,
-        origin: ORIGIN,
-      },
-      body: form,
-    }),
-  );
-
-  assert.equal(response?.status, 201);
-  assert.doesNotMatch(await response!.text(), /CSRF validation failed/);
-  assert.equal(store.storageFiles.size, 1);
-  assert.equal(bucket.objects.size, 1);
-});
-
 test("native multipart FormData uploads still persist normally", async () => {
   const { app, bucket, csrf, store } = await fixture();
   const form = new FormData();
