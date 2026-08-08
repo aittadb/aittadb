@@ -13,12 +13,20 @@ const INJECTED_FAILURE = "injected-storage-internal-secret";
 class FaultInjectingStore extends MemoryAuthStore {
   upsertFileFailures = 0;
   deleteFileFailures = 0;
+  private readonly upsertFailuresByR2Key = new Set<string>();
+
+  failUpsertForR2Key(r2Key: string): void {
+    this.upsertFailuresByR2Key.add(r2Key);
+  }
 
   override async upsertStorageFileMetadata(
     file: StorageFileMetadata,
     expectedR2Key: string | null,
     limits?: StorageLimits,
   ): Promise<boolean> {
+    if (this.upsertFailuresByR2Key.delete(file.r2Key)) {
+      throw new Error(`${INJECTED_FAILURE}:d1-upsert`);
+    }
     if (this.upsertFileFailures > 0) {
       this.upsertFileFailures -= 1;
       throw new Error(`${INJECTED_FAILURE}:d1-upsert`);
@@ -47,6 +55,7 @@ class FaultInjectingStore extends MemoryAuthStore {
 
 class FaultInjectingBucket extends MemoryR2Bucket {
   putFailures = 0;
+  failAllDeletes = false;
   private readonly deleteFailures = new Map<string, number>();
 
   failDelete(key: string, attempts: number): void {
@@ -69,6 +78,9 @@ class FaultInjectingBucket extends MemoryR2Bucket {
   }
 
   override async delete(key: string): Promise<void> {
+    if (this.failAllDeletes) {
+      throw new Error(`${INJECTED_FAILURE}:r2-delete`);
+    }
     const remaining = this.deleteFailures.get(key) ?? 0;
     if (remaining > 0) {
       this.deleteFailures.set(key, remaining - 1);
@@ -255,6 +267,58 @@ test("file creation leaves neither metadata nor an R2 object after an isolated w
   );
   assert.equal(context.store.storageFiles.size, 0);
   assert.equal(context.bucket.objects.size, 0);
+});
+
+test("failed metadata write and failed R2 compensation record one internal repair", async () => {
+  const context = await fixture();
+  context.store.upsertFileFailures = 1;
+  context.bucket.failAllDeletes = true;
+
+  const response = await fileRequest(
+    context,
+    "PUT",
+    "dual-failure.txt",
+    "uncommitted bytes",
+    "text/plain",
+  );
+  const physicalKey = Array.from(context.bucket.objects.keys())[0];
+  assert.ok(physicalKey);
+  await assertGenericFailure(response, context, physicalKey);
+  assert.equal(context.store.storageFiles.size, 0);
+  assert.equal(context.bucket.objects.size, 1);
+  assert.deepEqual(
+    Array.from(context.store.storageFileOrphanRepairs.values()).map((repair) =>
+      Object.keys(repair).sort(),
+    ),
+    [["clientId", "createdAt", "r2Key", "updatedAt", "userId"]],
+  );
+  assert.deepEqual(
+    Array.from(context.store.storageFileOrphanRepairs.values()).map(
+      ({ userId, clientId, r2Key }) => ({ userId, clientId, r2Key }),
+    ),
+    [
+      {
+        userId: context.userId,
+        clientId: context.clientId,
+        r2Key: physicalKey,
+      },
+    ],
+  );
+
+  const unavailable = await context.app.fetch(
+    new Request("https://aittadb.example.test/storage/file-orphan-repairs", {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${context.accessToken}`,
+      },
+    }),
+  );
+  assert.ok(unavailable);
+  assert.equal(unavailable.status, 404);
+  const unavailableBody = await unavailable.text();
+  assert.equal(unavailableBody.includes(physicalKey), false);
+  assert.equal(unavailableBody.includes(context.userId), false);
+  assert.equal(unavailableBody.includes(context.clientId), false);
 });
 
 test("file replacement uses copy-on-write and never pairs new bytes with old metadata", async () => {
@@ -452,6 +516,100 @@ test("file deletion preserves the complete resource when D1 or R2 deletion fails
     null,
   );
   assert.equal(context.bucket.objects.has(previous.r2Key), false);
+});
+
+test("failed deletion restore and failed R2 compensation record the orphan", async () => {
+  const context = await fixture();
+  const key = "dual-delete.txt";
+  assert.equal(
+    (await fileRequest(context, "PUT", key, "delete me", "text/plain")).status,
+    200,
+  );
+  const previous = await context.store.getStorageFileMetadata(
+    context.userId,
+    context.clientId,
+    key,
+  );
+  assert.ok(previous);
+  context.store.upsertFileFailures = 1;
+  context.bucket.failAllDeletes = true;
+
+  await assertGenericFailure(
+    await fileRequest(context, "DELETE", key),
+    context,
+    previous.r2Key,
+  );
+  assert.equal(
+    await context.store.getStorageFileMetadata(
+      context.userId,
+      context.clientId,
+      key,
+    ),
+    null,
+  );
+  assert.equal(context.bucket.objects.has(previous.r2Key), true);
+  assert.deepEqual(
+    Array.from(context.store.storageFileOrphanRepairs.values()).map(
+      ({ userId, clientId, r2Key }) => ({ userId, clientId, r2Key }),
+    ),
+    [
+      {
+        userId: context.userId,
+        clientId: context.clientId,
+        r2Key: previous.r2Key,
+      },
+    ],
+  );
+});
+
+test("failed replacement rollback records only the unretired old object", async () => {
+  const context = await fixture();
+  const key = "dual-replace.txt";
+  assert.equal(
+    (await fileRequest(context, "PUT", key, "old bytes", "text/plain")).status,
+    200,
+  );
+  const previous = await context.store.getStorageFileMetadata(
+    context.userId,
+    context.clientId,
+    key,
+  );
+  assert.ok(previous);
+  context.store.failUpsertForR2Key(previous.r2Key);
+  context.bucket.failDelete(previous.r2Key, 4);
+
+  await assertGenericFailure(
+    await fileRequest(
+      context,
+      "PUT",
+      key,
+      "replacement bytes",
+      "text/replacement",
+    ),
+    context,
+    previous.r2Key,
+  );
+  const replacement = await context.store.getStorageFileMetadata(
+    context.userId,
+    context.clientId,
+    key,
+  );
+  assert.ok(replacement);
+  assert.notEqual(replacement.r2Key, previous.r2Key);
+  assert.equal(context.bucket.objects.has(replacement.r2Key), true);
+  assert.equal(context.bucket.objects.has(previous.r2Key), true);
+  assert.deepEqual(
+    Array.from(context.store.storageFileOrphanRepairs.values()).map(
+      ({ userId, clientId, r2Key }) => ({ userId, clientId, r2Key }),
+    ),
+    [
+      {
+        userId: context.userId,
+        clientId: context.clientId,
+        r2Key: previous.r2Key,
+      },
+    ],
+  );
 });
 
 test("concurrent first writes retain exactly one metadata row and R2 object", async () => {

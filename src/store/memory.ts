@@ -16,6 +16,7 @@ import type {
   RefreshTokenFamily,
   RefreshTokenRecord,
   StorageFileMetadata,
+  StorageFileOrphanRepair,
   StorageLimits,
   StorageListPage,
   StorageListPosition,
@@ -38,6 +39,7 @@ export class MemoryAuthStore implements AuthStore {
   revokedJtis = new Map<string, number>();
   storageRecords = new Map<string, StorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
+  storageFileOrphanRepairs = new Map<string, StorageFileOrphanRepair>();
   counters = new Map<string, { count: number; windowStart: number }>();
   adminOperationSubmissions = new Map<
     string,
@@ -580,6 +582,25 @@ export class MemoryAuthStore implements AuthStore {
       return false;
     }
     return this.storageFiles.delete(storageFileKey);
+  }
+
+  async recordStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean> {
+    const existing = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (
+      existing &&
+      (existing.userId !== repair.userId ||
+        existing.clientId !== repair.clientId)
+    ) {
+      return false;
+    }
+    this.storageFileOrphanRepairs.set(repair.r2Key, {
+      ...repair,
+      createdAt: existing?.createdAt ?? repair.createdAt,
+      updatedAt: Math.max(existing?.updatedAt ?? 0, repair.updatedAt),
+    });
+    return true;
   }
 
   async getStorageUsage(

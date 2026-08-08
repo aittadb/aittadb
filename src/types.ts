@@ -234,6 +234,14 @@ export interface StorageFileMetadata {
   updatedAt: number;
 }
 
+export interface StorageFileOrphanRepair {
+  userId: string;
+  clientId: string;
+  r2Key: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface StorageListPosition {
   updatedAt: number;
   key: string;
@@ -398,6 +406,9 @@ export interface AuthStore {
     clientId: string,
     key: string,
     expectedR2Key: string,
+  ): Promise<boolean>;
+  recordStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
   ): Promise<boolean>;
   getStorageUsage(userId: string, clientId: string): Promise<StorageUsage>;
 }

@@ -490,7 +490,11 @@ async function writeStorageFile(
       return storageLimitExceeded();
     }
   } catch (error) {
-    await deleteR2Object(env.BUCKET, r2Key);
+    try {
+      await deleteR2Object(env.BUCKET, r2Key);
+    } catch {
+      await recordStorageFileOrphanRepairs(store, file);
+    }
     throw error;
   }
   if (existing) {
@@ -538,6 +542,10 @@ async function deleteStorageFileConsistently(
   } catch (deleteError) {
     const present = await r2ObjectPresent(bucket, file.r2Key);
     if (present === false) return true;
+    if (present === null) {
+      await recordStorageFileOrphanRepairs(store, file);
+      throw deleteError;
+    }
     if (present === true) {
       try {
         if (!(await store.upsertStorageFileMetadata(file, null))) {
@@ -551,6 +559,7 @@ async function deleteStorageFileConsistently(
           await deleteR2Object(bucket, file.r2Key);
           return true;
         } catch {
+          await recordStorageFileOrphanRepairs(store, file);
           throw restoreError;
         }
       }
@@ -572,7 +581,10 @@ async function retireReplacedStorageObject(
     if (previousPresent === false) {
       return currentFileIs(store, replacement);
     }
-    if (previousPresent !== true) throw deleteError;
+    if (previousPresent === null) {
+      await recordStorageFileOrphanRepairs(store, previous);
+      throw deleteError;
+    }
 
     try {
       if (
@@ -588,6 +600,7 @@ async function retireReplacedStorageObject(
         await deleteR2Object(bucket, previous.r2Key);
         return false;
       } catch {
+        await recordStorageFileOrphanRepairs(store, previous);
         throw restoreError;
       }
     }
@@ -595,25 +608,57 @@ async function retireReplacedStorageObject(
     try {
       await deleteR2Object(bucket, replacement.r2Key);
     } catch (cleanupError) {
-      if ((await r2ObjectPresent(bucket, replacement.r2Key)) === true) {
+      const replacementPresent = await r2ObjectPresent(
+        bucket,
+        replacement.r2Key,
+      );
+      let repairCandidates = replacementPresent === false ? [] : [replacement];
+      if (replacementPresent === true) {
         // Keep metadata paired with the object that is known to exist if
         // rollback cleanup itself fails.
         try {
           if (
             await store.upsertStorageFileMetadata(replacement, previous.r2Key)
           ) {
-            await deleteR2Object(bucket, previous.r2Key);
-            return true;
+            repairCandidates = [previous];
+            try {
+              await deleteR2Object(bucket, previous.r2Key);
+              return true;
+            } catch {
+              // The previous object is now the only repair candidate.
+            }
           }
         } catch {
-          // The outer request still fails generically; no internal key leaks.
+          // The D1 outcome is uncertain, so repair must verify both objects.
+          repairCandidates = [previous, replacement];
         }
       }
+      await recordStorageFileOrphanRepairs(store, ...repairCandidates);
       throw cleanupError;
     }
     throw deleteError;
   }
   return currentFileIs(store, replacement);
+}
+
+async function recordStorageFileOrphanRepairs(
+  store: AuthStore,
+  ...files: StorageFileMetadata[]
+): Promise<void> {
+  const recordedAt = nowSeconds();
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.r2Key)) continue;
+    seen.add(file.r2Key);
+    const recorded = await store.recordStorageFileOrphanRepair({
+      userId: file.userId,
+      clientId: file.clientId,
+      r2Key: file.r2Key,
+      createdAt: recordedAt,
+      updatedAt: recordedAt,
+    });
+    if (!recorded) throw new Error("storage_file_repair_owner_conflict");
+  }
 }
 
 async function currentFileIs(

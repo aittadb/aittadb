@@ -15,6 +15,7 @@ import type {
   RefreshTokenFamily,
   RefreshTokenRecord,
   StorageFileMetadata,
+  StorageFileOrphanRepair,
   StorageLimits,
   StorageListPage,
   StorageListPosition,
@@ -899,6 +900,24 @@ export class D1AuthStore implements AuthStore {
         "DELETE FROM storage_files WHERE user_id = ? AND client_id = ? AND key = ? AND r2_key = ?",
       )
       .bind(userId, clientId, key, expectedR2Key)
+      .run();
+    return mutationChanges(result) === 1;
+  }
+
+  async recordStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        "INSERT INTO storage_file_orphan_repairs (r2_key, user_id, client_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(r2_key) DO UPDATE SET updated_at = MAX(storage_file_orphan_repairs.updated_at, excluded.updated_at) WHERE storage_file_orphan_repairs.user_id = excluded.user_id AND storage_file_orphan_repairs.client_id = excluded.client_id",
+      )
+      .bind(
+        repair.r2Key,
+        repair.userId,
+        repair.clientId,
+        repair.createdAt,
+        repair.updatedAt,
+      )
       .run();
     return mutationChanges(result) === 1;
   }
