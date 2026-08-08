@@ -1,6 +1,6 @@
 # AittaDB Agent Instructions
 
-This file is authoritative for humans and AI agents working in this repository. Read it before changing code. Keep it concise and below 32,000 bytes; `npm run agents:check` enforces the limit. Put extended rationale in `docs/` and link it here when useful. Never shorten a mandatory boundary merely to meet the limit.
+Authoritative for humans and AI agents; read before changing code. Keep below 32,000 bytes (`npm run agents:check`). Put rationale in `docs/`; never trim a mandatory boundary to fit.
 
 ## Purpose and Product Boundary
 
@@ -160,7 +160,7 @@ Build one resource/operation model and render machine controls or semantic HTML.
 
 Every application endpoint supplies useful HTML and hypermedia JSON. OAuth/OIDC discovery, JWKS, authorization, token, revocation, introspection, and UserInfo retain standard wire formats; entry resources may advertise forms. Errors include valid recovery controls. HTML executes real validation and durable state, never mock users, credentials, storage, or browser-only authorization.
 
-Browser mutation adapters reject invalid origin before body, rate-limit, repository, R2, or maintenance work, then require CSRF. Accept the issuer origin behind Sites dispatch; allow `Origin: null` only with `Sec-Fetch-Site: same-origin`. Use a bounded host-only secure `HttpOnly`, `SameSite=Lax` CSRF cookie supporting concurrent tabs. Missing, malformed, mismatched, or cross-origin submissions fail closed.
+Browser mutation adapters reject invalid origins before body reads, rate limiting, repository, R2, or maintenance, then require CSRF. Accept issuer-origin Sites dispatch and `Origin: null` only with `Sec-Fetch-Site: same-origin`. Use a bounded host-only `Secure`, `HttpOnly`, `SameSite=Lax` CSRF cookie for concurrent tabs. Fail closed otherwise.
 
 Storage HTML stays resource-oriented: collections render bounded lists/empty states, item navigation, and create/upload; item GET renders only actions valid for its URL key. Browser POST adapts to that same URL via validated `_method`; keys never come from override fields. No-JavaScript `?key=` navigation redirects only to an encoded same-origin item path. Never mix unrelated URLs in an operation selector or render JSON dumps as HTML results.
 
