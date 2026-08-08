@@ -16,6 +16,7 @@ import type {
   RefreshTokenRecord,
   StorageFileMetadata,
   StorageFileOrphanRepair,
+  StorageFileOrphanRepairDisposition,
   StorageLimits,
   StorageListPage,
   StorageListPosition,
@@ -64,6 +65,8 @@ const UPSERT_STORAGE_FILE_WITH_LIMITS = `
 INSERT INTO storage_files (user_id, client_id, key, r2_key, content_type, size, sha256, created_at, updated_at)
 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
 WHERE
+  NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE r2_key = ?4)
+  AND
   ((?10 IS NULL AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3))
     OR (?10 IS NOT NULL AND EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3 AND r2_key = ?10)))
   AND
@@ -97,6 +100,8 @@ const UPSERT_STORAGE_FILE_COMPARE_AND_SET = `
 INSERT INTO storage_files (user_id, client_id, key, r2_key, content_type, size, sha256, created_at, updated_at)
 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
 WHERE
+  NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE r2_key = ?4)
+  AND
   ((?10 IS NULL AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3))
     OR (?10 IS NOT NULL AND EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3 AND r2_key = ?10)))
 ON CONFLICT(user_id, client_id, key) DO UPDATE SET
@@ -922,6 +927,63 @@ export class D1AuthStore implements AuthStore {
     return mutationChanges(result) === 1;
   }
 
+  async listStorageFileOrphanRepairs(
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]> {
+    const rows = await this.db
+      .prepare(
+        "SELECT * FROM storage_file_orphan_repairs ORDER BY updated_at ASC, created_at ASC, r2_key ASC LIMIT ?",
+      )
+      .bind(limit)
+      .all<Row>();
+    return (rows.results ?? []).map(rowToStorageFileOrphanRepair);
+  }
+
+  async classifyStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<StorageFileOrphanRepairDisposition> {
+    const row = await this.db
+      .prepare(
+        "SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE r2_key = ? AND user_id = ? AND client_id = ?) THEN 'missing' WHEN EXISTS (SELECT 1 FROM storage_files WHERE r2_key = ?) THEN 'referenced' ELSE 'orphan' END AS disposition",
+      )
+      .bind(repair.r2Key, repair.userId, repair.clientId, repair.r2Key)
+      .first<Row>();
+    const disposition = row?.disposition;
+    if (
+      disposition !== "missing" &&
+      disposition !== "referenced" &&
+      disposition !== "orphan"
+    ) {
+      throw new Error("storage_file_orphan_repair_classification_failed");
+    }
+    return disposition;
+  }
+
+  async completeStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        "DELETE FROM storage_file_orphan_repairs WHERE r2_key = ? AND user_id = ? AND client_id = ?",
+      )
+      .bind(repair.r2Key, repair.userId, repair.clientId)
+      .run();
+    return mutationChanges(result) === 1;
+  }
+
+  async deferStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+    now: number,
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        "UPDATE storage_file_orphan_repairs SET updated_at = MAX(updated_at, ?) WHERE r2_key = ? AND user_id = ? AND client_id = ?",
+      )
+      .bind(now, repair.r2Key, repair.userId, repair.clientId)
+      .run();
+    return mutationChanges(result) === 1;
+  }
+
   async getStorageUsage(
     userId: string,
     clientId: string,
@@ -1087,6 +1149,16 @@ function rowToStorageFile(row: Row): StorageFileMetadata {
     contentType: String(row.content_type),
     size: Number(row.size),
     sha256: String(row.sha256),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function rowToStorageFileOrphanRepair(row: Row): StorageFileOrphanRepair {
+  return {
+    r2Key: String(row.r2_key),
+    userId: String(row.user_id),
+    clientId: String(row.client_id),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };

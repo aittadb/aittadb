@@ -17,6 +17,7 @@ import type {
   RefreshTokenRecord,
   StorageFileMetadata,
   StorageFileOrphanRepair,
+  StorageFileOrphanRepairDisposition,
   StorageLimits,
   StorageListPage,
   StorageListPosition,
@@ -543,6 +544,7 @@ export class MemoryAuthStore implements AuthStore {
     expectedR2Key: string | null,
     limits?: StorageLimits,
   ): Promise<boolean> {
+    if (this.storageFileOrphanRepairs.has(file.r2Key)) return false;
     const key = storageKey(file.userId, file.clientId, file.key);
     const existing = this.storageFiles.get(key);
     if (
@@ -603,6 +605,51 @@ export class MemoryAuthStore implements AuthStore {
     return true;
   }
 
+  async listStorageFileOrphanRepairs(
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]> {
+    return Array.from(this.storageFileOrphanRepairs.values())
+      .sort(
+        (a, b) =>
+          a.updatedAt - b.updatedAt ||
+          a.createdAt - b.createdAt ||
+          a.r2Key.localeCompare(b.r2Key),
+      )
+      .slice(0, limit);
+  }
+
+  async classifyStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<StorageFileOrphanRepairDisposition> {
+    const current = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (!sameStorageFileOrphanRepairOwner(current, repair)) return "missing";
+    const referenced = Array.from(this.storageFiles.values()).some(
+      (file) => file.r2Key === repair.r2Key,
+    );
+    return referenced ? "referenced" : "orphan";
+  }
+
+  async completeStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean> {
+    const current = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (!sameStorageFileOrphanRepairOwner(current, repair)) return false;
+    return this.storageFileOrphanRepairs.delete(repair.r2Key);
+  }
+
+  async deferStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+    now: number,
+  ): Promise<boolean> {
+    const current = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (!sameStorageFileOrphanRepairOwner(current, repair)) return false;
+    this.storageFileOrphanRepairs.set(repair.r2Key, {
+      ...current,
+      updatedAt: Math.max(current.updatedAt, now),
+    });
+    return true;
+  }
+
   async getStorageUsage(
     userId: string,
     clientId: string,
@@ -624,6 +671,17 @@ function stripSecret(
     origins: [...client.origins],
     createdAt: client.createdAt,
   };
+}
+
+function sameStorageFileOrphanRepairOwner(
+  current: StorageFileOrphanRepair | undefined,
+  expected: StorageFileOrphanRepair,
+): current is StorageFileOrphanRepair {
+  return (
+    current !== undefined &&
+    current.userId === expected.userId &&
+    current.clientId === expected.clientId
+  );
 }
 
 function storageKey(userId: string, clientId: string, key: string): string {

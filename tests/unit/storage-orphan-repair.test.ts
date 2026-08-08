@@ -35,6 +35,58 @@ test("orphan-repair migration stores only internal physical repair metadata", as
         .get()?.sql ?? "",
     );
     assert.match(indexSql, /created_at, r2_key/);
+    const repairOrderIndexSql = String(
+      sqlite
+        .prepare(
+          "SELECT sql FROM sqlite_schema WHERE name = 'idx_storage_file_orphan_repairs_updated_at'",
+        )
+        .get()?.sql ?? "",
+    );
+    assert.match(repairOrderIndexSql, /updated_at, created_at, r2_key/);
+    const referenceIndexSql = String(
+      sqlite
+        .prepare(
+          "SELECT sql FROM sqlite_schema WHERE name = 'idx_storage_files_r2_key'",
+        )
+        .get()?.sql ?? "",
+    );
+    assert.match(referenceIndexSql, /storage_files\(r2_key\)/);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("D1 repair row excludes metadata reattachment and resolves current references", async () => {
+  const sqlite = await migratedDatabase();
+  try {
+    sqlite.exec(
+      "INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES ('user-a', 'user-a@example.test', 'User A', 1, 1), ('user-b', 'user-b@example.test', 'User B', 1, 1); INSERT INTO oauth_clients (id, type, name, secret_hash, disabled_at, created_at) VALUES ('client-a', 'public', 'Client A', NULL, NULL, 1), ('client-b', 'public', 'Client B', NULL, NULL, 1)",
+    );
+    const store = new D1AuthStore(sqliteD1(sqlite));
+    const candidate = repair("user-a", "client-a", "physical/locked", 10);
+    assert.equal(await store.recordStorageFileOrphanRepair(candidate), true);
+    assert.equal(
+      await store.upsertStorageFileMetadata(
+        file(candidate.r2Key, "user-b", "client-b"),
+        null,
+      ),
+      false,
+    );
+    assert.equal(await store.completeStorageFileOrphanRepair(candidate), true);
+    assert.equal(
+      await store.upsertStorageFileMetadata(
+        file(candidate.r2Key, "user-b", "client-b"),
+        null,
+      ),
+      true,
+    );
+    assert.equal(await store.recordStorageFileOrphanRepair(candidate), true);
+    assert.equal(
+      await store.classifyStorageFileOrphanRepair(candidate),
+      "referenced",
+    );
+    assert.equal(await store.completeStorageFileOrphanRepair(candidate), true);
+    assert.deepEqual(await store.listStorageFileOrphanRepairs(10), []);
   } finally {
     sqlite.close();
   }
@@ -74,6 +126,31 @@ test("D1 orphan-repair recording deduplicates and rejects tenant reassignment", 
         created_at: 10,
         updated_at: 20,
       },
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("D1 orphan-repair batches are deterministic and deferred failures rotate", async () => {
+  const sqlite = await migratedDatabase();
+  try {
+    const store = new D1AuthStore(sqliteD1(sqlite));
+    const first = repair("user-a", "client-a", "physical/a", 10);
+    const second = repair("user-a", "client-a", "physical/b", 10);
+    const third = repair("user-a", "client-a", "physical/c", 20);
+    await store.recordStorageFileOrphanRepair(third);
+    await store.recordStorageFileOrphanRepair(second);
+    await store.recordStorageFileOrphanRepair(first);
+
+    assert.deepEqual(
+      (await store.listStorageFileOrphanRepairs(2)).map((item) => item.r2Key),
+      [first.r2Key, second.r2Key],
+    );
+    assert.equal(await store.deferStorageFileOrphanRepair(first, 30), true);
+    assert.deepEqual(
+      (await store.listStorageFileOrphanRepairs(3)).map((item) => item.r2Key),
+      [second.r2Key, third.r2Key, first.r2Key],
     );
   } finally {
     sqlite.close();
@@ -122,6 +199,20 @@ function repair(
     r2Key,
     createdAt: recordedAt,
     updatedAt: recordedAt,
+  };
+}
+
+function file(r2Key: string, userId = "user-a", clientId = "client-a") {
+  return {
+    userId,
+    clientId,
+    key: "logical-key",
+    r2Key,
+    contentType: "text/plain",
+    size: 4,
+    sha256: "digest",
+    createdAt: 10,
+    updatedAt: 10,
   };
 }
 

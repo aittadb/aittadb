@@ -242,6 +242,11 @@ export interface StorageFileOrphanRepair {
   updatedAt: number;
 }
 
+export type StorageFileOrphanRepairDisposition =
+  | "missing"
+  | "referenced"
+  | "orphan";
+
 export interface StorageListPosition {
   updatedAt: number;
   key: string;
@@ -409,6 +414,19 @@ export interface AuthStore {
   ): Promise<boolean>;
   recordStorageFileOrphanRepair(
     repair: StorageFileOrphanRepair,
+  ): Promise<boolean>;
+  listStorageFileOrphanRepairs(
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]>;
+  classifyStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<StorageFileOrphanRepairDisposition>;
+  completeStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean>;
+  deferStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+    now: number,
   ): Promise<boolean>;
   getStorageUsage(userId: string, clientId: string): Promise<StorageUsage>;
 }

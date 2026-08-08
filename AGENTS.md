@@ -38,7 +38,7 @@ Runtime requirements:
 - Environment variables and Sites secrets for configuration.
 - No authoritative state in `localStorage`, `sessionStorage`, process memory, or browser cookies. Cookies may carry protected transaction state only.
 - Process memory may hold non-authoritative performance hints; correctness cannot depend on survival or uniqueness.
-- Public metadata, health, discovery, JWKS, OpenAPI, docs, CSS, and JavaScript routes must not initialize D1. Static assets pass to Vinext. Durable-route cleanup is bounded and scheduled with `waitUntil`, not awaited on every response.
+- Public metadata, health, discovery, JWKS, OpenAPI, docs, CSS, and JavaScript routes must not initialize D1. Static assets pass to Vinext. Durable cleanup/repair is bounded and scheduled with `waitUntil`.
 - `.openai/hosting.json` is ignored checkout-local metadata and may contain the active project ID and logical bindings. Never commit a real reusable `project_id`. Keep `.openai/hosting.example.json` safe for forks.
 
 ## Upstream Identity Trust Boundary
@@ -143,7 +143,7 @@ When enabled, OAuth administration requires the Sites session mapped to a UUIDv4
 - Expose no generic SQL, table, D1, R2 listing, environment, binding, owner/client ID, physical key, configuration, or secret API.
 - Omit private JWKs, secrets, deployment values, owner IDs, client IDs, and R2 keys from success and failure output.
 - Record JSON is limited to 64 KiB. File bytes are limited to 10 MiB. Require trusted Sites identity before parsing a browser multipart wrapper; then stream-bound it, distrust `Content-Length`, bound overhead, and recheck file size. Raw bearer uploads remain canonical API operations.
-- File replacement uses copy-on-write physical keys and D1 compare-and-set against the observed R2 key. Stale mutations fail `409` and retire their objects. Unresolved compensation records deduplicated internal user/client-bound orphan state; callers cannot access it or physical keys.
+- File replacement uses copy-on-write keys and D1 compare-and-set. Repair rows block key reattachment; a bounded background batch deletes only globally unreferenced R2 objects, retains referenced bytes, and retries failures without a public surface.
 - Attachment filenames are safe and logical-key based.
 - Enforce finite deployment, local-user, and local-user/client item and byte ceilings atomically in D1. The write kill switch blocks create/replace but leaves authorized deletion available. Responses disclose only the current user/client namespace usage and limits.
 - Collection reads use bounded deterministic keyset pages. Continuation cursors use canonical AES-GCM authenticated encryption derived from private signing-key material and bound to resource kind, local subject, and client; expose no position, user/client identifier, signing material, or secret. Private signing-key rotation invalidates them immediately.

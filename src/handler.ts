@@ -78,6 +78,7 @@ import {
   deviceDecisionDocument,
   deviceEntryDocument,
 } from "./transaction-resources";
+import { repairStorageFileOrphans } from "./storage-orphan-repair";
 import {
   adminClientsPage,
   authUiJs,
@@ -268,7 +269,7 @@ export function createAittaDBWithStore(
           corsHeaders,
         );
         if (store && needsStore(url.pathname)) {
-          scheduleCleanup(store, ctx, nowSeconds());
+          scheduleCleanup(store, env.BUCKET, ctx, nowSeconds());
         }
         return finalized;
       } catch (error) {
@@ -2684,12 +2685,14 @@ function usesApplicationErrorNegotiation(request: Request): boolean {
 
 function scheduleCleanup(
   store: AuthStore,
+  bucket: R2Bucket | undefined,
   ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
   now: number,
 ): void {
   if (!ctx || now < nextCleanupAt) return;
   nextCleanupAt = now + CLEANUP_INTERVAL_SECONDS;
   ctx.waitUntil(store.cleanup(now));
+  if (bucket) ctx.waitUntil(repairStorageFileOrphans(store, bucket, now));
 }
 
 function isCorsControlledRoute(pathname: string): boolean {

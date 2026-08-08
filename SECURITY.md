@@ -22,7 +22,7 @@ Administrative access requires a current trusted ChatGPT sign-in inside ChatGPT 
 
 Device codes are high entropy and stored only as hashes. Short user codes are also hash-only at rest: the standard response returns the display code, the same-origin verification form supplies it when rendering consent, and migration `0004_security_indexes.sql` blanks legacy display values. AittaDB does not write either code to audit records.
 
-File operations compensate isolated D1/R2 failures, but the services do not share a transaction. A simultaneous persistent failure in both a primary write and its compensation can require private operator repair; public responses must remain generic and never reveal object keys, bindings, or backend errors.
+File operations compensate isolated D1/R2 failures, but the services do not share a transaction. Unresolved objects enter private owner-bound repair state that blocks metadata reattachment; finite background batches retain globally referenced bytes and idempotently retry deletion of unreferenced objects. A total D1 outage can prevent initial recording; public responses remain generic and never reveal object keys, bindings, or backend errors.
 
 ## Current Source Status
 
