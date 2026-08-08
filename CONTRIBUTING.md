@@ -8,7 +8,7 @@ When declaring work ready, include a `0/100` evidence-based readiness confidence
 
 Use feature branches. Do not push directly to `main`, merge without review, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
 
-Run `npm run validate` before requesting review. It includes `npm run agents:check`; keep the authoritative root `AGENTS.md` below 32,000 bytes so Codex loads the complete instruction set by default. Prefer concise rules and move explanatory background to linked files in `docs/`.
+Run `npm run validate` before requesting review. It includes the tracked-tree `npm run secrets:check` guard and `npm run agents:check`; keep the authoritative root `AGENTS.md` below 32,000 bytes so Codex loads the complete instruction set by default. For secret-safety acceptance in a complete clone, also run `npm run secrets:audit-history`; report findings only by category, path, and commit. Prefer concise rules and move explanatory background to linked files in `docs/`.
 
 Dependencies are lockfile-pinned where runtime compatibility or vendored browser assets matter. Run `npm ci` for a clean install and do not suppress the explicit `npm run audit:high` result. Dependabot tracks routine npm updates; React, React Server Components, Vinext, Vite, Cloudflare, and Wrangler updates must be tested as a compatible group.
 

@@ -4,6 +4,14 @@ AittaDB is experimental, security-sensitive application-backend software. Report
 
 Do not file public issues that include working exploits, private keys, client secrets, refresh tokens, access tokens, authorization codes, device codes, cookies, or PII.
 
+## Public Repository Secret Safety
+
+The canonical GitHub repository is public and contains no secrets. Never commit private signing material, runtime `.env` or `.dev.vars` files, active `.openai/hosting.json` or Wrangler state, deployment credentials, generated administrator/client material, or bearer-equivalent values. Checked-in example configuration contains only inert placeholders, and test credentials are synthetic fixtures. Keep real values in ignored local files or hosted secret/configuration stores.
+
+Run `npm run secrets:check` before committing. It deterministically scans Git-tracked paths and text without printing matched values; it is deliberately repository-specific, not a generic entropy scanner. From a complete clone, `npm run secrets:audit-history` scans every commit reachable from local and remote refs. Historical `.openai/hosting.json` revisions are reported separately as legacy public deployment metadata because Sites `project_id` values are identifiers, not credentials; the active file still stays ignored and must never become a reusable fork template.
+
+If exposure is suspected, do not echo or paste the value. Escalate privately at once with only its category, path, and commit. Rotation or revocation requires explicit maintainer approval, as does any public-history rewrite. Deleting a value from the current tree does not invalidate it or remove it from history.
+
 Production deployments must configure `ISSUER_URL`, `JWT_KEY_ID`, `JWT_PRIVATE_JWK`, D1 binding `DB`, R2 binding `BUCKET`, and finite storage controls through Sites secrets, environment, and bindings. Deployments enable administration only by configuring canonical local UUIDv4 values in `ADMIN_SUBJECTS`; an empty list disables it. Production deployment requires explicit maintainer approval.
 
 The deployed application always uses the single ChatGPT Sites header identity provider. There is no production configuration, binding, or environment mode for a mock user; synthetic identities are injected only by test code that is outside the Worker module graph.

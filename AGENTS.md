@@ -20,15 +20,15 @@ Current public releases use FSL-1.1-MIT and convert to MIT two years after publi
 
 ## Canonical Source and Origin
 
-GitHub at `https://github.com/aittadb/aittadb` is canonical. Work in the current checkout; do not create another canonical tree. Preserve its files, npm lockfile, package choices, instructions, uncommitted user changes, and unrelated work.
+`https://github.com/aittadb/aittadb` is the public canonical GitHub repository and contains no secrets. Create no other canonical tree; work here and preserve files, lockfile, package choices, instructions, user changes, and unrelated work. Commit no secrets or private deployment material; use inert placeholders and synthetic test fixtures. Never echo suspected exposure; escalate privately. Rotation, revocation, or history rewrite needs explicit approval.
 
 The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
-Use feature branches. Never push directly to `main`, merge, deploy, publish, save a production version/checkpoint, rotate hosted secrets, or change Sites access settings without the user's explicit approval. A task-specific approval does not authorize unrelated operational changes.
+Use feature branches. Explicit approval is required to push to `main`, merge, deploy, publish, save a production version/checkpoint, rotate hosted secrets, or change Sites access. Approval is task-specific.
 
 ## Runtime Contract
 
-Use strict TypeScript, Vinext, and Cloudflare Worker ESM. Deployed modules must not require Node APIs, filesystem writes, server processes, or durable process memory. Node APIs are confined to build scripts, local administration, and tests.
+Use strict TypeScript, Vinext, and Cloudflare Worker ESM. Deployed code cannot require Node APIs, filesystem writes, server processes, or durable memory; Node APIs are only for builds, local administration, and tests.
 
 Runtime requirements:
 
@@ -185,9 +185,9 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` lists names, never values. Configure issuer/signing data, lifetimes, exact origins, finite storage/page/rate limits, write switch, admin subjects, and feature flags. Fail closed for missing secrets or malformed flags. Records, Files, and Statistics default on; OAuth Apps default off. `ISSUER_URL` is exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and require acceptance notes.
+`.env.example` lists names, not values. Configure issuer/signing data, lifetimes, exact origins, finite storage/page/rate limits, write switch, admin subjects, and feature flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps off. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
 
-Generate local ES256 keys only through the documented script/Make target. Secret key files are ignored. Never print a generated private key in agent conversation, commit it, or place it in public hosting metadata. Bootstrap administration by signing in at `/session`, then configuring that deployment-local UUID in `ADMIN_SUBJECTS`; never substitute email addresses or display names. The upstream email-reassignment risk remains explicit.
+Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 
 `/privacy` is public HTML and versioned hypermedia JSON. `PRIVACY_CONTROLLER_*`/`PRIVACY_CONTACT_*` values take precedence; otherwise resolve only the first `ADMIN_SUBJECTS` UUID and publish its stored email plus optional name, never UUIDs, allowlists, provenance, or other fields. Invalid/unresolved data returns generic `503`. Link every HTML page and keep the policy and OpenAPI synchronized with actual data, retention, hosting, residency, cookies, rights, and operator-review behavior.
 
@@ -212,13 +212,14 @@ README must prominently state experimental status; source availability under FSL
 - Swagger check/sync: `npm run swagger:check`, `npm run swagger:sync`
 - Migration consistency: `npm run db:check`
 - Agent instruction budget: `npm run agents:check`
+- Secret checks: `npm run secrets:check`, `npm run secrets:audit-history`
 - High-severity audit: `npm run audit:high`
 - Production build: `npm run build`
 - Complete validation: `npm run validate`
 - Local key file: `make generate-local-jwt-key`
 - Ephemeral stdout key generation: `npm run keys:generate`
 
-Keep commands synchronized with `package.json`, CI, README, and contributor docs. CI uses lockfile installation and runs format, lint, typecheck, unit/integration tests, OpenAPI, Swagger, migration, AGENTS-size, audit, and production build checks. It never deploys.
+Keep commands synchronized with `package.json`, CI, README, and contributor docs. CI lockfile-installs and checks format, lint, types, secrets, unit/integration tests, OpenAPI, Swagger, migrations, AGENTS size, audit, and production build. It never deploys.
 
 ## PLAN.md Workflow
 
@@ -249,10 +250,10 @@ Never split one unit's implementation, tests, or documentation into separate tas
 
 ## Git, Review, and Deployment
 
-Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly, and push after relevant checks when authenticated access is available. Planning-only checkpoints may be committed directly. Preserve unrelated user work; never use destructive reset/checkout without explicit instruction. Run `npm run validate` before handoff. Update/open a draft PR after validation; if push access is unavailable, retain the verified local commit and report it. Never leave intended changes loose at handoff and never merge. Reviews prioritize security, regressions, protocol divergence, and missing tests.
+Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after relevant checks when authenticated. Planning-only checkpoints may be direct. Preserve unrelated work; never destructively reset/checkout without explicit instruction. Run `npm run validate` before handoff, then update/open a draft PR. Without push access, retain/report the verified local commit. Never leave intended changes loose at handoff and never merge. Reviews prioritize security, regressions, protocol drift, and missing tests.
 
 Production or preview deployment still requires the approval described under Canonical Source. Publish the exact validated committed source, apply checked-in migration artifacts through Sites, preserve D1/R2 bindings and hosted secrets, and verify deployment status. Never claim ChatGPT authentication works end to end unless a real private/public Sites deployment was tested. Record unverified Sites behavior and the exact next manual step.
 
 ## Maintaining This File
 
-Update `AGENTS.md` in the same task whenever architecture, interfaces, commands, constraints, security policy, repository structure, deployment procedure, current operational knowledge, or workflow changes. Keep it below 32,000 bytes. Prefer compact normative rules here and deeper explanation in maintained docs; remove stale statements instead of appending contradictions.
+Update `AGENTS.md` in the same task when architecture, interfaces, commands, constraints, security policy, structure, deployment procedure, operational knowledge, or workflow changes. Keep it below 32,000 bytes. Keep compact rules here and rationale in docs; remove stale statements instead of appending contradictions.

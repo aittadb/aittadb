@@ -14,7 +14,7 @@ Before creating a private Sites deployment:
 8. Inspect `dist/.openai/drizzle/` and confirm it contains one generated SQL artifact for every reviewed file in `db/migrations/` plus a non-empty migration journal.
 9. Deploy privately only after explicit approval.
 
-Do not commit real `.openai/hosting.json` production `project_id` values as part of reusable public templates.
+Keep `.env`, `.dev.vars`, `.secrets/`, `.wrangler/`, and active `.openai/hosting.json` data local or in hosted configuration. Do not commit real `.openai/hosting.json` production `project_id` values as part of reusable public templates. Sites project IDs are public deployment identifiers rather than credentials, but reusing one still violates deployment isolation. Run `npm run secrets:check` before review; release secret-safety acceptance uses `npm run secrets:audit-history` from a complete clone and prints only category, path, and commit for findings.
 
 The build configuration falls back to `.openai/hosting.example.json` so type checking and production-build validation work in a clean checkout and in CI. This fallback does not configure a deployable Sites project. A real deployment still requires the ignored checkout-local `.openai/hosting.json` created in step 3.
 

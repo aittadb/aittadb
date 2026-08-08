@@ -24,9 +24,11 @@
     "swagger:check": "node --import tsx scripts/sync-swagger-ui.ts --check",
     "db:check": "node --import tsx scripts/check-migrations.ts",
     "agents:check": "node --import tsx scripts/check-agents-size.ts",
+    "secrets:check": "node --import tsx scripts/check-secret-safety.ts",
+    "secrets:audit-history": "node --import tsx scripts/check-secret-safety.ts --history",
     "audit:high": "npm audit --audit-level=high",
     "keys:generate": "node --import tsx scripts/generate-keypair.ts",
-    "validate": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run openapi:check && npm run swagger:check && npm run db:check && npm run agents:check && npm run audit:high && npm run build"
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run secrets:check && npm test && npm run openapi:check && npm run swagger:check && npm run db:check && npm run agents:check && npm run audit:high && npm run build"
   },
   "dependencies": {
     "image-dimensions": "2.5.1",

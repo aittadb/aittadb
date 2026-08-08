@@ -81,9 +81,9 @@ make generate-local-jwt-key
 npm run validate
 ```
 
-`make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material.
+`make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material. This is a public repository: tracked examples contain only inert placeholders, and `npm run secrets:check` rejects prohibited credential paths and obvious live material without printing values. Release acceptance from a complete clone also runs `npm run secrets:audit-history`.
 
-`npm run validate` includes a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, the root `AGENTS.md` instruction-budget check, tests, and the production build. `AGENTS.md` must remain below 32,000 bytes so Codex loads its complete authoritative contract by default. D1 migrations are maintained as reviewed SQL and packaged into the Sites deployment artifact during the build; request handlers never run schema DDL. The project intentionally has no incomplete ORM generation command.
+`npm run validate` includes tracked-tree secret safety, a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, the root `AGENTS.md` instruction-budget check, tests, and the production build. `AGENTS.md` must remain below 32,000 bytes so Codex loads its complete authoritative contract by default. D1 migrations are maintained as reviewed SQL and packaged into the Sites deployment artifact during the build; request handlers never run schema DDL. The project intentionally has no incomplete ORM generation command.
 
 ## Required Configuration
 

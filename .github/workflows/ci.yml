@@ -19,6 +19,7 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm run secrets:check
       - run: npm run test:unit
       - run: npm run test:integration
       - run: npm run openapi:check

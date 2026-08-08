@@ -21,9 +21,36 @@
 # misc
 .DS_Store
 *.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.example.tfvars
 
-# generated local credentials
+# generated and tool-specific local credentials
 /.secrets/
+/.direnv/
+/.envrc
+/.netrc
+/.npmrc
+/.pypirc
+/admin-subjects*
+/client-secret*
+/credentials.json
+/jwt-signing-key*.json
+/secrets.json
+/secrets.yaml
+/secrets.yml
+/service-account*.json
+/service_account*.json
+/id_dsa
+/id_ecdsa
+/id_ed25519
+/id_rsa
 
 # debug
 npm-debug.log*
@@ -31,10 +58,15 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# local runtime environment; only inert templates belong in Git
 .env*
 !.env.example
+!.env.sample
+!.env.template
 .dev.vars*
+!.dev.vars.example
+!.dev.vars.sample
+!.dev.vars.template
 *.tsbuildinfo
 
 # vercel
