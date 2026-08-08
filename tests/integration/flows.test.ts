@@ -97,6 +97,10 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     "https://aittadb.example.test/statistics",
   );
   assert.equal(
+    apiRootJson.links.find((item) => item.rel.includes("privacy-policy"))?.href,
+    "https://aittadb.example.test/privacy",
+  );
+  assert.equal(
     apiRootJson.actions.find((item) => item.name === "sign-out")?.href,
     "https://aittadb.example.test/signout-with-chatgpt?return_to=%2F",
   );
@@ -194,6 +198,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /href="\/storage\/records"/);
   assert.match(browserRootHtml, /href="\/storage\/files"/);
   assert.match(browserRootHtml, /href="\/statistics"/);
+  assert.match(browserRootHtml, /href="\/privacy"/);
   assert.match(browserRootHtml, /href="\/docs"/);
   assert.doesNotMatch(browserRootHtml, /href="\/authorize"/);
   assert.doesNotMatch(browserRootHtml, /href="\/device"/);
@@ -206,6 +211,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.doesNotMatch(browserRootHtml, /Sites Auth Broker/);
   assert.match(browserRootHtml, /https:\/\/github\.com\/aittadb\/aittadb/);
   assert.match(browserRootHtml, /View source on GitHub/);
+  assert.match(browserRootHtml, /aria-label="Project information"/);
   assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
   const contentSecurityPolicy =
     browserRoot!.headers.get("content-security-policy") ?? "";
@@ -431,6 +437,7 @@ test("public home enters the real protected local AittaDB session", async () => 
   assert.doesNotMatch(browserHtml, /href="\/authorize"/);
   assert.doesNotMatch(browserHtml, /href="\/device"/);
   assert.doesNotMatch(browserHtml, /href="\/oauth\/device_authorization"/);
+  assert.match(browserHtml, /<a href="\/privacy">Privacy<\/a>/);
 
   const apiSession = await app.fetch(
     new Request("https://aittadb.example.test/session", {
@@ -453,6 +460,11 @@ test("public home enters the real protected local AittaDB session", async () => 
     apiSessionJson.links.find((item) => item.rel.includes("storage-records"))
       ?.href,
     "https://aittadb.example.test/storage/records",
+  );
+  assert.equal(
+    apiSessionJson.links.find((item) => item.rel.includes("privacy-policy"))
+      ?.href,
+    "https://aittadb.example.test/privacy",
   );
 
   const repeated = await app.fetch(
@@ -524,6 +536,148 @@ test("public home enters the real protected local AittaDB session", async () => 
     anonymousRootJson.actions.some((item) => item.name === "sign-out"),
     false,
   );
+});
+
+test("privacy policy provides equivalent HTML and versioned hypermedia JSON", async () => {
+  const env = await testEnv({
+    PRIVACY_CONTROLLER_NAME:
+      'Aitta <script>alert("controller")</script> Services',
+    PRIVACY_CONTACT_NAME: "Privacy Contact",
+    PRIVACY_CONTACT_EMAIL: "privacy@example.test",
+  });
+  const app = createTestAittaDB(env, new MemoryAuthStore());
+
+  const vendorResponse = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: {
+        accept: "application/vnd.aittadb+json; version=0.1",
+      },
+    }),
+  );
+  assert.equal(vendorResponse?.status, 200);
+  assert.match(
+    vendorResponse?.headers.get("content-type") ?? "",
+    /^application\/vnd\.aittadb\+json; version=0\.1/,
+  );
+  assert.equal(vendorResponse?.headers.get("aittadb-api-version"), "0.1");
+  const vendorDocument = (await vendorResponse?.json()) as {
+    api_version: string;
+    type: string;
+    id: string;
+    data: {
+      title: string;
+      deployment: string;
+      controller: Record<string, string>;
+      sections: Array<{ id: string; title: string }>;
+    };
+    links: Array<{ rel: string[]; href: string }>;
+    actions: unknown[];
+  };
+  assert.equal(vendorDocument.api_version, "0.1");
+  assert.equal(vendorDocument.type, "privacy-policy");
+  assert.equal(vendorDocument.id, "https://aittadb.example.test/privacy");
+  assert.equal(vendorDocument.data.title, "Privacy Policy");
+  assert.equal(vendorDocument.data.deployment, "https://aittadb.example.test");
+  assert.deepEqual(vendorDocument.data.controller, {
+    name: 'Aitta <script>alert("controller")</script> Services',
+    contact_name: "Privacy Contact",
+    email: "privacy@example.test",
+  });
+  assert.ok(vendorDocument.data.sections.some(({ id }) => id === "rights"));
+  assert.deepEqual(vendorDocument.actions, []);
+  assert.equal(
+    vendorDocument.links.find(({ rel }) => rel.includes("self"))?.href,
+    "https://aittadb.example.test/privacy",
+  );
+  assert.equal(
+    vendorDocument.links.find(({ rel }) => rel.includes("contact"))?.href,
+    "mailto:privacy@example.test",
+  );
+
+  const compatibleResponse = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(compatibleResponse?.status, 200);
+  assert.equal(
+    compatibleResponse?.headers.get("content-type"),
+    "application/json; charset=utf-8",
+  );
+  assert.deepEqual(await compatibleResponse?.json(), vendorDocument);
+
+  const htmlResponse = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  assert.equal(htmlResponse?.status, 200);
+  assert.match(htmlResponse?.headers.get("content-type") ?? "", /^text\/html/);
+  const policyHtml = await htmlResponse!.text();
+  assert.match(policyHtml, /<html lang="en">/);
+  assert.match(policyHtml, /<h1>Privacy Policy<\/h1>/);
+  assert.match(policyHtml, /aria-label="Privacy controller and contact"/);
+  assert.match(policyHtml, /aria-labelledby="privacy-rights"/);
+  assert.match(policyHtml, /href="mailto:privacy@example\.test"/);
+  assert.match(
+    policyHtml,
+    /Aitta &lt;script&gt;alert\(&quot;controller&quot;\)&lt;\/script&gt; Services/,
+  );
+  assert.doesNotMatch(policyHtml, /<script>/i);
+  assert.match(policyHtml, /<a href="\/privacy">Privacy<\/a>/);
+
+  const unsupported = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "application/xml" },
+    }),
+  );
+  assert.equal(unsupported?.status, 406);
+  assert.equal(
+    ((await unsupported?.json()) as { error: string }).error,
+    "not_acceptable",
+  );
+});
+
+test("privacy policy failures are generic and preserve HTML and JSON parity", async () => {
+  const cases = [
+    await testEnv(),
+    await testEnv({
+      PRIVACY_CONTROLLER_NAME: "AittaDB Operator",
+      PRIVACY_CONTACT_EMAIL: "malformed-email",
+    }),
+  ];
+
+  for (const env of cases) {
+    const app = createTestAittaDB(env, new MemoryAuthStore());
+    const jsonResponse = await app.fetch(
+      new Request("https://aittadb.example.test/privacy", {
+        headers: { accept: "application/json" },
+      }),
+    );
+    assert.equal(jsonResponse?.status, 503);
+    const jsonBody = (await jsonResponse?.json()) as {
+      error: string;
+      data: { error: string };
+      links: Array<{ rel: string[]; href: string }>;
+    };
+    assert.equal(jsonBody.error, "privacy_policy_unavailable");
+    assert.equal(jsonBody.data.error, "privacy_policy_unavailable");
+    assert.equal(JSON.stringify(jsonBody).includes("ADMIN_SUBJECTS"), false);
+    assert.equal(JSON.stringify(jsonBody).includes("malformed-email"), false);
+
+    const htmlResponse = await app.fetch(
+      new Request("https://aittadb.example.test/privacy", {
+        headers: { accept: "text/html" },
+      }),
+    );
+    assert.equal(htmlResponse?.status, 503);
+    const htmlBody = await htmlResponse!.text();
+    assert.match(htmlBody, /<h1>Service unavailable<\/h1>/);
+    assert.match(htmlBody, /privacy_policy_unavailable/);
+    assert.match(htmlBody, /<a href="\/privacy">Privacy<\/a>/);
+    assert.equal(htmlBody.includes("ADMIN_SUBJECTS"), false);
+    assert.equal(htmlBody.includes("malformed-email"), false);
+  }
 });
 
 test("public statistics expose only the aggregate local identity count", async () => {

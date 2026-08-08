@@ -73,10 +73,18 @@ import {
   docsPage,
   errorPage,
   healthPage,
+  privacyPolicyPage,
   sessionPage,
   serviceHomePage,
   statisticsPage,
 } from "./pages";
+import {
+  buildPrivacyPolicy,
+  EU_PRIVACY_RIGHTS_URL,
+  resolvePrivacyContact,
+  SITES_DPA_URL,
+  SITES_TERMS_URL,
+} from "./privacy";
 import {
   authorizationFormPage,
   deviceAuthorizationFormPage,
@@ -272,6 +280,9 @@ async function route(
       link("statistics", `${config.issuerUrl}/statistics`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
+      link("privacy-policy", `${config.issuerUrl}/privacy`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
       link("session", `${config.issuerUrl}/session`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
@@ -325,6 +336,13 @@ async function route(
         "View service statistics",
         "GET",
         `${config.issuerUrl}/statistics`,
+        { authorization: { scheme: "none" }, fields: [] },
+      ),
+      action(
+        "read-privacy-policy",
+        "Read Privacy Policy",
+        "GET",
+        `${config.issuerUrl}/privacy`,
         { authorization: { scheme: "none" }, fields: [] },
       ),
       ...(signedIn
@@ -456,6 +474,59 @@ async function route(
   }
   if (url.pathname === "/docs" && request.method === "GET")
     return html(docsPage());
+
+  if (url.pathname === "/privacy" && request.method === "GET") {
+    const contact = await resolvePrivacyContact(config, store);
+    if (!contact) {
+      return hypermediaError(
+        request,
+        "privacy_policy_unavailable",
+        "The deployment operator has not configured an available privacy contact",
+        503,
+        {
+          links: [
+            link("self", `${config.issuerUrl}/privacy`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+            link("service", config.issuerUrl, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+            link("documentation", `${config.issuerUrl}/docs`, {
+              type: "text/html",
+            }),
+          ],
+        },
+      );
+    }
+    const policy = buildPrivacyPolicy(config, contact);
+    const document = resourceDocument({
+      type: "privacy-policy",
+      id: `${config.issuerUrl}/privacy`,
+      data: policy,
+      links: [
+        link("self", `${config.issuerUrl}/privacy`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("contact", `mailto:${contact.email}`, {
+          title: "Contact the deployment operator",
+        }),
+        link("terms", SITES_TERMS_URL, { type: "text/html" }),
+        link("service-provider-privacy", SITES_DPA_URL, {
+          type: "text/html",
+        }),
+        link("privacy-rights", EU_PRIVACY_RIGHTS_URL, {
+          type: "text/html",
+        }),
+        link("documentation", `${config.issuerUrl}/docs`, {
+          type: "text/html",
+        }),
+      ],
+    });
+    return acceptsHtml(request)
+      ? html(privacyPolicyPage(policy))
+      : hypermediaJson(request, document);
+  }
 
   if (!store)
     return oauthError("database_unavailable", "Database is unavailable", 503);
@@ -899,6 +970,9 @@ async function localSessionEndpoint(
       {
         links: [
           link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+          link("privacy-policy", `${config.issuerUrl}/privacy`, {
+            type: HYPERMEDIA_MEDIA_TYPE,
+          }),
           link(
             "sign-in",
             `${config.issuerUrl}/signin-with-chatgpt?return_to=%2Fsession`,
@@ -946,6 +1020,9 @@ async function localSessionEndpoint(
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
       link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("privacy-policy", `${config.issuerUrl}/privacy`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
       link("userinfo", `${config.issuerUrl}/userinfo`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
@@ -2137,6 +2214,7 @@ export function isAittaDBRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/privacy" ||
     pathname === "/statistics" ||
     pathname === "/session" ||
     pathname === "/auth-ui.css" ||
@@ -2169,6 +2247,7 @@ function usesApplicationNegotiation(request: Request, url: URL): boolean {
   if (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/privacy" ||
     pathname === "/statistics" ||
     pathname === "/session" ||
     pathname === "/device" ||
@@ -2210,6 +2289,7 @@ function usesApplicationErrorNegotiation(request: Request): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/privacy" ||
     pathname === "/statistics" ||
     pathname === "/session" ||
     pathname === "/device" ||
@@ -2286,6 +2366,7 @@ function needsStore(pathname: string): boolean {
   return ![
     "/",
     "/health",
+    "/privacy",
     "/auth-ui.css",
     "/auth-ui.js",
     "/.well-known/openid-configuration",

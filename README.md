@@ -87,6 +87,7 @@ npm run validate
 - `JWT_KEY_ID`: configured signing key ID.
 - `JWT_PRIVATE_JWK`: ES256 P-256 private JWK JSON.
 - `ADMIN_SUBJECTS`: comma-separated canonical local UUIDv4 subjects for administrators. Sign in at `/session`, read the deployment-local AittaDB subject, and add it through Sites configuration. Only a current trusted Sites session mapped to an entry can use administration. An empty list disables administration, and UUID allowlisting does not eliminate upstream email-reassignment risk.
+- `PRIVACY_CONTROLLER_*` / `PRIVACY_CONTACT_*`: optional public operator and contact details for `/privacy`. Explicit values take precedence; missing required details fall back to only the stored email and optional display name of the first resolvable `ADMIN_SUBJECTS` user. No UUID, allowlist, or private configuration is published. A generic `503` is returned when neither source resolves a usable controller and contact.
 - `STORAGE_WRITES_ENABLED`: deployment storage-write kill switch; disabling it leaves authorized reads and deletes available.
 - `STORAGE_GLOBAL_MAX_ITEMS` / `STORAGE_GLOBAL_MAX_BYTES`: combined record-and-file ceiling for the deployment; defaults to 10,000 items and 1 GiB.
 - `STORAGE_USER_MAX_ITEMS` / `STORAGE_USER_MAX_BYTES`: combined ceiling across one local user's client namespaces; defaults to 1,000 items and 100 MiB.
@@ -101,6 +102,7 @@ npm run validate
 - `GET /health`
 - `GET /statistics`
 - `GET /session`
+- `GET /privacy`
 - `GET /.well-known/openid-configuration`
 - `GET /.well-known/jwks.json`
 - `GET /authorize`
@@ -145,6 +147,12 @@ The signed-in browser uses a reserved, hidden AittaDB client ID, so the user's d
 
 `GET /statistics` is public and returns only the aggregate count of local AittaDB identities in this deployment. It exposes no email address, display name, local subject, client ownership, or other personal or internal data.
 
+## Privacy
+
+Each AittaDB deployment operator is the controller for personal data collected by that published deployment. `GET /privacy` serves the deployment's notice as accessible HTML or versioned hypermedia JSON through normal content negotiation. Operators must review the notice, applicable law, configured clients, retention, and public contact details before publishing. See the [baseline Privacy Policy](docs/privacy.md) and [deployment configuration](docs/deployment.md#privacy-notice-configuration).
+
+OpenAI hosts ChatGPT Sites and processes personal data collected by a published Site ("Hosted Data") under the applicable [ChatGPT Sites Data Processing Addendum](https://openai.com/policies/chatgpt-sites-data-processing-addendum/) or organization agreement. AittaDB makes no fixed data-residency promise; the Sites documentation currently states that deployed Sites, D1/R2 storage, artifacts, and logs do not support data residency at launch.
+
 ## ChatGPT Sites Sign-In Boundary
 
 ChatGPT sign-in is supplied inside ChatGPT Sites through Sites-owned `/signin-with-chatgpt` and `/signout-with-chatgpt` routes. This service reads only server-side `oai-authenticated-user-email`, optional `oai-authenticated-user-full-name`, and the full-name encoding header. It never forwards or exposes ChatGPT cookies, credentials, sessions, or tokens.
@@ -182,6 +190,7 @@ This is an invitation to start a conversation rather than an announcement of a f
 - Read each repository's documentation.
 - Use [GitHub Issues](https://github.com/aittadb/aittadb/issues) for bug reports and feature proposals.
 - Read the [ChatGPT Sites documentation](https://learn.chatgpt.com/docs/sites).
+- Review the deployment's `/privacy` resource and the [baseline Privacy Policy](docs/privacy.md).
 - Visit the founder's GitHub profile: [@thejhh](https://github.com/thejhh).
 
 ## Fun Fact

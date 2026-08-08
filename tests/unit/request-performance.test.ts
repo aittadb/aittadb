@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { createAittaDB } from "../../src/handler";
 import { testEnv } from "../helpers";
 
+function normalizedQueries(values: readonly string[]): string[] {
+  return values.map((query) => query.replace(/\s+/g, " ").trim());
+}
+
 test("public requests perform no D1 work and runtime requests never apply schema DDL", async () => {
   const queries: string[] = [];
   const db: D1Database = {
@@ -26,7 +30,11 @@ test("public requests perform no D1 work and runtime requests never apply schema
     },
   };
   const maintenance: Array<Promise<unknown>> = [];
-  const env = await testEnv({ DB: db });
+  const env = await testEnv({
+    DB: db,
+    PRIVACY_CONTROLLER_NAME: "AittaDB Test Operator",
+    PRIVACY_CONTACT_EMAIL: "privacy@example.test",
+  });
   const app = await createAittaDB(env, {
     waitUntil(promise) {
       maintenance.push(promise);
@@ -41,6 +49,13 @@ test("public requests perform no D1 work and runtime requests never apply schema
   );
   assert.equal(root?.status, 200);
   assert.deepEqual(queries, []);
+  const explicitPrivacy = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(explicitPrivacy?.status, 200);
+  assert.deepEqual(queries, []);
   const authScript = await app.fetch(
     new Request("https://aittadb.example.test/auth-ui.js"),
   );
@@ -54,6 +69,23 @@ test("public requests perform no D1 work and runtime requests never apply schema
     null,
   );
   assert.deepEqual(queries, []);
+
+  const fallbackSubject = crypto.randomUUID();
+  const fallbackEnv = await testEnv({
+    DB: db,
+    ADMIN_SUBJECTS: fallbackSubject,
+  });
+  const fallbackApp = await createAittaDB(fallbackEnv);
+  const fallbackPrivacy = await fallbackApp.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(fallbackPrivacy?.status, 503);
+  assert.deepEqual(normalizedQueries(queries), [
+    "SELECT * FROM users WHERE id = ?",
+  ]);
+  queries.length = 0;
 
   const session = await app.fetch(
     new Request("https://aittadb.example.test/session", {

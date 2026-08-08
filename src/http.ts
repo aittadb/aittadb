@@ -86,6 +86,7 @@ export function defaultHypermediaLinks(): HypermediaLink[] {
     link("service", "/", { type: HYPERMEDIA_MEDIA_TYPE }),
     link("session", "/session", { type: HYPERMEDIA_MEDIA_TYPE }),
     link("health", "/health", { type: HYPERMEDIA_MEDIA_TYPE }),
+    link("privacy-policy", "/privacy", { type: HYPERMEDIA_MEDIA_TYPE }),
     link("documentation", "/docs", { type: "text/html" }),
     link("describedby", "/openapi.json", { type: "application/json" }),
     link("openid-configuration", "/.well-known/openid-configuration", {

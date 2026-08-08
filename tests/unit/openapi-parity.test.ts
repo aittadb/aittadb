@@ -20,6 +20,7 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
   );
 
   for (const operation of [
+    "GET /privacy",
     "GET /statistics",
     "POST /storage/files",
     "POST /device/decision",

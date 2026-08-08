@@ -50,6 +50,7 @@ const STANDARD_HTML = [JSON_MEDIA, HTML_MEDIA] as const;
 const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/", "get", "200", HYPERMEDIA_HTML),
   response("/health", "get", "200", HYPERMEDIA_HTML),
+  response("/privacy", "get", "200", HYPERMEDIA_HTML),
   response("/statistics", "get", "200", HYPERMEDIA_HTML),
   response("/session", "get", "200", HYPERMEDIA_HTML),
   response("/authorize", "get", "200", HYPERMEDIA_HTML),

@@ -9,7 +9,7 @@ Before creating a private Sites deployment:
 3. Copy `.openai/hosting.example.json` to `.openai/hosting.json` and replace the placeholder with that new Sites project ID.
 4. Configure D1 binding `DB`.
 5. Configure R2 binding `BUCKET` for AittaDB object storage.
-6. Configure hosted values for `ISSUER_URL`, `JWT_KEY_ID`, `JWT_PRIVATE_JWK`, and the storage controls documented in `.env.example`. Leave `ADMIN_SUBJECTS` empty until the intended administrator has signed in once.
+6. Configure hosted values for `ISSUER_URL`, `JWT_KEY_ID`, `JWT_PRIVATE_JWK`, the privacy notice, and the storage controls documented in `.env.example`. Leave `ADMIN_SUBJECTS` empty until the intended administrator has signed in once.
 7. Run `npm run validate`.
 8. Inspect `dist/.openai/drizzle/` and confirm it contains one generated SQL artifact for every reviewed file in `db/migrations/` plus a non-empty migration journal.
 9. Deploy privately only after explicit approval.
@@ -32,6 +32,16 @@ For an existing deployment using the removed `ADMIN_EMAILS` or `ADMIN_ACCESS_KEY
 4. Remove the obsolete `ADMIN_EMAILS` and `ADMIN_ACCESS_KEY_HASH` hosted values; the new source never reads them.
 
 Administrative mutations are audited with bounded action data and hashed actor/client references. Do not claim that UUID allowlisting fixes reassignment: AittaDB still locates the local UUID through the upstream email, so a reassigned address can resolve to the same subject. Until Sites supplies a stable upstream subject or AittaDB gains a stronger account-migration contract, operators must treat that as a material residual administrator-takeover risk and keep the allowlist narrow.
+
+## Privacy Notice Configuration
+
+The operator of each published AittaDB deployment is the controller for that deployment's Hosted Data and must review the [baseline Privacy Policy](privacy.md), applicable law, configured OAuth clients, purposes, retention, and contact details before publishing. OpenAI hosts and processes Sites Hosted Data under the applicable [ChatGPT Sites Data Processing Addendum](https://openai.com/policies/chatgpt-sites-data-processing-addendum/) or the operator's organization agreement. Do not claim a fixed processing location: [Sites documentation](https://help.openai.com/en/articles/20001339-creating-and-managing-chatgpt-sites) currently says deployed Sites, D1/R2 data, artifacts, and logs do not support data residency at launch.
+
+Configure only public values in `PRIVACY_CONTROLLER_NAME`, `PRIVACY_CONTROLLER_IDENTIFIER`, `PRIVACY_CONTACT_NAME`, `PRIVACY_CONTACT_EMAIL`, `PRIVACY_CONTACT_PHONE`, and `PRIVACY_CONTACT_ADDRESS`; explicit values take precedence and blanks are not rendered. Do not put credentials or private addresses in these fields. No personal defaults belong in source control.
+
+When required controller/contact data is incomplete, `/privacy` resolves the first canonical UUID in `ADMIN_SUBJECTS` through the local-user repository and uses only its last stored email plus optional display name. It never displays that UUID, the allowlist, or another user field. This fallback works only after that administrator has signed in, does not prove that the address remains current or verified, and still carries the documented email-reassignment risk. If neither explicit configuration nor the fallback yields a usable controller and contact, `/privacy` returns a generic `503` rather than an incomplete notice.
+
+Before publication, request `/privacy` with both `Accept: text/html` and `Accept: application/vnd.aittadb+json; version=0.1`; verify the same policy and links, escaped intended contact values, and no identifier or secret leakage. Repeat this review whenever the operator, clients, purposes, retention, Sites terms/DPA, or contact configuration changes.
 
 ## AittaDB Storage Controls
 

@@ -148,6 +148,27 @@ export const openApiSpec = {
         },
       },
     },
+    "/privacy": {
+      get: {
+        summary: "Privacy Policy for this AittaDB deployment",
+        description:
+          "Returns the deployment operator's privacy notice as accessible HTML or versioned hypermedia JSON. Explicit public contact configuration takes precedence; when required contact values are absent, the service may resolve the first allowlisted local administrator subject to its stored email and optional display name. The subject identifier and allowlist are never returned. Each independent deployment operator must review the policy against its own applications, agreements, providers, and applicable law.",
+        responses: {
+          "200": {
+            description: "Current deployment Privacy Policy",
+            content: hypermediaContent(
+              "#/components/schemas/PrivacyPolicyDocument",
+            ),
+          },
+          "503": {
+            description:
+              "No valid explicit contact or resolvable administrator fallback is available; the response contains no configuration or identity details",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "406": notAcceptableResponse,
+        },
+      },
+    },
     "/statistics": {
       get: {
         summary: "Privacy-preserving public service statistics",
@@ -1631,6 +1652,85 @@ export const openApiSpec = {
                 },
                 additionalProperties: false,
               },
+            },
+          },
+        ],
+      },
+      PrivacyController: {
+        type: "object",
+        required: ["name", "email"],
+        properties: {
+          name: { type: "string", minLength: 1 },
+          identifier: { type: "string", minLength: 1 },
+          contact_name: { type: "string", minLength: 1 },
+          email: { type: "string", format: "email" },
+          phone: { type: "string", minLength: 1 },
+          postal_address: { type: "string", minLength: 1 },
+        },
+        additionalProperties: false,
+      },
+      PrivacyPolicySection: {
+        type: "object",
+        required: ["id", "title", "paragraphs"],
+        properties: {
+          id: { type: "string", minLength: 1 },
+          title: { type: "string", minLength: 1 },
+          paragraphs: {
+            type: "array",
+            minItems: 1,
+            items: { type: "string", minLength: 1 },
+          },
+          items: {
+            type: "array",
+            minItems: 1,
+            items: { type: "string", minLength: 1 },
+          },
+        },
+        additionalProperties: false,
+      },
+      PrivacyPolicyReference: {
+        type: "object",
+        required: ["title", "href"],
+        properties: {
+          title: { type: "string", minLength: 1 },
+          href: { type: "string", format: "uri" },
+        },
+        additionalProperties: false,
+      },
+      PrivacyPolicyData: {
+        type: "object",
+        required: [
+          "title",
+          "deployment",
+          "controller",
+          "sections",
+          "references",
+        ],
+        properties: {
+          title: { type: "string", const: "Privacy Policy" },
+          deployment: { type: "string", format: "uri" },
+          controller: { $ref: "#/components/schemas/PrivacyController" },
+          sections: {
+            type: "array",
+            minItems: 1,
+            items: { $ref: "#/components/schemas/PrivacyPolicySection" },
+          },
+          references: {
+            type: "array",
+            minItems: 1,
+            items: { $ref: "#/components/schemas/PrivacyPolicyReference" },
+          },
+        },
+        additionalProperties: false,
+      },
+      PrivacyPolicyDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "privacy-policy" },
+              data: { $ref: "#/components/schemas/PrivacyPolicyData" },
             },
           },
         ],

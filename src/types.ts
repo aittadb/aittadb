@@ -47,7 +47,23 @@ export interface RuntimeEnv {
   STORAGE_READ_RATE_LIMIT?: string;
   STORAGE_WRITE_RATE_LIMIT?: string;
   ADMIN_SUBJECTS?: string;
+  PRIVACY_CONTROLLER_NAME?: string;
+  PRIVACY_CONTROLLER_IDENTIFIER?: string;
+  PRIVACY_CONTACT_NAME?: string;
+  PRIVACY_CONTACT_EMAIL?: string;
+  PRIVACY_CONTACT_PHONE?: string;
+  PRIVACY_CONTACT_ADDRESS?: string;
   NODE_ENV?: string;
+}
+
+export interface PrivacyConfig {
+  controllerName: string | null;
+  controllerIdentifier: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  contactAddress: string | null;
+  valid: boolean;
 }
 
 export interface StorageLimits {
@@ -76,6 +92,7 @@ export interface AppConfig {
   storageReadRateLimit: number;
   storageWriteRateLimit: number;
   adminSubjects: readonly string[];
+  privacy: PrivacyConfig;
   isTest: boolean;
   isProduction: boolean;
 }

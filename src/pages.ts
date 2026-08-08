@@ -5,6 +5,7 @@ import type {
   DeviceGrantStatus,
   LocalUser,
 } from "./types";
+import type { PrivacyPolicyData } from "./privacy";
 
 export interface PageAction {
   href: string;
@@ -74,7 +75,7 @@ export function serviceHomePage(
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Persistent storage</span><strong>D1 records + R2 files</strong></div></section><p class="note"><strong>This public AittaDB instance runs on OpenAI-hosted ChatGPT Sites.</strong> AittaDB is reusable software: developers can deploy an independent instance in their own ChatGPT Sites project to provide authentication, JSON records, and file storage to their applications. Each instance creates its own identities and credentials, never forwards ChatGPT credentials, and remains independent from OpenAI. Persistent events are planned. <a class="note-cta" href="https://github.com/aittadb/aittadb#built-for-chatgpt-sites">How AittaDB works</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/statistics"><strong>Service statistics</strong><span>View the public aggregate identity count without exposing personal information.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Persistent storage</span><strong>D1 records + R2 files</strong></div></section><p class="note"><strong>This public AittaDB instance runs on OpenAI-hosted ChatGPT Sites.</strong> AittaDB is reusable software: developers can deploy an independent instance in their own ChatGPT Sites project to provide authentication, JSON records, and file storage to their applications. Each instance creates its own identities and credentials, never forwards ChatGPT credentials, and remains independent from OpenAI. Persistent events are planned. <a class="note-cta" href="https://github.com/aittadb/aittadb#built-for-chatgpt-sites">How AittaDB works</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/statistics"><strong>Service statistics</strong><span>View the public aggregate identity count without exposing personal information.</span></a><a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
       options.signedIn
         ? {
@@ -161,6 +162,62 @@ export function statisticsPage(identityCount: number): string {
     body: `<section class="info-grid" aria-label="AittaDB statistics"><div><span>Local identities</span><strong>${escapeHtml(String(identityCount))}</strong></div><div><span>Privacy</span><strong>Aggregate count only</strong></div></section><p class="note">The count belongs to this independent AittaDB deployment. It does not describe ChatGPT or OpenAI users and contains no personal information.</p>`,
     actions: [
       { href: "/", label: "Service home" },
+      { href: "/docs", label: "API docs", secondary: true },
+    ],
+  });
+}
+
+export function privacyPolicyPage(policy: PrivacyPolicyData): string {
+  const controller = policy.controller;
+  const contactRows = [
+    ["Controller", controller.name],
+    ...(controller.identifier
+      ? [["Controller identifier", controller.identifier]]
+      : []),
+    ...(controller.contact_name
+      ? [["Privacy contact", controller.contact_name]]
+      : []),
+    [
+      "Email",
+      `<a href="mailto:${escapeHtml(controller.email)}">${escapeHtml(controller.email)}</a>`,
+    ],
+    ...(controller.phone ? [["Phone", controller.phone]] : []),
+    ...(controller.postal_address
+      ? [["Postal address", controller.postal_address]]
+      : []),
+  ]
+    .map(
+      ([label, value]) =>
+        `<div><span>${escapeHtml(label)}</span><strong>${label === "Email" ? value : escapeHtml(value)}</strong></div>`,
+    )
+    .join("");
+  const sections = policy.sections
+    .map(
+      (section) =>
+        `<section class="policy-section" aria-labelledby="privacy-${escapeHtml(section.id)}"><h2 id="privacy-${escapeHtml(section.id)}">${escapeHtml(section.title)}</h2>${section.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}${section.items ? `<ul>${section.items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}</section>`,
+    )
+    .join("");
+  const references = policy.references
+    .map(
+      (reference) =>
+        `<li><a href="${escapeHtml(reference.href)}" rel="noreferrer">${escapeHtml(reference.title)}</a></li>`,
+    )
+    .join("");
+
+  return pageDocument({
+    title: "AittaDB Privacy Policy",
+    eyebrow: "Privacy",
+    heading: "Privacy Policy",
+    summary:
+      "How this AittaDB deployment handles sign-in identity, application data, files, authorization records, and security metadata.",
+    visualEyebrow: "Deployment responsibility",
+    visualHeading: "Clear boundaries for identity and stored data.",
+    visualSummary:
+      "The operator named here controls this deployment's Hosted Data. Other AittaDB deployments and client applications have their own privacy responsibilities.",
+    body: `<section class="info-grid" aria-label="Privacy controller and contact">${contactRows}</section><p class="note">This policy describes the implemented AittaDB core and must be reviewed by each deployment operator against its applications, agreements, providers, users, and applicable law.</p>${sections}<section class="policy-section" aria-labelledby="privacy-references"><h2 id="privacy-references">Related information</h2><ul class="policy-reference-list">${references}</ul></section>`,
+    actions: [
+      { href: `mailto:${controller.email}`, label: "Contact the operator" },
+      { href: "/", label: "Service home", secondary: true },
       { href: "/docs", label: "API docs", secondary: true },
     ],
   });
@@ -379,7 +436,7 @@ export function pageDocument(options: PageOptions): string {
     ? `<meta name="description" content="${escapeHtml(options.social.description)}"><link rel="canonical" href="${escapeHtml(options.social.url)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(options.title)}"><meta property="og:description" content="${escapeHtml(options.social.description)}"><meta property="og:url" content="${escapeHtml(options.social.url)}"><meta property="og:image" content="${escapeHtml(options.social.imageUrl)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="AittaDB: ChatGPT sign-in, app-ready identity and data."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(options.title)}"><meta name="twitter:description" content="${escapeHtml(options.social.description)}"><meta name="twitter:image" content="${escapeHtml(options.social.imageUrl)}">`
     : "";
   const layout = options.layout ?? "default";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application backend")}</p><h2>${escapeHtml(options.visualHeading ?? "Hosted identity, data, and files for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate user, its own credentials, and isolated persistent storage without forwarding ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Identity + sessions</strong></div><div><span>App data</span><strong>JSON + files</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">Identity / Data / Files / Events</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main>${options.scripts ?? ""}</body></html>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application backend")}</p><h2>${escapeHtml(options.visualHeading ?? "Hosted identity, data, and files for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate user, its own credentials, and isolated persistent storage without forwarding ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Identity + sessions</strong></div><div><span>App data</span><strong>JSON + files</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">Identity / Data / Files / Events</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><nav class="footer-links" aria-label="Project information"><a href="/privacy">Privacy</a><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></nav></footer></section></main>${options.scripts ?? ""}</body></html>`;
 }
 
 function brandWordmark(): string {
@@ -541,6 +598,7 @@ export function authUiCss(): string {
   .operation-grid strong{font-size:.94rem}.operation-grid span{color:#647287;font-size:.82rem;line-height:1.42}
   .resource-address{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 14px;margin:22px 0 30px;padding:16px 0;border-top:1px solid #dbe3eb;border-bottom:1px solid #dbe3eb}.resource-address span{color:#68768a;font-size:.72rem;font-weight:800;text-transform:uppercase}.resource-address code{min-width:0;overflow-wrap:anywhere;color:#183764}
   .storage-state{margin:8px 0 34px}.storage-state>h2,.storage-state-heading h2{margin:0 0 8px;color:#13284b;font-size:1.18rem}.storage-state-heading p,.storage-status p{margin:0;color:#647287}.storage-status{border-left:4px solid var(--accent);padding:14px 16px;background:#eef9fa;border-radius:6px}.empty-state{margin:10px 0;padding:20px;border:1px dashed #b9c5d2;border-radius:6px;background:#f7f9fb;color:#5e6c80}.record-value{white-space:pre-wrap;overflow:auto;max-height:420px;border:1px solid #ccd6e0;border-radius:6px;background:#f7f9fb;color:#183764;padding:16px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86rem}.table-value{display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.table-link{font-weight:750;text-underline-offset:3px}
+  .policy-section{padding:8px 0 20px;border-top:1px solid #e2e7ed}.policy-section:first-of-type{margin-top:30px}.policy-section h2{margin:18px 0 10px}.policy-section p{margin:10px 0;color:#43536a}.policy-section ul{margin:12px 0;padding-left:22px;color:#43536a}.policy-section li+li{margin-top:8px}.policy-reference-list{list-style:none;padding-left:0!important}.policy-reference-list a{font-weight:720;text-underline-offset:3px}
   .resource-workbench{margin-top:28px}.resource-operation{padding:22px 0;border-top:1px solid #dbe3eb}.resource-operation:last-of-type{border-bottom:1px solid #dbe3eb}.resource-operation>header{display:flex;align-items:flex-start;gap:13px;margin-bottom:8px}.resource-operation>header div{min-width:0}.resource-operation h3{margin:0;color:#13284b;font-size:1rem;letter-spacing:0}.resource-operation header p{margin:5px 0 0;color:#647287;font-size:.88rem}.method-badge{flex:none;min-width:58px;border:1px solid #99cdd1;border-radius:4px;background:#e7f6f7;color:#0b6f77;padding:4px 7px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.72rem;font-weight:800}.method-post{border-color:#9eb6d3;background:#eef4fb;color:#183764}.method-put{border-color:#f0b6aa;background:#fff0ed;color:#a82c1d}.method-delete{border-color:#e8aaa3;background:#fdecea;color:#94231c}
   .resource-operation .stacked-form{margin-top:16px}.resource-operation .stacked-form .actions{margin-top:20px}
   .content-frame>code,.content-frame>p code,.content-frame>section code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
@@ -569,10 +627,10 @@ export function authUiCss(): string {
   .table-wrap th{color:#5e6c80;font-size:.72rem;text-transform:uppercase;letter-spacing:0;background:#f4f7fa}
   .table-actions{display:flex;flex-wrap:wrap;gap:8px}.table-actions form{margin:0}
   .page-footer{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding-top:20px;border-top:1px solid #e2e7ed;color:#667488;font-size:.82rem}
-  .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}
+  .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}.footer-links{display:flex;align-items:center;gap:16px}
   .repo-link{flex:none;font-weight:760;text-decoration-thickness:1px;text-underline-offset:3px}
   @media (max-width:860px){body.aittadb-page{padding:14px}.aittadb-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}.content-frame>h1{font-size:2.75rem}}
-  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}.content-frame>h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.resource-address{grid-template-columns:1fr;gap:4px}.resource-address code{margin-bottom:8px}.content-frame>.actions,.stacked-form .actions{display:grid}.content-frame>.actions>.button,.stacked-form button,.table-actions button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
+  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}.content-frame>h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.resource-address{grid-template-columns:1fr;gap:4px}.resource-address code{margin-bottom:8px}.content-frame>.actions,.stacked-form .actions{display:grid}.content-frame>.actions>.button,.stacked-form button,.table-actions button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.footer-links{align-items:flex-start;flex-direction:column;gap:8px}.repo-link{align-self:flex-start}}
   `;
 }
 

@@ -198,13 +198,15 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 Generate local ES256 keys only through the documented script/Make target. Secret key files are ignored. Never print a generated private key in agent conversation, commit it, or place it in public hosting metadata. Bootstrap administration by signing in at `/session`, then configuring that deployment-local UUID in `ADMIN_SUBJECTS`; never substitute email addresses or display names. The upstream email-reassignment risk remains explicit.
 
+`/privacy` is the public policy resource in HTML and versioned hypermedia JSON. Public `PRIVACY_CONTROLLER_*`/`PRIVACY_CONTACT_*` values take precedence; otherwise resolve only the first `ADMIN_SUBJECTS` UUID with `getUser()` and publish only its stored email plus optional name, never the UUID, allowlist, provenance, or other fields. Invalid or unresolved contact data returns generic `503`. Every HTML page links to the policy. Keep its data inventory, retention, Sites hosting/DPA role, residency caveat, cookie behavior, rights, and operator-review warning synchronized with implementation and OpenAPI.
+
 Redact PII and every credential from logs. Use generic auth errors that do not reveal account existence. Minimal audit events may contain event type, local UUID, client ID, request ID, carefully bounded coarse request metadata, and timestamps. OAuth, identity, storage, and token responses use `Cache-Control: no-store` where sensitive.
 
 Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer policy, permissions policy, and production HTTPS HSTS. Bearer CORS is bound to the token audience's active client and exact origin. Token-endpoint CORS binds the submitted active client before consuming a credential. Never use wildcard credentialed CORS or user-controlled issuer/audience. Stream-enforce bounds and rate-limit OAuth, storage, client-authentication, and administration. See `docs/threat-model.md` and `SECURITY.md`.
 
 ## Documentation Set
 
-Maintain `README.md`, `AGENTS.md`, `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.env.example`, architecture, style, performance, threat model, deployment, self-hosting limits, OpenAPI, schema/migrations, CLI Device Grant example, browser/native PKCE example, curl examples, key generation/rotation, downstream JWT verification, fork setup, and Sites-specific behavior.
+Maintain `README.md`, `AGENTS.md`, `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, `LICENSE.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `.env.example`, architecture, style, performance, privacy baseline, threat model, deployment, self-hosting limits, OpenAPI, schema/migrations, CLI Device Grant example, browser/native PKCE example, curl examples, key generation/rotation, downstream JWT verification, fork setup, and Sites-specific behavior.
 
 README must prominently state experimental status, independence, the Sites identity-header dependency, separate local identity/credentials, no official ChatGPT OAuth service, self-hosting adapter replacement, and FSL-to-MIT conversion. Keep implementation claims current.
 
