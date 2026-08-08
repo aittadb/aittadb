@@ -10,6 +10,7 @@ System units:
 - `src/crypto.ts`: Web Crypto random values, hashes, PKCE, ES256 JWTs, and JWKS.
 - `src/store/d1.ts`: D1 repository implementation.
 - `src/store/memory.ts`: test-only repository implementation.
+- `src/store/account-deletion.ts`: finite account-deletion claim bounds and validation shared by both repositories.
 - `src/system-client.ts`: immutable reserved browser-client contract and external-flow guard.
 - `src/browser-session.ts`: current Sites identity to minimal short-lived internal access-token adapter.
 - `src/storage.ts`: AittaDB application-storage endpoints and scope enforcement.
@@ -33,6 +34,8 @@ Storage writes use one conditional D1 statement to enforce combined record-and-f
 Collection reads use deterministic `updated_at DESC, key ASC` ordering and fetch at most `page_size + 1` rows to determine whether a next page exists. The response returns at most the bounded page size and, when needed, a canonical AES-256-GCM cursor whose key is domain-separated and derived from the private signing-key material. Authenticated-encryption additional data binds storage kind, local user, and OAuth client without serializing those identifiers into the token; the ciphertext exposes no logical key, timestamp, namespace identifier, signing material, or secret. No authoritative cursor state or previous cursor key is stored. Rotating the private signing-key material immediately invalidates outstanding cursors, and clients restart traversal from the collection URI.
 
 D1 access is implemented with narrow repositories and prepared SQL statements. The project does not use Drizzle ORM or Drizzle Kit: reviewed SQL lives in `db/migrations/`, the required-table manifest lives in `db/schema.ts`, and `build/sites-migrations.ts` packages the reviewed statements plus the Sites migration journal into `dist/.openai/drizzle/`. `npm run db:check` prevents the manifest, migration history, and packaged ordering from silently diverging. Sites applies the deployment artifact migrations; request handlers never issue schema DDL.
+
+Account deletion currently has a durable repository primitive but no public operation or purge coordinator. Migration `0008` stores one `WITHOUT ROWID` state row keyed directly by immutable local subject, with pending, leased running, retryable, and terminal completed states. Idempotent start never resets an existing row. Claims select at most 25 oldest eligible rows, use leases of at most five minutes, and increment an attempt used by retry/completion compare-and-set transitions; stale workers cannot finalize reclaimed work. The table has no separate job or deployment identifier and intentionally has no user foreign key so a minimal completed tombstone can survive eventual removal of the user row. The subject and claim metadata are internal coordinator inputs and have no HTTP, hypermedia, HTML, OpenAPI, audit, or log representation. See `docs/account-deletion-jobs.md`.
 
 It never stores or forwards ChatGPT credentials. Downstream `sub` values are locally generated immutable UUIDs.
 

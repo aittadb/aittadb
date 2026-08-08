@@ -1,10 +1,17 @@
 import { uuid } from "../crypto";
 import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
+  accountDeletionClaimExpiry,
+  assertAccountDeletionNow,
+  assertAccountDeletionRetryAt,
+} from "./account-deletion";
+import {
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
 } from "../system-client";
 import type {
+  AccountDeletionJob,
+  AccountDeletionJobStartResult,
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
@@ -265,6 +272,92 @@ export class D1AuthStore implements AuthStore {
       .prepare("SELECT COUNT(*) AS identity_count FROM users")
       .first<Row>();
     return Number(row?.identity_count ?? 0);
+  }
+
+  async startAccountDeletionJob(
+    subject: string,
+    now: number,
+  ): Promise<AccountDeletionJobStartResult> {
+    assertAccountDeletionNow(now);
+    const inserted = await this.db
+      .prepare(
+        "INSERT INTO account_deletion_jobs (subject, state, attempt, available_at, created_at, updated_at, completed_at) SELECT ?, 'pending', 0, ?, ?, ?, NULL FROM users WHERE id = ? ON CONFLICT(subject) DO NOTHING RETURNING subject, state, attempt, available_at, created_at, updated_at, completed_at",
+      )
+      .bind(subject, now, now, now, subject)
+      .first<Row>();
+    if (inserted) {
+      return { created: true, job: rowToAccountDeletionJob(inserted) };
+    }
+
+    const existing = await this.getAccountDeletionJob(subject);
+    if (existing) return { created: false, job: existing };
+    throw new Error("account_deletion_subject_not_found");
+  }
+
+  async getAccountDeletionJob(
+    subject: string,
+  ): Promise<AccountDeletionJob | null> {
+    const row = await this.db
+      .prepare(
+        "SELECT subject, state, attempt, available_at, created_at, updated_at, completed_at FROM account_deletion_jobs WHERE subject = ?",
+      )
+      .bind(subject)
+      .first<Row>();
+    return row ? rowToAccountDeletionJob(row) : null;
+  }
+
+  async claimAccountDeletionJobs(
+    now: number,
+    leaseSeconds: number,
+    limit: number,
+  ): Promise<AccountDeletionJob[]> {
+    const leaseExpiresAt = accountDeletionClaimExpiry(now, leaseSeconds, limit);
+    const rows = await this.db
+      .prepare(
+        "UPDATE account_deletion_jobs SET state = 'running', attempt = attempt + 1, available_at = ?, updated_at = ? WHERE subject IN (SELECT subject FROM account_deletion_jobs WHERE state IN ('pending', 'running', 'retryable') AND available_at <= ? ORDER BY available_at ASC, created_at ASC, subject ASC LIMIT ?) AND state IN ('pending', 'running', 'retryable') AND available_at <= ? RETURNING subject, state, attempt, available_at, created_at, updated_at, completed_at",
+      )
+      .bind(leaseExpiresAt, now, now, limit, now)
+      .all<Row>();
+    return (rows.results ?? [])
+      .map(rowToAccountDeletionJob)
+      .sort(
+        (left, right) =>
+          left.createdAt - right.createdAt ||
+          left.subject.localeCompare(right.subject),
+      );
+  }
+
+  async retryAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+    retryAt: number,
+  ): Promise<boolean> {
+    assertAccountDeletionRetryAt(now, retryAt);
+    if (!Number.isSafeInteger(attempt) || attempt < 1) return false;
+    const result = await this.db
+      .prepare(
+        "UPDATE account_deletion_jobs SET state = 'retryable', available_at = ?, updated_at = ? WHERE subject = ? AND state = 'running' AND attempt = ? AND available_at > ?",
+      )
+      .bind(retryAt, now, subject, attempt, now)
+      .run();
+    return mutationChanges(result) === 1;
+  }
+
+  async completeAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+  ): Promise<boolean> {
+    assertAccountDeletionNow(now);
+    if (!Number.isSafeInteger(attempt) || attempt < 1) return false;
+    const result = await this.db
+      .prepare(
+        "UPDATE account_deletion_jobs SET state = 'completed', available_at = NULL, updated_at = ?, completed_at = ? WHERE subject = ? AND state = 'running' AND attempt = ? AND available_at > ?",
+      )
+      .bind(now, now, subject, attempt, now)
+      .run();
+    return mutationChanges(result) === 1;
   }
 
   async createClient(
@@ -1056,6 +1149,27 @@ function rowToUser(row: Row): LocalUser {
     displayName: String(row.display_name),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+  };
+}
+
+function rowToAccountDeletionJob(row: Row): AccountDeletionJob {
+  const state = row.state;
+  if (
+    state !== "pending" &&
+    state !== "running" &&
+    state !== "retryable" &&
+    state !== "completed"
+  ) {
+    throw new Error("account_deletion_job_state_invalid");
+  }
+  return {
+    subject: String(row.subject),
+    state,
+    attempt: Number(row.attempt),
+    availableAt: nullableNumber(row.available_at),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+    completedAt: nullableNumber(row.completed_at),
   };
 }
 

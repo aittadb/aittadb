@@ -128,6 +128,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
         "The email address and optional display name supplied server-side by ChatGPT Sites when you sign in, together with a separate locally generated UUID and timestamps.",
         "OAuth clients, requested scopes, authorization and consent state, token metadata, hashed opaque credentials, and access-token revocation identifiers.",
         "JSON records, logical keys, files, file metadata, and other content that you or an authorized application choose to store.",
+        "Internal account-deletion job state containing the local subject, coarse state, claim attempt, and timestamps. The current service has no HTTP operation that starts this job.",
         "Redacted audit events and pseudonymous rate-limit identifiers used for security, abuse prevention, and reliability.",
       ],
     },
@@ -162,7 +163,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
       paragraphs: [
         `Access tokens normally expire after ${formatDuration(config.accessTokenTtlSeconds)}, authorization codes after ${formatDuration(config.authCodeTtlSeconds)}, device grants after ${formatDuration(config.deviceCodeTtlSeconds)}, and refresh tokens after ${formatDuration(config.refreshTokenTtlSeconds)}. These periods are deployment-configurable. Expired protocol rows become eligible for bounded, traffic-dependent cleanup and may remain until cleanup runs.`,
         "One-time administrator submission hashes become eligible for bounded cleanup after 15 minutes. Audit events become eligible after 90 days, and one-minute rate-limit counters after five minutes. Local identities, remembered consents, client metadata, and application content do not share one automatic expiry period.",
-        "Authorized users and applications can delete individual records and files. Other data is retained while needed to provide or secure the deployment, until the deployment is removed, or until the operator completes an applicable deletion request. The current MVP has no self-service whole-account deletion workflow.",
+        "Authorized users and applications can delete individual records and files. Other data is retained while needed to provide or secure the deployment, until the deployment is removed, or until the operator completes an applicable deletion request. The current MVP has no self-service whole-account deletion workflow. Its internal deletion-job completed state is a terminal idempotency tombstone with no automatic retention limit or public representation.",
       ],
     },
     {

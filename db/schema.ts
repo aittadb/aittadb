@@ -17,4 +17,5 @@ export const schemaTables = [
   "storage_records",
   "storage_files",
   "storage_file_orphan_repairs",
+  "account_deletion_jobs",
 ] as const;

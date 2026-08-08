@@ -1,0 +1,42 @@
+# Account-Deletion Job Repository
+
+This document defines the internal durable state primitive introduced for the future self-service account-deletion flow. It is a repository contract only. It adds no HTTP route, authorization decision, data purge, coordinator, status resource, or browser interface.
+
+## State model
+
+Migration `0008_account_deletion_jobs.sql` stores one row per immutable local AittaDB subject. The subject itself is the primary key; the table is `WITHOUT ROWID` and has no job ID, deployment ID, project ID, client ID, email address, physical storage key, credential, or error text.
+
+The states are:
+
+- `pending`: an idempotent start created the job, and it is immediately claimable;
+- `running`: a bounded worker claim is active until `available_at`;
+- `retryable`: a current claimant deferred work until `available_at`;
+- `completed`: terminal; it cannot be claimed, retried, completed again, or restarted.
+
+`attempt` starts at zero and increments on every claim or expired-lease reclaim. A claimant must present the exact current subject and attempt when marking a job retryable or completed. The transition succeeds only while that claim's lease remains active. This compare-and-set rule prevents a stale worker from changing a job after another worker has reclaimed it.
+
+The completed row deliberately has no foreign key to `users`: later deletion work may remove the user row while retaining the minimal terminal tombstone needed for idempotency. The repository verifies that a local user exists when it creates the first job. An already-existing terminal row remains readable internally after user removal.
+
+## Repository contract
+
+`AuthStore` provides the same operations in D1 and the test-only memory implementation:
+
+- `startAccountDeletionJob(subject, now)` creates a pending row once and otherwise returns the existing row unchanged. An unknown subject fails with `account_deletion_subject_not_found`.
+- `getAccountDeletionJob(subject)` performs one exact-subject lookup.
+- `claimAccountDeletionJobs(now, leaseSeconds, limit)` claims only eligible pending, retryable, or lease-expired running rows. The batch is limited to 25 and the lease to five minutes. Invalid bounds fail before mutation.
+- `retryAccountDeletionJob(subject, attempt, now, retryAt)` conditionally defers one live claim; `retryAt` must be later than `now`.
+- `completeAccountDeletionJob(subject, attempt, now)` conditionally moves one live claim to its terminal state.
+
+Claim selection is finite and oldest-eligible-first by availability time, creation time, and subject. The repository returns only the selected internal job fields. It never returns a D1 `rowid` or another deployment/physical identifier.
+
+## Isolation and exposure
+
+The local subject is required internally so a later coordinator can purge exactly one owner. Every lookup and state transition binds that exact subject, and every transition also binds its current attempt. A subject or attempt mismatch changes no row.
+
+No current HTTP, hypermedia, HTML, OpenAPI, logging, or audit surface exposes this repository model. Future request and status tasks must authorize the current Sites identity independently and render only the caller's coarse state. They must not serialize the subject, attempt, availability timestamp, database details, or batch claims.
+
+## Failure behavior
+
+An expired running lease becomes eligible for another bounded claim. A stale claimant then loses its compare-and-set transition. Retry scheduling is explicit and durable. `completed` is terminal and repeated starts return it without changing timestamps or resurrecting work.
+
+This primitive does not delete anything. Interruption-safe purging, subject authorization blocking, R2 compensation, final user removal, request authorization, and status representation are separate PLAN tasks and must not be inferred from the presence of this table.

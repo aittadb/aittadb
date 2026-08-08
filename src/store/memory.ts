@@ -1,11 +1,18 @@
 import { uuid } from "../crypto";
 import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
 import {
+  accountDeletionClaimExpiry,
+  assertAccountDeletionNow,
+  assertAccountDeletionRetryAt,
+} from "./account-deletion";
+import {
   BROWSER_SESSION_CLIENT,
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
 } from "../system-client";
 import type {
+  AccountDeletionJob,
+  AccountDeletionJobStartResult,
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
@@ -38,6 +45,7 @@ export class MemoryAuthStore implements AuthStore {
   families = new Map<string, RefreshTokenFamily>();
   refreshTokens = new Map<string, RefreshTokenRecord>();
   revokedJtis = new Map<string, number>();
+  accountDeletionJobs = new Map<string, AccountDeletionJob>();
   storageRecords = new Map<string, StorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
   storageFileOrphanRepairs = new Map<string, StorageFileOrphanRepair>();
@@ -163,6 +171,127 @@ export class MemoryAuthStore implements AuthStore {
 
   async countUsers(): Promise<number> {
     return this.users.size;
+  }
+
+  async startAccountDeletionJob(
+    subject: string,
+    now: number,
+  ): Promise<AccountDeletionJobStartResult> {
+    assertAccountDeletionNow(now);
+    const existing = this.accountDeletionJobs.get(subject);
+    if (existing) {
+      return { created: false, job: copyAccountDeletionJob(existing) };
+    }
+    if (!this.users.has(subject)) {
+      throw new Error("account_deletion_subject_not_found");
+    }
+    const job: AccountDeletionJob = {
+      subject,
+      state: "pending",
+      attempt: 0,
+      availableAt: now,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+    };
+    this.accountDeletionJobs.set(subject, job);
+    return { created: true, job: copyAccountDeletionJob(job) };
+  }
+
+  async getAccountDeletionJob(
+    subject: string,
+  ): Promise<AccountDeletionJob | null> {
+    const job = this.accountDeletionJobs.get(subject);
+    return job ? copyAccountDeletionJob(job) : null;
+  }
+
+  async claimAccountDeletionJobs(
+    now: number,
+    leaseSeconds: number,
+    limit: number,
+  ): Promise<AccountDeletionJob[]> {
+    const leaseExpiresAt = accountDeletionClaimExpiry(now, leaseSeconds, limit);
+    const jobs = Array.from(this.accountDeletionJobs.values())
+      .filter(
+        (job) =>
+          job.state !== "completed" &&
+          job.availableAt !== null &&
+          job.availableAt <= now,
+      )
+      .sort(
+        (left, right) =>
+          (left.availableAt ?? 0) - (right.availableAt ?? 0) ||
+          left.createdAt - right.createdAt ||
+          left.subject.localeCompare(right.subject),
+      )
+      .slice(0, limit);
+    return jobs.map((job) => {
+      const claimed: AccountDeletionJob = {
+        ...job,
+        state: "running",
+        attempt: job.attempt + 1,
+        availableAt: leaseExpiresAt,
+        updatedAt: now,
+      };
+      this.accountDeletionJobs.set(job.subject, claimed);
+      return copyAccountDeletionJob(claimed);
+    });
+  }
+
+  async retryAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+    retryAt: number,
+  ): Promise<boolean> {
+    assertAccountDeletionRetryAt(now, retryAt);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 1 ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return false;
+    }
+    this.accountDeletionJobs.set(subject, {
+      ...job,
+      state: "retryable",
+      availableAt: retryAt,
+      updatedAt: now,
+    });
+    return true;
+  }
+
+  async completeAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+  ): Promise<boolean> {
+    assertAccountDeletionNow(now);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 1 ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return false;
+    }
+    this.accountDeletionJobs.set(subject, {
+      ...job,
+      state: "completed",
+      availableAt: null,
+      updatedAt: now,
+      completedAt: now,
+    });
+    return true;
   }
 
   async createClient(
@@ -671,6 +800,10 @@ function stripSecret(
     origins: [...client.origins],
     createdAt: client.createdAt,
   };
+}
+
+function copyAccountDeletionJob(job: AccountDeletionJob): AccountDeletionJob {
+  return { ...job };
 }
 
 function sameStorageFileOrphanRepairOwner(

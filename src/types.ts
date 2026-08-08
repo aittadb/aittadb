@@ -262,6 +262,28 @@ export interface StorageUsage {
   byteCount: number;
 }
 
+export type AccountDeletionJobState =
+  | "pending"
+  | "running"
+  | "retryable"
+  | "completed";
+
+/** Internal repository state. It is never an HTTP representation. */
+export interface AccountDeletionJob {
+  subject: string;
+  state: AccountDeletionJobState;
+  attempt: number;
+  availableAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+}
+
+export interface AccountDeletionJobStartResult {
+  created: boolean;
+  job: AccountDeletionJob;
+}
+
 export interface AuthStore {
   cleanup(now: number): Promise<void>;
   rateLimit(
@@ -279,6 +301,28 @@ export interface AuthStore {
   findOrCreateUser(identity: UpstreamIdentity, now: number): Promise<LocalUser>;
   getUser(id: string): Promise<LocalUser | null>;
   countUsers(): Promise<number>;
+
+  startAccountDeletionJob(
+    subject: string,
+    now: number,
+  ): Promise<AccountDeletionJobStartResult>;
+  getAccountDeletionJob(subject: string): Promise<AccountDeletionJob | null>;
+  claimAccountDeletionJobs(
+    now: number,
+    leaseSeconds: number,
+    limit: number,
+  ): Promise<AccountDeletionJob[]>;
+  retryAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+    retryAt: number,
+  ): Promise<boolean>;
+  completeAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+  ): Promise<boolean>;
 
   createClient(
     input: ClientRegistrationInput,

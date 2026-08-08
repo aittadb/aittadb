@@ -57,6 +57,8 @@ test("explicit privacy configuration needs no user lookup and renders escaped ac
   assert.match(html, /SameSite=Strict encrypted result cookie/);
   assert.match(html, /never put in a URL or durable plaintext storage/);
   assert.match(html, /submission hashes become eligible.*15 minutes/);
+  assert.match(html, /account-deletion job state/);
+  assert.match(html, /terminal idempotency tombstone/);
 });
 
 test("privacy policy omits optional controller and contact values that are unset", async () => {

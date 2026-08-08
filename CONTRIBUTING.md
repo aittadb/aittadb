@@ -12,7 +12,7 @@ Run `npm run validate` before requesting review. It includes `npm run agents:che
 
 Dependencies are lockfile-pinned where runtime compatibility or vendored browser assets matter. Run `npm ci` for a clean install and do not suppress the explicit `npm run audit:high` result. Dependabot tracks routine npm updates; React, React Server Components, Vinext, Vite, Cloudflare, and Wrangler updates must be tested as a compatible group.
 
-The project uses handwritten, prepared D1 SQL rather than Drizzle ORM. Update `db/migrations/`, `db/schema.ts`, and `src/store/migrations.ts` together and prove consistency with `npm run db:check`. There is intentionally no `db:generate` command.
+The project uses handwritten, prepared D1 SQL rather than Drizzle ORM. Update `db/migrations/`, `db/schema.ts`, the `AuthStore` contract, both repository implementations, and focused migration/parity tests together when a persisted primitive changes. Prove consistency with `npm run db:check`. There is intentionally no `db:generate` command.
 
 Swagger UI is pinned in `package.json` and self-hosted from `public/vendor/swagger-ui/`. After changing `swagger-ui-dist`, run `npm run swagger:sync`; CI verifies the checked-in assets with `npm run swagger:check`.
 
