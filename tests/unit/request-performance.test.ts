@@ -7,8 +7,9 @@ function normalizedQueries(values: readonly string[]): string[] {
   return values.map((query) => query.replace(/\s+/g, " ").trim());
 }
 
-test("public requests perform no D1 work and runtime requests never apply schema DDL", async () => {
+test("public requests avoid D1 and background cleanup failures cannot replace responses", async () => {
   const queries: string[] = [];
+  const cleanupFailure = "private-cleanup-failure";
   const db: D1Database = {
     prepare(query: string): D1PreparedStatement {
       queries.push(query);
@@ -23,6 +24,9 @@ test("public requests perform no D1 work and runtime requests never apply schema
           return null;
         },
         async run<T>(): Promise<D1Result<T>> {
+          if (query.startsWith("DELETE FROM admin_operation_submissions")) {
+            throw new Error(cleanupFailure);
+          }
           return { success: true, results: [] };
         },
       };
@@ -98,8 +102,11 @@ test("public requests perform no D1 work and runtime requests never apply schema
     }),
   );
   assert.equal(session?.status, 200);
-  await Promise.all(maintenance);
+  assert.equal((await session!.text()).includes(cleanupFailure), false);
+  await assert.rejects(Promise.all(maintenance), new RegExp(cleanupFailure));
   assert.match(queries.join("\n"), /SELECT \* FROM users/);
+  assert.match(queries.join("\n"), /DELETE FROM rate_limit_counters/);
+  assert.match(queries.join("\n"), /DELETE FROM admin_operation_submissions/);
   assert.equal(
     queries.some((query) => /^\s*(?:CREATE|ALTER|DROP)\b/i.test(query)),
     false,

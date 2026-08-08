@@ -49,7 +49,7 @@ The initial finite defaults combine records and files and enforce 10,000 items/1
 
 Set `STORAGE_WRITES_ENABLED=false` as an operational kill switch when new or replacement storage must stop. It returns `503 storage_writes_disabled`, removes write controls from representations, and intentionally leaves authorized reads and deletes available so users can inspect or reduce usage. A configured item/byte ceiling returns `507 storage_limit_exceeded`. Collection usage output contains only the caller's current user/client namespace, never global or cross-client totals.
 
-Rate counters use one-minute windows. A global endpoint-family ceiling is ten times its per-IP ceiling. The counter table fails closed for new keys at 10,000 rows; once-per-minute background cleanup removes at most 500 eligible rows per category and keeps rate-counter rows for five minutes. Monitor sustained `429` responses because cleanup is bounded and depends on durable-route traffic and `waitUntil` execution.
+Rate counters use one-minute windows. A global endpoint-family ceiling is ten times its per-IP ceiling. The counter table fails closed for new keys at 10,000 rows; once-per-minute background cleanup removes at most 500 rows per category, oldest eligibility timestamp first with a deterministic `rowid` tie-breaker, and keeps rate-counter rows for five minutes. Monitor sustained `429` responses because cleanup is bounded and depends on durable-route traffic and `waitUntil` execution.
 
 ## Public-Beta Limits
 
