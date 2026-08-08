@@ -1706,8 +1706,8 @@ test("AittaDB storage API stores D1 records and R2 files for the local user and 
 });
 
 test("storage is isolated by local user and client without exposing deployment internals", async () => {
-  const adminAllowlist = "private-admin-allowlist@example.test";
-  const env = await testEnv({ ADMIN_EMAILS: adminAllowlist });
+  const adminSubject = crypto.randomUUID();
+  const env = await testEnv({ ADMIN_SUBJECTS: adminSubject });
   const privateJwk = JSON.parse(String(env.JWT_PRIVATE_JWK)) as JsonWebKey;
   assert.equal(typeof privateJwk.d, "string");
   const privateScalar = String(privateJwk.d);
@@ -1989,10 +1989,10 @@ test("storage is isolated by local user and client without exposing deployment i
   for (const response of checkedResponses) {
     const body = await response?.clone().text();
     assert.equal(body?.includes(privateScalar), false);
-    assert.equal(body?.includes(adminAllowlist), false);
+    assert.equal(body?.includes(adminSubject), false);
     assert.equal(body?.includes(ownerFile.r2Key), false);
     assert.equal(body?.includes("JWT_PRIVATE_JWK"), false);
-    assert.equal(body?.includes("ADMIN_EMAILS"), false);
+    assert.equal(body?.includes("ADMIN_SUBJECTS"), false);
   }
 });
 
@@ -2671,13 +2671,16 @@ test("current signed-in session drives UserInfo and isolated record and file ope
 });
 
 test("reserved browser-session client is hidden, non-administrable, and rejected by OAuth", async () => {
-  const env = await testEnv();
+  const baseEnv = await testEnv();
   const store = new MemoryAuthStore();
-  const app = createTestAittaDB(env, store, {
+  const adminIdentity = {
     email: "admin@example.test",
     fullName: "AittaDB Admin",
     displayName: "AittaDB Admin",
-  });
+  };
+  const adminUser = await store.findOrCreateUser(adminIdentity, nowSeconds());
+  const env = { ...baseEnv, ADMIN_SUBJECTS: adminUser.id };
+  const app = createTestAittaDB(env, store, adminIdentity);
   const internalClient = await store.getClient(BROWSER_SESSION_CLIENT_ID);
   assert.ok(internalClient);
   assert.equal(
@@ -2704,7 +2707,6 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
     new Request("https://aittadb.example.test/admin/clients", {
       headers: {
         accept: "text/html",
-        "x-aittadb-admin-key": "test-admin-key",
       },
     }),
   );
@@ -2720,7 +2722,6 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
         "content-type": "application/x-www-form-urlencoded",
         cookie: `aittadb_csrf=${adminCsrf}`,
         origin: "https://aittadb.example.test",
-        "x-aittadb-admin-key": "test-admin-key",
       },
       body: form({
         csrf_token: adminCsrf,

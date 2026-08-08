@@ -129,7 +129,7 @@ OAuth rules:
 - Use standard OAuth content types and errors. Token success remains protocol-standard.
 - Introspection is for authorized confidential clients and active access tokens only. Revocation authenticates the owning client, handles access and refresh tokens even when the hint is omitted or wrong, revokes refresh families, records access-token `jti`, and preserves standard non-disclosure behavior.
 
-Admin operations require trusted ChatGPT sign-in, an allowed local subject or explicitly audited exact-email bootstrap, and the independent deployment key through a header or short-lived subject-bound secure cookie. The key is never sufficient without Sites identity. Support list/create, public/confidential type, display name, exact redirects, scopes, origins, disable, secret rotation, and grant revocation. No unrestricted dynamic registration.
+Admin operations require the current trusted ChatGPT Sites session mapped to a canonical local UUIDv4 in `ADMIN_SUBJECTS`. There is no email allowlist, administrator password/key, key header, unlock form, or separate admin cookie. Non-admin representations expose no client data/actions; mutations still require same-origin and CSRF. Support list/create, public/confidential type, display name, exact redirects, scopes, origins, disable, secret rotation, grant revocation, and redacted mutation audits. No unrestricted dynamic registration. Subject allowlisting inherits upstream email-reassignment risk.
 
 ## Storage Isolation
 
@@ -194,9 +194,9 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` lists names and documentation, never values. Important configuration includes issuer/signing data, token lifetimes, exact client origins, finite storage ceilings/page/rate settings, a storage write switch, administrator subjects, a narrow email bootstrap allowlist, and the independent administrator-key hash. Production fails closed when required secrets are absent. The canonical `ISSUER_URL` is exactly `https://aittadb.com` with no path or trailing slash; issuer changes invalidate the old token boundary and require explicit acceptance notes.
+`.env.example` lists names and documentation, never values. Important configuration includes issuer/signing data, token lifetimes, exact client origins, finite storage ceilings/page/rate settings, a storage write switch, and canonical administrator subjects. Production fails closed when required secrets are absent. The canonical `ISSUER_URL` is exactly `https://aittadb.com` with no path or trailing slash; issuer changes invalidate the old token boundary and require explicit acceptance notes.
 
-Generate local ES256 and administrator keys only through documented script/Make targets. Secret key files are ignored. Never print/process a generated private or administrator key in agent conversation, commit it, or place it in public hosting metadata. Remove bootstrap email entries after subject enrollment where practical; the independent key remains mandatory because upstream Sites identity has no documented stable subject and email reassignment remains possible.
+Generate local ES256 keys only through the documented script/Make target. Secret key files are ignored. Never print a generated private key in agent conversation, commit it, or place it in public hosting metadata. Bootstrap administration by signing in at `/session`, then configuring that deployment-local UUID in `ADMIN_SUBJECTS`; never substitute email addresses or display names. The upstream email-reassignment risk remains explicit.
 
 Redact PII and every credential from logs. Use generic auth errors that do not reveal account existence. Minimal audit events may contain event type, local UUID, client ID, request ID, carefully bounded coarse request metadata, and timestamps. OAuth, identity, storage, and token responses use `Cache-Control: no-store` where sensitive.
 
@@ -223,7 +223,6 @@ README must prominently state experimental status, independence, the Sites ident
 - Production build: `npm run build`
 - Complete validation: `npm run validate`
 - Local key file: `make generate-local-jwt-key`
-- Local administrator key files: `make generate-local-admin-access-key`
 - Ephemeral stdout key generation: `npm run keys:generate`
 
 Keep commands synchronized with `package.json`, CI, README, and contributor docs. CI uses lockfile installation and runs format, lint, typecheck, unit/integration tests, OpenAPI, Swagger, migration, AGENTS-size, audit, and production build checks. It never deploys.

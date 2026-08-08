@@ -12,7 +12,7 @@ AittaDB currently provides identity, authentication, persistent JSON data, and o
 
 It is not an official OpenAI project. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
 
-The service creates its own user record with an immutable UUID subject. The upstream email address is used only to locate or create that AittaDB user. ChatGPT Sites does not currently document a stable upstream subject, so an email change can create a new AittaDB identity and a reassigned address can inherit the existing identity and namespace. This remains a risk for ordinary users and administrators: putting that local UUID in `ADMIN_SUBJECTS` does not change how it is located. The independent administrator key is the separate factor. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
+The service creates its own user record with an immutable UUID subject. The upstream email address is used only to locate or create that AittaDB user. ChatGPT Sites does not currently document a stable upstream subject, so an email change can create a new AittaDB identity and a reassigned address can inherit the existing identity and namespace. This remains a risk for ordinary users and administrators: putting that local UUID in `ADMIN_SUBJECTS` does not change how it is located. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
 
 Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication.
 
@@ -65,8 +65,8 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 - D1-backed durable state with checked-in migrations.
 - Per-user, per-client application storage: JSON records in D1 and file bytes in R2.
 - Finite storage ceilings, bounded cursor pagination, atomic rate counters, and a deployment storage-write kill switch.
-- ChatGPT-sign-in-protected browser operations for current-session UserInfo, personal record/file storage, device approval, consent, and admin client bootstrap.
-- Administrator access requiring both an allowed local identity and a separately generated access key.
+- ChatGPT-sign-in-protected browser operations for current-session UserInfo, personal record/file storage, device approval, consent, and client administration.
+- Administrator access limited to signed-in local UUID subjects configured in `ADMIN_SUBJECTS`.
 
 ## Local Setup
 
@@ -74,13 +74,10 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 npm ci
 cp .env.example .env
 make generate-local-jwt-key
-make generate-local-admin-access-key
 npm run validate
 ```
 
 `make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material.
-
-`make generate-local-admin-access-key` (equivalently `npm run admin-key:generate`) writes a 256-bit key and its SHA-256 base64url hash to separate ignored files under `.secrets/` with restrictive permissions. It prints only file locations and setup instructions, not key material. Configure the hosted `ADMIN_ACCESS_KEY_HASH` secret from the hash file; retain the plaintext file only for authorized administrators. Do not use `--force` except for an intentional rotation.
 
 `npm run validate` includes a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, the root `AGENTS.md` instruction-budget check, tests, and the production build. `AGENTS.md` must remain below 32,000 bytes so Codex loads its complete authoritative contract by default. D1 migrations are maintained as reviewed SQL and packaged into the Sites deployment artifact during the build; request handlers never run schema DDL. The project intentionally has no incomplete ORM generation command.
 
@@ -89,9 +86,7 @@ npm run validate
 - `ISSUER_URL`: exact public issuer URL.
 - `JWT_KEY_ID`: configured signing key ID.
 - `JWT_PRIVATE_JWK`: ES256 P-256 private JWK JSON.
-- `ADMIN_SUBJECTS`: comma-separated immutable local UUID subjects for administrators; this removes a direct email allowlist entry but does not eliminate upstream email reassignment risk.
-- `ADMIN_ACCESS_KEY_HASH`: SHA-256 base64url hash of the independent administrator access key; administration fails closed when it is absent.
-- `ADMIN_EMAILS`: optional exact email allowlist for initial bootstrap or migration only; remove entries after their local UUIDs are in `ADMIN_SUBJECTS`.
+- `ADMIN_SUBJECTS`: comma-separated canonical local UUIDv4 subjects for administrators. Sign in at `/session`, read the deployment-local AittaDB subject, and add it through Sites configuration. Only a current trusted Sites session mapped to an entry can use administration. An empty list disables administration, and UUID allowlisting does not eliminate upstream email-reassignment risk.
 - `STORAGE_WRITES_ENABLED`: deployment storage-write kill switch; disabling it leaves authorized reads and deletes available.
 - `STORAGE_GLOBAL_MAX_ITEMS` / `STORAGE_GLOBAL_MAX_BYTES`: combined record-and-file ceiling for the deployment; defaults to 10,000 items and 1 GiB.
 - `STORAGE_USER_MAX_ITEMS` / `STORAGE_USER_MAX_BYTES`: combined ceiling across one local user's client namespaces; defaults to 1,000 items and 100 MiB.

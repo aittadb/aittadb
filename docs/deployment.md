@@ -5,35 +5,33 @@ Private deployment testing must wait for explicit maintainer approval.
 Before creating a private Sites deployment:
 
 1. Generate a signing key with `make generate-local-jwt-key`.
-2. Generate an independent administrator key with `make generate-local-admin-access-key` or `npm run admin-key:generate`. The generator writes ignored files with restrictive permissions and does not print key material.
-3. Create a fresh Sites project for the fork.
-4. Copy `.openai/hosting.example.json` to `.openai/hosting.json` and replace the placeholder with that new Sites project ID.
-5. Configure D1 binding `DB`.
-6. Configure R2 binding `BUCKET` for AittaDB object storage.
-7. Configure hosted values for `ISSUER_URL`, `JWT_KEY_ID`, `JWT_PRIVATE_JWK`, and the storage controls documented in `.env.example`. When enabling administration, set `ADMIN_SUBJECTS` and set the hosted secret `ADMIN_ACCESS_KEY_HASH` to the contents of `.secrets/admin-access-key.sha256`; never upload the plaintext administrator key as that hash secret.
-8. Run `npm run validate`.
-9. Inspect `dist/.openai/drizzle/` and confirm it contains one generated SQL artifact for every reviewed file in `db/migrations/` plus a non-empty migration journal.
-10. Deploy privately only after explicit approval.
+2. Create a fresh Sites project for the fork.
+3. Copy `.openai/hosting.example.json` to `.openai/hosting.json` and replace the placeholder with that new Sites project ID.
+4. Configure D1 binding `DB`.
+5. Configure R2 binding `BUCKET` for AittaDB object storage.
+6. Configure hosted values for `ISSUER_URL`, `JWT_KEY_ID`, `JWT_PRIVATE_JWK`, and the storage controls documented in `.env.example`. Leave `ADMIN_SUBJECTS` empty until the intended administrator has signed in once.
+7. Run `npm run validate`.
+8. Inspect `dist/.openai/drizzle/` and confirm it contains one generated SQL artifact for every reviewed file in `db/migrations/` plus a non-empty migration journal.
+9. Deploy privately only after explicit approval.
 
 Do not commit real `.openai/hosting.json` production `project_id` values as part of reusable public templates.
 
-The build configuration falls back to `.openai/hosting.example.json` so type checking and production-build validation work in a clean checkout and in CI. This fallback does not configure a deployable Sites project. A real deployment still requires the ignored checkout-local `.openai/hosting.json` created in step 4.
+The build configuration falls back to `.openai/hosting.example.json` so type checking and production-build validation work in a clean checkout and in CI. This fallback does not configure a deployable Sites project. A real deployment still requires the ignored checkout-local `.openai/hosting.json` created in step 3.
 
-Forks must create their own Sites project, D1 database, R2 bucket, JWT signing key, administrator key, and hosted secrets. Do not reuse another deployment's `.openai/hosting.json`, signing key, administrator key, D1 database, or R2 bucket.
+Forks must create their own Sites project, D1 database, R2 bucket, JWT signing key, and hosted secrets. Do not reuse another deployment's `.openai/hosting.json`, signing key, administrator allowlist, D1 database, or R2 bucket.
 
 ## Administrator Bootstrap and Migration
 
-For a fresh deployment, the initial approved deployment can leave administration closed. Sign in at `/session` to create the local user and read its immutable AittaDB UUID, then configure that UUID in `ADMIN_SUBJECTS` together with `ADMIN_ACCESS_KEY_HASH` in a second approved configuration deployment. The browser administrator flow requires the independent plaintext key and issues a secure 15-minute session bound to that UUID. Missing `ADMIN_ACCESS_KEY_HASH` makes administration unavailable with `503`.
+For a fresh deployment, leave administration closed while `ADMIN_SUBJECTS` is empty. Sign in at `/session` to create the local user and read its immutable deployment-local AittaDB UUID. Add that canonical UUIDv4 to `ADMIN_SUBJECTS` through Sites configuration and deploy the configuration change. The next request from that same trusted Sites session can open `/admin/clients` directly; no separate administrator password, key, header, or unlock cookie exists.
 
-For an existing deployment that only has `ADMIN_EMAILS`:
+For an existing deployment using the removed `ADMIN_EMAILS` or `ADMIN_ACCESS_KEY_HASH` settings:
 
-1. Keep the existing exact email entry temporarily and add `ADMIN_ACCESS_KEY_HASH`.
-2. Sign in with that account, unlock administration with the independently held key, and confirm the local UUID shown by `/session`.
-3. Add that UUID to `ADMIN_SUBJECTS` and deploy the configuration change.
-4. Confirm administration with the subject allowlist and independent key.
-5. Remove the migrated address from `ADMIN_EMAILS` and deploy again.
+1. Before upgrading, sign in with each intended administrator and record only the local UUID shown by `/session`.
+2. Configure those UUIDs in `ADMIN_SUBJECTS` and deploy the new source and configuration together.
+3. Confirm that an allowlisted signed-in account can open `/admin/clients` and an unlisted account receives a generic denial.
+4. Remove the obsolete `ADMIN_EMAILS` and `ADMIN_ACCESS_KEY_HASH` hosted values; the new source never reads them.
 
-Every email-bootstrap session and administrative mutation is audited with redacted, bounded metadata. Remove migrated email entries so they do not remain an unnoticed direct allowlist, but do not claim that UUID allowlisting fixes reassignment: the local UUID is still located through the upstream email, so a reassigned address can resolve to the same subject. The independently held administrator key is the separate factor. Rotate it intentionally with `npm run admin-key:generate -- --force`, replace the hosted hash, distribute the new plaintext key through a separate secure channel, and expect existing administrator sessions to become invalid.
+Administrative mutations are audited with bounded action data and hashed actor/client references. Do not claim that UUID allowlisting fixes reassignment: AittaDB still locates the local UUID through the upstream email, so a reassigned address can resolve to the same subject. Until Sites supplies a stable upstream subject or AittaDB gains a stronger account-migration contract, operators must treat that as a material residual administrator-takeover risk and keep the allowlist narrow.
 
 ## AittaDB Storage Controls
 

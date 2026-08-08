@@ -10,11 +10,6 @@ import type {
   UpstreamIdentity,
 } from "./types";
 import {
-  hasValidAdminSession,
-  issueAdminSession,
-  verifyAdminAccessKey,
-} from "./admin-session";
-import {
   requireSitesIdentity,
   sitesIdentityProvider,
   type UpstreamIdentityProvider,
@@ -69,7 +64,6 @@ import {
 } from "./transaction-resources";
 import {
   adminClientsPage,
-  adminUnlockPage,
   authUiJs,
   authUiCss,
   consentPage,
@@ -238,10 +232,12 @@ async function route(
   if (url.pathname === "/" && request.method === "GET") {
     const identity = identityProvider.read(request);
     const signedIn = Boolean(identity);
+    const signedInUser =
+      identity && store
+        ? await store.findOrCreateUser(identity, nowSeconds())
+        : null;
     const showAdmin = Boolean(
-      identity &&
-      config.adminAccessKeyHash &&
-      config.adminEmails.includes(identity.email),
+      signedInUser && config.adminSubjects.includes(signedInUser.id),
     );
     const metadata = {
       service: "AittaDB",
@@ -926,11 +922,7 @@ async function localSessionEndpoint(
   }
 
   const user = await store.findOrCreateUser(identity, nowSeconds());
-  const isAdmin = Boolean(
-    config.adminAccessKeyHash &&
-    (config.adminSubjects.includes(user.id) ||
-      config.adminEmails.includes(identity.email)),
-  );
+  const isAdmin = config.adminSubjects.includes(user.id);
   const csrf = csrfTokenForRequest(request);
   const session = {
     authenticated: true,
@@ -1721,9 +1713,6 @@ async function adminClientsGet(
     identityProvider,
   );
   if (admin instanceof Response) return admin;
-  if (!(await hasAdminCredential(request, admin.user.id, config))) {
-    return adminUnlockResponse(request);
-  }
   const csrf = csrfTokenForRequest(request);
   return adminClientsResponse(
     request,
@@ -1767,34 +1756,6 @@ async function adminClientsPost(
     );
   }
   const action = form.get("action");
-  if (action === "unlock") {
-    if (
-      !(await verifyAdminAccessKey(form.get("admin_access_key") || "", config))
-    ) {
-      await store.audit(
-        "admin.session.rejected",
-        { identity_source: admin.authorizationSource },
-        nowSeconds(),
-      );
-      return adminUnlockResponse(request, 401);
-    }
-    const session = await issueAdminSession(
-      admin.user.id,
-      config,
-      nowSeconds(),
-    );
-    await store.audit(
-      "admin.session.created",
-      { identity_source: admin.authorizationSource },
-      nowSeconds(),
-    );
-    const response = redirect("/admin/clients", 303);
-    response.headers.set("set-cookie", session.cookie);
-    return response;
-  }
-  if (!(await hasAdminCredential(request, admin.user.id, config))) {
-    return adminUnlockResponse(request, 401);
-  }
   if (action) {
     const clientId = form.get("client_id") || "";
     if (isBrowserSessionClientId(clientId)) {
@@ -1874,17 +1835,7 @@ async function requireAdminIdentity(
   config: ReturnType<typeof loadConfig>,
   store: AuthStore,
   identityProvider: UpstreamIdentityProvider,
-): Promise<
-  | { user: LocalUser; authorizationSource: "subject" | "email-bootstrap" }
-  | Response
-> {
-  if (!config.adminAccessKeyHash) {
-    return oauthError(
-      "admin_unavailable",
-      "Administrative operations require a configured independent access key",
-      503,
-    );
-  }
+): Promise<{ user: LocalUser; authorizationSource: "subject" } | Response> {
   const identity = identityProvider.read(request);
   if (!identity) {
     if (acceptsHtml(request))
@@ -1907,9 +1858,7 @@ async function requireAdminIdentity(
     );
   }
   const user = await store.findOrCreateUser(identity, nowSeconds());
-  const subjectAllowed = config.adminSubjects.includes(user.id);
-  const emailBootstrapAllowed = config.adminEmails.includes(identity.email);
-  if (!subjectAllowed && !emailBootstrapAllowed) {
+  if (!config.adminSubjects.includes(user.id)) {
     return acceptsHtml(request)
       ? html(
           errorPage(
@@ -1927,35 +1876,8 @@ async function requireAdminIdentity(
   }
   return {
     user,
-    authorizationSource: subjectAllowed ? "subject" : "email-bootstrap",
+    authorizationSource: "subject",
   };
-}
-
-async function hasAdminCredential(
-  request: Request,
-  subject: string,
-  config: ReturnType<typeof loadConfig>,
-): Promise<boolean> {
-  const headerKey = request.headers.get("x-aittadb-admin-key") || "";
-  return (
-    (await verifyAdminAccessKey(headerKey, config)) ||
-    (await hasValidAdminSession(request, subject, config, nowSeconds()))
-  );
-}
-
-function adminUnlockResponse(request: Request, status = 200): Response {
-  if (!acceptsHtml(request)) {
-    return oauthError(
-      "admin_authentication_required",
-      "Independent administrator authentication is required",
-      401,
-    );
-  }
-  const csrf = csrfTokenForRequest(request);
-  return html(adminUnlockPage(csrf), {
-    status,
-    headers: { "set-cookie": csrfCookie(csrf) },
-  });
 }
 
 async function auditAdminMutation(
@@ -1964,7 +1886,7 @@ async function auditAdminMutation(
   clientId: string,
   admin: {
     user: LocalUser;
-    authorizationSource: "subject" | "email-bootstrap";
+    authorizationSource: "subject";
   },
 ): Promise<void> {
   await store.audit(

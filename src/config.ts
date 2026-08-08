@@ -24,14 +24,10 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
   );
   const jwtKeyId = env.JWT_KEY_ID ?? (isTest ? "test-key" : "");
   const rawJwk = env.JWT_PRIVATE_JWK;
-  const adminAccessKeyHash = env.ADMIN_ACCESS_KEY_HASH?.trim() || null;
 
   if (!jwtKeyId) throw new Error("JWT_KEY_ID is required");
   if (!rawJwk) throw new Error("JWT_PRIVATE_JWK is required");
   if (isProduction && !env.DB) throw new Error("DB binding is required");
-  if (adminAccessKeyHash && !/^[A-Za-z0-9_-]{43}$/.test(adminAccessKeyHash)) {
-    throw new Error("ADMIN_ACCESS_KEY_HASH must be a SHA-256 base64url digest");
-  }
 
   const jwtPrivateJwk = parseJwk(rawJwk);
   if (
@@ -60,7 +56,6 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
     issuerUrl,
     jwtPrivateJwk,
     jwtKeyId,
-    adminEmails: splitList(env.ADMIN_EMAILS),
     accessTokenTtlSeconds: readPositiveInt(
       env.ACCESS_TOKEN_TTL_SECONDS,
       DEFAULT_ACCESS_TOKEN_TTL,
@@ -119,8 +114,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       env.STORAGE_WRITE_RATE_LIMIT,
       DEFAULT_STORAGE_WRITE_RATE_LIMIT,
     ),
-    adminSubjects: splitList(env.ADMIN_SUBJECTS),
-    adminAccessKeyHash,
+    adminSubjects: readAdminSubjects(env.ADMIN_SUBJECTS),
     isTest,
     isProduction,
   };
@@ -153,6 +147,21 @@ function splitList(value: string | undefined): readonly string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function readAdminSubjects(value: string | undefined): readonly string[] {
+  const subjects = [...new Set(splitList(value))];
+  if (
+    subjects.some(
+      (subject) =>
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+          subject,
+        ),
+    )
+  ) {
+    throw new Error("ADMIN_SUBJECTS must contain canonical UUIDv4 values");
+  }
+  return subjects;
 }
 
 function readPositiveInt(value: string | undefined, fallback: number): number {

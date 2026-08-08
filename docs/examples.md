@@ -80,14 +80,7 @@ make generate-local-jwt-key
 
 The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is ignored by Git.
 
-Generate the independent administrator key separately:
-
-```sh
-make generate-local-admin-access-key
-# Equivalent: npm run admin-key:generate
-```
-
-The generator writes the plaintext key and SHA-256 base64url hash to separate ignored files under `.secrets/` with restrictive permissions and prints no key material. Configure the hosted `ADMIN_ACCESS_KEY_HASH` secret from the hash file. The plaintext key unlocks a 15-minute browser administrator session only after the signed-in local UUID is allowed by `ADMIN_SUBJECTS` or, during migration, its exact email is temporarily allowed by `ADMIN_EMAILS`. UUID allowlisting does not eliminate reassignment risk because AittaDB still locates that UUID by upstream email; the independent key is the separate factor.
+To enable administration, sign in at `/session`, copy the deployment-local AittaDB UUID shown there, and add that canonical UUIDv4 to `ADMIN_SUBJECTS` through Sites configuration. The current trusted Sites session can then open `/admin/clients`; no separate administrator password or key is used. Keep the list narrow. UUID allowlisting does not eliminate reassignment risk because AittaDB still locates that UUID by upstream email.
 
 ## AittaDB Storage
 
