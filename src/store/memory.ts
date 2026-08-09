@@ -1,11 +1,46 @@
-import { uuid } from "../crypto";
-import { REFRESH_FAMILY_ORPHAN_GRACE_SECONDS } from "./cleanup";
+import { sha256, uuid } from "../crypto";
+import { assertAuditEventAttribution } from "../audit";
+import { assertAccountFilePurgeInput } from "../account-file-purge";
+import {
+  AUDIT_RETENTION_SECONDS,
+  CLEANUP_BATCH_SIZE,
+  createCleanupReport,
+  RATE_COUNTER_RETENTION_SECONDS,
+  REFRESH_FAMILY_ORPHAN_GRACE_SECONDS,
+} from "./cleanup";
+import type { CleanupReport } from "./cleanup";
+import {
+  assertStorageFileWriteFenceBatchLimit,
+  assertStorageFileWriteFence,
+  STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH,
+} from "../storage-file-write-fence";
+import {
+  ACCOUNT_DELETION_AUDIT_UNLINK_BATCH,
+  accountDeletionClaimExpiry,
+  assertAccountDeletionNow,
+  assertAccountDeletionRetryAt,
+} from "./account-deletion";
+import {
+  accountCredentialPurgeUnavailable,
+  assertAccountCredentialPurgeLimit,
+} from "./account-credential-purge";
+import {
+  accountRecordPurgeBatch,
+  accountRecordPurgeUnavailable,
+  assertAccountRecordPurgeInput,
+} from "./account-record-purge";
 import {
   BROWSER_SESSION_CLIENT,
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
 } from "../system-client";
 import type {
+  AccountDeletionJob,
+  AccountDeletionJobStartResult,
+  AccountCredentialPurgeBatchResult,
+  AccountFilePurgeStageResult,
+  AccountRecordPurgeBatch,
+  AuditEventAttribution,
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
@@ -16,6 +51,9 @@ import type {
   RefreshTokenFamily,
   RefreshTokenRecord,
   StorageFileMetadata,
+  StorageFileOrphanRepair,
+  StorageFileOrphanRepairDisposition,
+  StorageFileWriteFence,
   StorageLimits,
   StorageListPage,
   StorageListPosition,
@@ -27,20 +65,39 @@ import type {
 export class MemoryAuthStore implements AuthStore {
   users = new Map<string, LocalUser>();
   usersByEmail = new Map<string, string>();
+  servicePrincipals = new Set<string>();
   clients = new Map<string, ClientView & { secretHash: string | null }>();
   devices = new Map<string, DeviceGrant>();
   devicesByUserCodeHash = new Map<string, string>();
   authRequests = new Map<string, AuthorizationRequest>();
   authCodes = new Map<string, AuthorizationCode>();
-  consents = new Set<string>();
+  consents = new Map<string, number>();
   families = new Map<string, RefreshTokenFamily>();
   refreshTokens = new Map<string, RefreshTokenRecord>();
-  revokedJtis = new Map<string, number>();
+  revokedJtis = new Map<
+    string,
+    { subject: string; expiresAt: number; revokedAt: number }
+  >();
+  accountDeletionJobs = new Map<string, AccountDeletionJob>();
   storageRecords = new Map<string, StorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
+  storageFileWriteFences = new Map<string, StorageFileWriteFence>();
+  storageFileOrphanRepairs = new Map<string, StorageFileOrphanRepair>();
   counters = new Map<string, { count: number; windowStart: number }>();
-  audits: Array<{ type: string; data: Record<string, unknown>; now: number }> =
-    [];
+  adminOperationSubmissions = new Map<
+    string,
+    {
+      userId: string;
+      expiresAt: number;
+      resultConsumedAt: number | null;
+    }
+  >();
+  audits: Array<{
+    type: string;
+    data: Record<string, unknown>;
+    actorSubjectHash: string | null;
+    now: number;
+  }> = [];
 
   constructor() {
     this.clients.set(BROWSER_SESSION_CLIENT_ID, {
@@ -52,46 +109,110 @@ export class MemoryAuthStore implements AuthStore {
     });
   }
 
-  async cleanup(now: number): Promise<void> {
-    for (const [key, value] of this.revokedJtis) {
-      if (value <= now) this.revokedJtis.delete(key);
-    }
-    for (const [key, code] of this.authCodes) {
-      if (code.expiresAt <= now) this.authCodes.delete(key);
-    }
-    for (const [key, request] of this.authRequests) {
-      const hasActiveCode = Array.from(this.authCodes.values()).some(
-        (code) => code.authRequestId === request.id && code.expiresAt > now,
-      );
-      if (request.expiresAt <= now && !hasActiveCode)
-        this.authRequests.delete(key);
-    }
-    for (const [key, grant] of this.devices) {
-      if (grant.expiresAt <= now) {
-        this.devices.delete(key);
-        this.devicesByUserCodeHash.delete(grant.userCodeHash);
-      }
-    }
-    for (const [key, token] of this.refreshTokens) {
-      if (token.expiresAt <= now) this.refreshTokens.delete(key);
-    }
-    for (const [key, family] of this.families) {
-      const hasToken = Array.from(this.refreshTokens.values()).some(
-        (token) => token.familyId === family.id,
-      );
-      if (
-        family.createdAt <= now - REFRESH_FAMILY_ORPHAN_GRACE_SECONDS &&
-        !hasToken
-      ) {
-        this.families.delete(key);
-      }
-    }
-    for (const [key, counter] of this.counters) {
-      if (counter.windowStart <= now - 300) this.counters.delete(key);
-    }
-    this.audits = this.audits.filter(
-      (event) => event.now > now - 90 * 24 * 60 * 60,
+  async cleanup(now: number): Promise<CleanupReport> {
+    const authorizationCodes = deleteCleanupEntries(
+      this.authCodes,
+      (code) => code.expiresAt <= now,
+      (left, right) => left.expiresAt - right.expiresAt,
     );
+    const authorizationRequests = deleteCleanupEntries(
+      this.authRequests,
+      (request) =>
+        request.expiresAt <= now &&
+        !Array.from(this.authCodes.values()).some(
+          (code) => code.authRequestId === request.id && code.expiresAt > now,
+        ),
+      (left, right) => left.expiresAt - right.expiresAt,
+    );
+    const deviceGrants = deleteCleanupEntries(
+      this.devices,
+      (grant) => grant.expiresAt <= now,
+      (left, right) => left.expiresAt - right.expiresAt,
+      (grant) => this.devicesByUserCodeHash.delete(grant.userCodeHash),
+    );
+    const refreshTokens = deleteCleanupEntries(
+      this.refreshTokens,
+      (token) => token.expiresAt <= now,
+      (left, right) => left.expiresAt - right.expiresAt,
+    );
+    const refreshTokenFamilies = deleteCleanupEntries(
+      this.families,
+      (family) =>
+        family.createdAt <= now - REFRESH_FAMILY_ORPHAN_GRACE_SECONDS &&
+        !Array.from(this.refreshTokens.values()).some(
+          (token) => token.familyId === family.id,
+        ),
+      (left, right) => left.createdAt - right.createdAt,
+    );
+    const revokedAccessTokens = deleteCleanupEntries(
+      this.revokedJtis,
+      (token) => token.expiresAt <= now,
+      (left, right) => left.expiresAt - right.expiresAt,
+    );
+    const rateLimitCounters = deleteCleanupEntries(
+      this.counters,
+      (counter) => counter.windowStart <= now - RATE_COUNTER_RETENTION_SECONDS,
+      (left, right) => left.windowStart - right.windowStart,
+    );
+    const adminSubmissions = deleteCleanupEntries(
+      this.adminOperationSubmissions,
+      (submission) => submission.expiresAt <= now,
+      (left, right) => left.expiresAt - right.expiresAt,
+    );
+    const expiredFences = Array.from(this.storageFileWriteFences.values())
+      .filter((fence) => fence.expiresAt <= now)
+      .sort(
+        (left, right) =>
+          left.expiresAt - right.expiresAt ||
+          left.r2Key.localeCompare(right.r2Key),
+      )
+      .slice(0, STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH);
+    for (const fence of expiredFences) {
+      const existing = this.storageFileOrphanRepairs.get(fence.r2Key);
+      if (
+        existing &&
+        (existing.userId !== fence.userId ||
+          existing.clientId !== fence.clientId)
+      ) {
+        continue;
+      }
+      this.storageFileOrphanRepairs.set(fence.r2Key, {
+        userId: fence.userId,
+        clientId: fence.clientId,
+        r2Key: fence.r2Key,
+        createdAt: existing?.createdAt ?? fence.createdAt,
+        updatedAt: Math.max(existing?.updatedAt ?? 0, now),
+      });
+      this.storageFileWriteFences.delete(fence.r2Key);
+    }
+    const expiredAuditIndexes = new Set(
+      this.audits
+        .map((event, index) => ({ event, index }))
+        .filter(({ event }) => event.now <= now - AUDIT_RETENTION_SECONDS)
+        .sort(
+          (left, right) =>
+            left.event.now - right.event.now || left.index - right.index,
+        )
+        .slice(0, CLEANUP_BATCH_SIZE)
+        .map(({ index }) => index),
+    );
+    this.audits = this.audits.filter(
+      (_event, index) => !expiredAuditIndexes.has(index),
+    );
+    return createCleanupReport({
+      "file-write-fences": expiredFences.filter(
+        (fence) => !this.storageFileWriteFences.has(fence.r2Key),
+      ).length,
+      "authorization-codes": authorizationCodes,
+      "authorization-requests": authorizationRequests,
+      "device-grants": deviceGrants,
+      "refresh-tokens": refreshTokens,
+      "refresh-token-families": refreshTokenFamilies,
+      "revoked-access-tokens": revokedAccessTokens,
+      "audit-events": expiredAuditIndexes.size,
+      "rate-limit-counters": rateLimitCounters,
+      "admin-submissions": adminSubmissions,
+    });
   }
 
   async rateLimit(
@@ -114,8 +235,15 @@ export class MemoryAuthStore implements AuthStore {
     type: string,
     data: Record<string, unknown>,
     now: number,
+    attribution?: AuditEventAttribution,
   ): Promise<void> {
-    this.audits.push({ type, data: redactAuditData(data), now });
+    assertAuditEventAttribution(attribution);
+    this.audits.push({
+      type,
+      data: redactAuditData(data),
+      actorSubjectHash: attribution?.actorSubjectHash ?? null,
+      now,
+    });
   }
 
   async findOrCreateUser(
@@ -146,8 +274,403 @@ export class MemoryAuthStore implements AuthStore {
     return this.users.get(id) ?? null;
   }
 
+  async getUserByEmail(email: string): Promise<LocalUser | null> {
+    const id = this.usersByEmail.get(email);
+    const user = id ? this.users.get(id) : null;
+    return user ? { ...user } : null;
+  }
+
   async countUsers(): Promise<number> {
     return this.users.size;
+  }
+
+  async startAccountDeletionJob(
+    subject: string,
+    now: number,
+  ): Promise<AccountDeletionJobStartResult> {
+    assertAccountDeletionNow(now);
+    const existing = this.accountDeletionJobs.get(subject);
+    if (existing) {
+      return { created: false, job: copyAccountDeletionJob(existing) };
+    }
+    if (!this.users.has(subject)) {
+      throw new Error("account_deletion_subject_not_found");
+    }
+    const job: AccountDeletionJob = {
+      subject,
+      state: "pending",
+      attempt: 0,
+      availableAt: now,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: null,
+    };
+    this.accountDeletionJobs.set(subject, job);
+    return { created: true, job: copyAccountDeletionJob(job) };
+  }
+
+  async getAccountDeletionJob(
+    subject: string,
+  ): Promise<AccountDeletionJob | null> {
+    const job = this.accountDeletionJobs.get(subject);
+    return job ? copyAccountDeletionJob(job) : null;
+  }
+
+  async claimAccountDeletionJobs(
+    now: number,
+    leaseSeconds: number,
+    limit: number,
+  ): Promise<AccountDeletionJob[]> {
+    const leaseExpiresAt = accountDeletionClaimExpiry(now, leaseSeconds, limit);
+    const jobs = Array.from(this.accountDeletionJobs.values())
+      .filter(
+        (job) =>
+          job.state !== "completed" &&
+          job.availableAt !== null &&
+          job.availableAt <= now,
+      )
+      .sort(
+        (left, right) =>
+          (left.availableAt ?? 0) - (right.availableAt ?? 0) ||
+          left.createdAt - right.createdAt ||
+          left.subject.localeCompare(right.subject),
+      )
+      .slice(0, limit);
+    return jobs.map((job) => {
+      const claimed: AccountDeletionJob = {
+        ...job,
+        state: "running",
+        attempt: job.attempt + 1,
+        availableAt: leaseExpiresAt,
+        updatedAt: now,
+      };
+      this.accountDeletionJobs.set(job.subject, claimed);
+      return copyAccountDeletionJob(claimed);
+    });
+  }
+
+  async retryAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+    retryAt: number,
+  ): Promise<boolean> {
+    assertAccountDeletionRetryAt(now, retryAt);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 1 ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return false;
+    }
+    this.accountDeletionJobs.set(subject, {
+      ...job,
+      state: "retryable",
+      availableAt: retryAt,
+      updatedAt: now,
+    });
+    return true;
+  }
+
+  async finalizeAccountDeletion(
+    subject: string,
+    attempt: number,
+    now: number,
+  ): Promise<boolean> {
+    assertAccountDeletionNow(now);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 1 ||
+      job.attempt !== attempt
+    ) {
+      return false;
+    }
+    if (job.state === "completed") {
+      const actorSubjectHash = await sha256(subject);
+      return (
+        !this.users.has(subject) &&
+        !this.hasAccountFinalizationResidue(subject) &&
+        !this.audits.some(
+          (event) => event.actorSubjectHash === actorSubjectHash,
+        )
+      );
+    }
+    if (
+      job.state !== "running" ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return false;
+    }
+
+    const actorSubjectHash = await sha256(subject);
+    const attributed = this.audits
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.actorSubjectHash === actorSubjectHash)
+      .sort(
+        (left, right) =>
+          left.event.now - right.event.now || left.index - right.index,
+      )
+      .slice(0, ACCOUNT_DELETION_AUDIT_UNLINK_BATCH);
+    for (const { event } of attributed) event.actorSubjectHash = null;
+    if (
+      this.audits.some((event) => event.actorSubjectHash === actorSubjectHash)
+    ) {
+      return false;
+    }
+    if (this.hasAccountFinalizationResidue(subject)) return false;
+
+    const user = this.users.get(subject);
+    if (user && this.usersByEmail.get(user.email) === subject) {
+      this.usersByEmail.delete(user.email);
+    }
+    this.users.delete(subject);
+    for (const [key, submission] of this.adminOperationSubmissions) {
+      if (submission.userId === subject) {
+        this.adminOperationSubmissions.delete(key);
+      }
+    }
+    this.accountDeletionJobs.set(subject, {
+      ...job,
+      state: "completed",
+      availableAt: null,
+      updatedAt: now,
+      completedAt: now,
+    });
+    return true;
+  }
+
+  async purgeAccountCredentialsAndGrants(
+    subject: string,
+    limit: number,
+  ): Promise<AccountCredentialPurgeBatchResult> {
+    assertAccountCredentialPurgeLimit(limit);
+    if (!this.accountDeletionJobs.has(subject)) {
+      throw accountCredentialPurgeUnavailable();
+    }
+
+    let deletedCount = 0;
+    const remaining = () => limit - deletedCount;
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.authCodes.entries()).filter(
+        ([, code]) => code.userId === subject,
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt ||
+        left.codeHash.localeCompare(right.codeHash),
+      ([key]) => this.authCodes.delete(key),
+    );
+    const referencedRequests = new Set(
+      Array.from(this.authCodes.values()).map((code) => code.authRequestId),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.authRequests.entries()).filter(
+        ([, request]) =>
+          request.userId === subject && !referencedRequests.has(request.id),
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt || left.id.localeCompare(right.id),
+      ([key]) => this.authRequests.delete(key),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.devices.entries()).filter(
+        ([, grant]) => grant.userId === subject,
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt || left.id.localeCompare(right.id),
+      ([key, grant]) => {
+        this.devices.delete(key);
+        this.devicesByUserCodeHash.delete(grant.userCodeHash);
+      },
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.consents.entries()).filter(([key]) =>
+        key.startsWith(`${subject}:`),
+      ),
+      remaining(),
+      ([leftKey, leftAt], [rightKey, rightAt]) =>
+        leftAt - rightAt || leftKey.localeCompare(rightKey),
+      ([key]) => this.consents.delete(key),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.refreshTokens.entries()).filter(
+        ([, token]) => token.userId === subject,
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.expiresAt - right.expiresAt || left.id.localeCompare(right.id),
+      ([key]) => this.refreshTokens.delete(key),
+    );
+    const referencedFamilies = new Set(
+      Array.from(this.refreshTokens.values()).map((token) => token.familyId),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.families.entries()).filter(
+        ([, family]) =>
+          family.userId === subject && !referencedFamilies.has(family.id),
+      ),
+      remaining(),
+      ([, left], [, right]) =>
+        left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+      ([key]) => this.families.delete(key),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.revokedJtis.entries()).filter(
+        ([, revocation]) => revocation.subject === subject,
+      ),
+      remaining(),
+      ([leftJti, left], [rightJti, right]) =>
+        left.revokedAt - right.revokedAt || leftJti.localeCompare(rightJti),
+      ([jti]) => this.revokedJtis.delete(jti),
+    );
+    deletedCount += deletePurgeCandidates(
+      Array.from(this.adminOperationSubmissions.entries()).filter(
+        ([, submission]) => submission.userId === subject,
+      ),
+      remaining(),
+      ([leftKey, left], [rightKey, right]) =>
+        left.expiresAt - right.expiresAt || leftKey.localeCompare(rightKey),
+      ([key]) => this.adminOperationSubmissions.delete(key),
+    );
+
+    return {
+      deletedCount,
+      done: !this.hasAccountCredentialsAndGrants(subject),
+    };
+  }
+
+  async purgeAccountRecords(
+    subject: string,
+    limit: number,
+  ): Promise<AccountRecordPurgeBatch> {
+    assertAccountRecordPurgeInput(subject, limit);
+    if (!this.accountDeletionJobs.has(subject)) {
+      throw accountRecordPurgeUnavailable();
+    }
+    const keys = Array.from(this.storageRecords.entries())
+      .filter(([, record]) => record.userId === subject)
+      .sort(
+        ([, left], [, right]) =>
+          left.clientId.localeCompare(right.clientId) ||
+          left.key.localeCompare(right.key),
+      )
+      .slice(0, limit)
+      .map(([key]) => key);
+    for (const key of keys) this.storageRecords.delete(key);
+    return accountRecordPurgeBatch(keys.length, limit);
+  }
+
+  async stageAccountFilePurgeBatch(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountFilePurgeStageResult> {
+    assertAccountFilePurgeInput(subject, attempt, now, limit);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return { selected: 0, staged: 0 };
+    }
+    const selected = Array.from(this.storageFiles.entries())
+      .filter(([, file]) => file.userId === subject)
+      .sort(
+        ([, left], [, right]) =>
+          left.clientId.localeCompare(right.clientId) ||
+          left.key.localeCompare(right.key) ||
+          left.r2Key.localeCompare(right.r2Key),
+      )
+      .slice(0, limit);
+
+    for (const [, file] of selected) {
+      const repair = this.storageFileOrphanRepairs.get(file.r2Key);
+      if (
+        repair &&
+        (repair.userId !== file.userId || repair.clientId !== file.clientId)
+      ) {
+        throw new Error("account_file_purge_repair_owner_conflict");
+      }
+    }
+    for (const [key, file] of selected) {
+      const repair = this.storageFileOrphanRepairs.get(file.r2Key);
+      this.storageFileOrphanRepairs.set(file.r2Key, {
+        userId: file.userId,
+        clientId: file.clientId,
+        r2Key: file.r2Key,
+        createdAt: repair?.createdAt ?? now,
+        updatedAt: Math.max(repair?.updatedAt ?? 0, now),
+      });
+      this.storageFiles.delete(key);
+    }
+    return { selected: selected.length, staged: selected.length };
+  }
+
+  async stageExpiredAccountFileWriteFences(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<number> {
+    assertStorageFileWriteFenceBatchLimit(limit);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !job ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      return 0;
+    }
+    const expired = Array.from(this.storageFileWriteFences.values())
+      .filter((fence) => fence.userId === subject && fence.expiresAt <= now)
+      .sort(
+        (left, right) =>
+          left.expiresAt - right.expiresAt ||
+          left.r2Key.localeCompare(right.r2Key),
+      )
+      .slice(0, limit);
+    let staged = 0;
+    for (const fence of expired) {
+      const repair = this.storageFileOrphanRepairs.get(fence.r2Key);
+      if (
+        repair &&
+        (repair.userId !== fence.userId || repair.clientId !== fence.clientId)
+      ) {
+        continue;
+      }
+      this.storageFileOrphanRepairs.set(fence.r2Key, {
+        userId: fence.userId,
+        clientId: fence.clientId,
+        r2Key: fence.r2Key,
+        createdAt: repair?.createdAt ?? fence.createdAt,
+        updatedAt: Math.max(repair?.updatedAt ?? 0, now),
+      });
+      this.storageFileWriteFences.delete(fence.r2Key);
+      staged += 1;
+    }
+    return staged;
+  }
+
+  async hasStorageFilesForSubject(subject: string): Promise<boolean> {
+    return Array.from(this.storageFiles.values()).some(
+      (file) => file.userId === subject,
+    );
   }
 
   async createClient(
@@ -167,6 +690,7 @@ export class MemoryAuthStore implements AuthStore {
       secretHash,
     };
     this.clients.set(client.id, client);
+    if (client.type === "service") this.servicePrincipals.add(client.id);
     return stripSecret(client);
   }
 
@@ -183,6 +707,10 @@ export class MemoryAuthStore implements AuthStore {
 
   async getClientSecretHash(id: string): Promise<string | null> {
     return this.clients.get(id)?.secretHash ?? null;
+  }
+
+  async hasServicePrincipal(id: string): Promise<boolean> {
+    return this.servicePrincipals.has(id);
   }
 
   async hasActiveClientOrigin(origin: string): Promise<boolean> {
@@ -218,7 +746,42 @@ export class MemoryAuthStore implements AuthStore {
     }
   }
 
+  async claimAdminOperationSubmission(
+    tokenHash: string,
+    userId: string,
+    _now: number,
+    expiresAt: number,
+  ): Promise<boolean> {
+    this.assertSubjectWriteActive(userId);
+    if (this.adminOperationSubmissions.has(tokenHash)) return false;
+    this.adminOperationSubmissions.set(tokenHash, {
+      userId,
+      expiresAt,
+      resultConsumedAt: null,
+    });
+    return true;
+  }
+
+  async consumeAdminOperationResult(
+    tokenHash: string,
+    userId: string,
+    now: number,
+  ): Promise<boolean> {
+    const submission = this.adminOperationSubmissions.get(tokenHash);
+    if (
+      !submission ||
+      submission.userId !== userId ||
+      submission.expiresAt <= now ||
+      submission.resultConsumedAt !== null
+    ) {
+      return false;
+    }
+    submission.resultConsumedAt = now;
+    return true;
+  }
+
   async createDeviceGrant(grant: DeviceGrant): Promise<void> {
+    this.assertSubjectWriteActive(grant.userId);
     this.devices.set(grant.deviceCodeHash, { ...grant });
     this.devicesByUserCodeHash.set(grant.userCodeHash, grant.deviceCodeHash);
   }
@@ -252,6 +815,7 @@ export class MemoryAuthStore implements AuthStore {
     userId: string | null,
     now: number,
   ): Promise<DeviceGrant | null> {
+    this.assertSubjectWriteActive(userId);
     const deviceHash = this.devicesByUserCodeHash.get(userCodeHash);
     const grant = deviceHash ? this.devices.get(deviceHash) : null;
     if (!grant || grant.status !== "pending" || grant.expiresAt <= now)
@@ -283,6 +847,7 @@ export class MemoryAuthStore implements AuthStore {
   async createAuthorizationRequest(
     request: AuthorizationRequest,
   ): Promise<void> {
+    this.assertSubjectWriteActive(request.userId);
     this.authRequests.set(request.id, { ...request });
   }
 
@@ -299,6 +864,7 @@ export class MemoryAuthStore implements AuthStore {
     userId: string | null,
     now: number,
   ): Promise<boolean> {
+    this.assertSubjectWriteActive(userId);
     const request = this.authRequests.get(id);
     if (!request || request.status !== "pending" || request.expiresAt <= now)
       return false;
@@ -307,6 +873,7 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   async createAuthorizationCode(code: AuthorizationCode): Promise<void> {
+    this.assertSubjectWriteActive(code.userId);
     this.authCodes.set(code.codeHash, { ...code });
   }
 
@@ -341,15 +908,19 @@ export class MemoryAuthStore implements AuthStore {
     userId: string,
     clientId: string,
     scope: string,
+    now: number,
   ): Promise<void> {
-    this.consents.add(`${userId}:${clientId}:${scope}`);
+    this.assertSubjectWriteActive(userId);
+    this.consents.set(`${userId}:${clientId}:${scope}`, now);
   }
 
   async createRefreshFamily(family: RefreshTokenFamily): Promise<void> {
+    this.assertSubjectWriteActive(family.userId);
     this.families.set(family.id, { ...family });
   }
 
   async createRefreshToken(token: RefreshTokenRecord): Promise<void> {
+    this.assertSubjectWriteActive(token.userId);
     this.refreshTokens.set(token.tokenHash, { ...token });
   }
 
@@ -398,12 +969,49 @@ export class MemoryAuthStore implements AuthStore {
     return true;
   }
 
-  async revokeAccessTokenJti(jti: string, expiresAt: number): Promise<void> {
-    this.revokedJtis.set(jti, expiresAt);
+  async revokeAccessTokenJti(
+    jti: string,
+    subject: string,
+    expiresAt: number,
+    now: number,
+  ): Promise<void> {
+    this.assertSubjectWriteActive(subject);
+    const existing = this.revokedJtis.get(jti);
+    if (existing && existing.subject !== subject) return;
+    this.revokedJtis.set(jti, { subject, expiresAt, revokedAt: now });
   }
 
   async isAccessTokenJtiRevoked(jti: string): Promise<boolean> {
     return this.revokedJtis.has(jti);
+  }
+
+  private hasAccountCredentialsAndGrants(subject: string): boolean {
+    return (
+      Array.from(this.authCodes.values()).some(
+        (code) => code.userId === subject,
+      ) ||
+      Array.from(this.authRequests.values()).some(
+        (request) => request.userId === subject,
+      ) ||
+      Array.from(this.devices.values()).some(
+        (grant) => grant.userId === subject,
+      ) ||
+      Array.from(this.consents.keys()).some((key) =>
+        key.startsWith(`${subject}:`),
+      ) ||
+      Array.from(this.refreshTokens.values()).some(
+        (token) => token.userId === subject,
+      ) ||
+      Array.from(this.families.values()).some(
+        (family) => family.userId === subject,
+      ) ||
+      Array.from(this.revokedJtis.values()).some(
+        (revocation) => revocation.subject === subject,
+      ) ||
+      Array.from(this.adminOperationSubmissions.values()).some(
+        (submission) => submission.userId === subject,
+      )
+    );
   }
 
   async listStorageRecords(
@@ -435,6 +1043,7 @@ export class MemoryAuthStore implements AuthStore {
     record: StorageRecord,
     limits: StorageLimits,
   ): Promise<boolean> {
+    this.assertSubjectWriteActive(record.userId);
     const key = storageKey(record.userId, record.clientId, record.key);
     const existing = this.storageRecords.get(key);
     const nextBytes = utf8Bytes(record.valueJson);
@@ -496,6 +1105,8 @@ export class MemoryAuthStore implements AuthStore {
     expectedR2Key: string | null,
     limits?: StorageLimits,
   ): Promise<boolean> {
+    this.assertSubjectWriteActive(file.userId);
+    if (this.storageFileOrphanRepairs.has(file.r2Key)) return false;
     const key = storageKey(file.userId, file.clientId, file.key);
     const existing = this.storageFiles.get(key);
     if (
@@ -537,12 +1148,209 @@ export class MemoryAuthStore implements AuthStore {
     return this.storageFiles.delete(storageFileKey);
   }
 
+  async recordStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean> {
+    const job = this.accountDeletionJobs.get(repair.userId);
+    if (job?.state === "completed") {
+      throw new Error("account_deletion_subject_inactive");
+    }
+    const existing = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (
+      existing &&
+      (existing.userId !== repair.userId ||
+        existing.clientId !== repair.clientId)
+    ) {
+      return false;
+    }
+    this.storageFileOrphanRepairs.set(repair.r2Key, {
+      ...repair,
+      createdAt: existing?.createdAt ?? repair.createdAt,
+      updatedAt: Math.max(existing?.updatedAt ?? 0, repair.updatedAt),
+    });
+    return true;
+  }
+
+  async reserveStorageFileWriteFence(
+    fence: StorageFileWriteFence,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    if (
+      this.accountDeletionJobs.has(fence.userId) ||
+      !this.users.has(fence.userId) ||
+      !this.clients.has(fence.clientId) ||
+      this.storageFileWriteFences.has(fence.r2Key) ||
+      this.storageFileOrphanRepairs.has(fence.r2Key)
+    ) {
+      return false;
+    }
+    this.storageFileWriteFences.set(fence.r2Key, { ...fence });
+    return true;
+  }
+
+  async completeStorageFileWriteFence(
+    fence: StorageFileWriteFence,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    const current = this.storageFileWriteFences.get(fence.r2Key);
+    if (!sameStorageFileWriteFence(current, fence)) return false;
+    return this.storageFileWriteFences.delete(fence.r2Key);
+  }
+
+  async convertStorageFileWriteFenceToRepair(
+    fence: StorageFileWriteFence,
+    now: number,
+  ): Promise<boolean> {
+    assertStorageFileWriteFence(fence);
+    if (!Number.isSafeInteger(now) || now < 0) {
+      throw new RangeError("storage_file_write_fence_now_invalid");
+    }
+    const current = this.storageFileWriteFences.get(fence.r2Key);
+    if (!sameStorageFileWriteFence(current, fence)) return false;
+    const repair = this.storageFileOrphanRepairs.get(fence.r2Key);
+    if (
+      repair &&
+      (repair.userId !== fence.userId || repair.clientId !== fence.clientId)
+    ) {
+      return false;
+    }
+    this.storageFileOrphanRepairs.set(fence.r2Key, {
+      userId: fence.userId,
+      clientId: fence.clientId,
+      r2Key: fence.r2Key,
+      createdAt: repair?.createdAt ?? fence.createdAt,
+      updatedAt: Math.max(repair?.updatedAt ?? 0, now),
+    });
+    this.storageFileWriteFences.delete(fence.r2Key);
+    return true;
+  }
+
+  async listStorageFileOrphanRepairs(
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]> {
+    return Array.from(this.storageFileOrphanRepairs.values())
+      .sort(
+        (a, b) =>
+          a.updatedAt - b.updatedAt ||
+          a.createdAt - b.createdAt ||
+          a.r2Key.localeCompare(b.r2Key),
+      )
+      .slice(0, limit);
+  }
+
+  async listStorageFileOrphanRepairsForSubject(
+    subject: string,
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]> {
+    return Array.from(this.storageFileOrphanRepairs.values())
+      .filter((repair) => repair.userId === subject)
+      .sort(
+        (a, b) =>
+          a.updatedAt - b.updatedAt ||
+          a.createdAt - b.createdAt ||
+          a.r2Key.localeCompare(b.r2Key),
+      )
+      .slice(0, limit);
+  }
+
+  async hasStorageFileOrphanRepairsForSubject(
+    subject: string,
+  ): Promise<boolean> {
+    return Array.from(this.storageFileOrphanRepairs.values()).some(
+      (repair) => repair.userId === subject,
+    );
+  }
+
+  async classifyStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<StorageFileOrphanRepairDisposition> {
+    const current = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (!sameStorageFileOrphanRepairOwner(current, repair)) return "missing";
+    const references = Array.from(this.storageFiles.values()).filter(
+      (file) => file.r2Key === repair.r2Key,
+    );
+    if (
+      references.some(
+        (file) =>
+          file.userId !== repair.userId || file.clientId !== repair.clientId,
+      )
+    ) {
+      return "conflict";
+    }
+    return references.length > 0 ? "referenced" : "orphan";
+  }
+
+  async completeStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean> {
+    const current = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (!sameStorageFileOrphanRepairOwner(current, repair)) return false;
+    return this.storageFileOrphanRepairs.delete(repair.r2Key);
+  }
+
+  async deferStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+    now: number,
+  ): Promise<boolean> {
+    const current = this.storageFileOrphanRepairs.get(repair.r2Key);
+    if (!sameStorageFileOrphanRepairOwner(current, repair)) return false;
+    this.storageFileOrphanRepairs.set(repair.r2Key, {
+      ...current,
+      updatedAt: Math.max(current.updatedAt, now),
+    });
+    return true;
+  }
+
   async getStorageUsage(
     userId: string,
     clientId: string,
   ): Promise<StorageUsage> {
     return usageFor(this, userId, clientId);
   }
+
+  private assertSubjectWriteActive(subject: string | null): void {
+    if (subject && this.accountDeletionJobs.has(subject)) {
+      throw new Error("account_deletion_subject_inactive");
+    }
+  }
+
+  private hasAccountFinalizationResidue(subject: string): boolean {
+    return (
+      this.hasAccountCredentialsAndGrants(subject) ||
+      Array.from(this.storageRecords.values()).some(
+        (record) => record.userId === subject,
+      ) ||
+      Array.from(this.storageFiles.values()).some(
+        (file) => file.userId === subject,
+      ) ||
+      Array.from(this.storageFileWriteFences.values()).some(
+        (fence) => fence.userId === subject,
+      ) ||
+      Array.from(this.storageFileOrphanRepairs.values()).some(
+        (repair) => repair.userId === subject,
+      )
+    );
+  }
+}
+
+function deleteCleanupEntries<T>(
+  values: Map<string, T>,
+  eligible: (value: T) => boolean,
+  compare: (left: T, right: T) => number,
+  afterDelete?: (value: T) => void,
+): number {
+  const selected = Array.from(values.entries())
+    .filter(([, value]) => eligible(value))
+    .sort(
+      ([leftKey, left], [rightKey, right]) =>
+        compare(left, right) || leftKey.localeCompare(rightKey),
+    )
+    .slice(0, CLEANUP_BATCH_SIZE);
+  for (const [key, value] of selected) {
+    values.delete(key);
+    afterDelete?.(value);
+  }
+  return selected.length;
 }
 
 function stripSecret(
@@ -558,6 +1366,46 @@ function stripSecret(
     origins: [...client.origins],
     createdAt: client.createdAt,
   };
+}
+
+function copyAccountDeletionJob(job: AccountDeletionJob): AccountDeletionJob {
+  return { ...job };
+}
+
+function deletePurgeCandidates<T>(
+  candidates: Array<[string, T]>,
+  limit: number,
+  compare: (left: [string, T], right: [string, T]) => number,
+  remove: (candidate: [string, T]) => unknown,
+): number {
+  if (limit <= 0) return 0;
+  const selected = candidates.sort(compare).slice(0, limit);
+  for (const candidate of selected) remove(candidate);
+  return selected.length;
+}
+
+function sameStorageFileOrphanRepairOwner(
+  current: StorageFileOrphanRepair | undefined,
+  expected: StorageFileOrphanRepair,
+): current is StorageFileOrphanRepair {
+  return (
+    current !== undefined &&
+    current.userId === expected.userId &&
+    current.clientId === expected.clientId
+  );
+}
+
+function sameStorageFileWriteFence(
+  current: StorageFileWriteFence | undefined,
+  expected: StorageFileWriteFence,
+): current is StorageFileWriteFence {
+  return (
+    current !== undefined &&
+    current.userId === expected.userId &&
+    current.clientId === expected.clientId &&
+    current.createdAt === expected.createdAt &&
+    current.expiresAt === expected.expiresAt
+  );
 }
 
 function storageKey(userId: string, clientId: string, key: string): string {
@@ -626,13 +1474,15 @@ function redactAuditData(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(data).map(([key, value]) => [
-      key,
-      /token|secret|code|cookie|authorization|password|credential|access_key/i.test(
+    Object.entries(data)
+      .filter(([key]) => key !== "actor_subject_hash")
+      .map(([key, value]) => [
         key,
-      )
-        ? "[REDACTED]"
-        : value,
-    ]),
+        /token|secret|code|cookie|authorization|password|credential|access_key/i.test(
+          key,
+        )
+          ? "[REDACTED]"
+          : value,
+      ]),
   );
 }

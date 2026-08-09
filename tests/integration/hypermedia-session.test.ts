@@ -33,7 +33,7 @@ interface Document<T = Record<string, unknown>> {
 const VENDOR = "application/vnd.aittadb+json; version=0.1";
 
 test("application routes reject unacceptable representations without changing OAuth wire errors", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store, null);
 
@@ -198,7 +198,7 @@ test("signed-in hypermedia storage actions execute through their advertised cont
 });
 
 test("signed-in UserInfo hypermedia action returns standard UserInfo JSON", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const app = createTestAittaDB(env, new MemoryAuthStore());
   const session = await app.fetch(
     new Request("https://aittadb.example.test/session", {

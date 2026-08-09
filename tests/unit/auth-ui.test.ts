@@ -177,6 +177,12 @@ test("auth UI reveals only active fields and safely targets item URLs", () => {
 });
 
 test("auth UI progressively enhances file drag and drop", () => {
+  let formSubmissions = 0;
+  const form = {
+    requestSubmit(): void {
+      formSubmissions += 1;
+    },
+  };
   const input = {
     files: [] as Array<{ name: string }>,
     listeners: new Map<string, Array<() => void>>(),
@@ -214,6 +220,9 @@ test("auth UI progressively enhances file drag and drop", () => {
       if (selector === 'input[type="file"]') return input;
       if (selector === "[data-file-drop-status]") return status;
       return null;
+    },
+    closest(selector: string): typeof form | null {
+      return selector === "form" ? form : null;
     },
     addEventListener(
       name: string,
@@ -256,6 +265,11 @@ test("auth UI progressively enhances file drag and drop", () => {
   });
 
   assert.equal(status.textContent, "Choose a file, or drag and drop it here.");
+  input.files = [{ name: "keyboard-selected.txt" }];
+  input.dispatchEvent({ type: "change" });
+  assert.equal(status.textContent, "keyboard-selected.txt");
+  assert.equal(formSubmissions, 0);
+
   let prevented = false;
   zone.dispatch("dragover", {
     preventDefault(): void {
@@ -272,4 +286,5 @@ test("auth UI progressively enhances file drag and drop", () => {
   assert.equal(classes.has("drag-active"), false);
   assert.equal(input.files[0]?.name, "report.pdf");
   assert.equal(status.textContent, "report.pdf");
+  assert.equal(formSubmissions, 0);
 });

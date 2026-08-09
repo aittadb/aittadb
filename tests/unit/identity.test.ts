@@ -149,6 +149,15 @@ test("reuses only valid host session CSRF tokens", () => {
   assert.equal(csrfTokenForRequest(request), csrf);
   assert.equal(csrfTokenMatches(request, csrf), true);
   assert.equal(csrfTokenMatches(request, `${csrf}x`), false);
+  assert.equal(
+    csrfTokenMatches(
+      new Request("https://aittadb.example.test/storage/files", {
+        headers: { cookie: "aittadb_csrf=malformed" },
+      }),
+      "malformed",
+    ),
+    false,
+  );
 
   const replacement = csrfTokenForRequest(
     new Request("https://aittadb.example.test/storage/files", {

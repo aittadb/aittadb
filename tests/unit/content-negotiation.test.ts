@@ -78,6 +78,24 @@ test("selects by effective quality, specificity, client order, and fallback", ()
   }
 });
 
+test("allows a resource to prefer HTML only when the client is indifferent", () => {
+  const select = (accept?: string) =>
+    negotiateHypermediaRepresentation(withAccept(accept), "html");
+
+  assert.equal(select(), "html");
+  assert.equal(select("*/*"), "html");
+  assert.equal(select("application/json"), "json");
+  assert.equal(
+    select("application/vnd.aittadb+json; version=0.1"),
+    "hypermedia",
+  );
+  assert.equal(select("application/*"), "json");
+  assert.equal(select("text/html;q=0, */*;q=0.8"), "json");
+  assert.equal(select("image/png"), null);
+
+  assert.equal(negotiateHypermediaRepresentation(withAccept("*/*")), "json");
+});
+
 test("uses supported fallbacks instead of rejecting an excluded or unsupported vendor range", () => {
   for (const accept of [
     "application/vnd.aittadb+json;version=9, application/json;q=0.5",

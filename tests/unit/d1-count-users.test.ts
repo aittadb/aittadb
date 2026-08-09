@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { D1AuthStore } from "../../src/store/d1";
 
-const COUNT_USERS_SQL = "SELECT COUNT(*) AS identity_count FROM users";
+const COUNT_USERS_SQL =
+  "SELECT COUNT(*) AS identity_count FROM users WHERE principal_type = 'user'";
 
 test("D1 countUsers prepares one aggregate query and returns only its number", async () => {
   const preparedQueries: string[] = [];

@@ -1,3 +1,5 @@
+import type { CleanupReport } from "./store/cleanup";
+
 export type OAuthScope =
   | "openid"
   | "email"
@@ -17,7 +19,7 @@ export const SUPPORTED_SCOPES: readonly OAuthScope[] = [
   "storage.delete",
 ];
 
-export type ClientType = "public" | "confidential";
+export type ClientType = "public" | "confidential" | "service";
 
 export type DeviceGrantStatus = "pending" | "approved" | "denied" | "used";
 
@@ -35,6 +37,11 @@ export interface RuntimeEnv {
   DEVICE_POLL_INTERVAL_SECONDS?: string;
   REFRESH_TOKEN_TTL_SECONDS?: string;
   ALLOWED_CORS_ORIGINS?: string;
+  FEATURE_RECORDS_ENABLED?: string;
+  FEATURE_FILES_ENABLED?: string;
+  FEATURE_STATISTICS_ENABLED?: string;
+  FEATURE_OAUTH_APPS_ENABLED?: string;
+  MAINTENANCE_CLEANUP_TELEMETRY_ENABLED?: string;
   STORAGE_WRITES_ENABLED?: string;
   STORAGE_GLOBAL_MAX_ITEMS?: string;
   STORAGE_GLOBAL_MAX_BYTES?: string;
@@ -47,7 +54,23 @@ export interface RuntimeEnv {
   STORAGE_READ_RATE_LIMIT?: string;
   STORAGE_WRITE_RATE_LIMIT?: string;
   ADMIN_SUBJECTS?: string;
+  PRIVACY_CONTROLLER_NAME?: string;
+  PRIVACY_CONTROLLER_IDENTIFIER?: string;
+  PRIVACY_CONTACT_NAME?: string;
+  PRIVACY_CONTACT_EMAIL?: string;
+  PRIVACY_CONTACT_PHONE?: string;
+  PRIVACY_CONTACT_ADDRESS?: string;
   NODE_ENV?: string;
+}
+
+export interface PrivacyConfig {
+  controllerName: string | null;
+  controllerIdentifier: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  contactAddress: string | null;
+  valid: boolean;
 }
 
 export interface StorageLimits {
@@ -60,6 +83,13 @@ export interface StorageLimits {
   namespaceMaxBytes: number;
 }
 
+export interface FeatureAvailability {
+  records: boolean;
+  files: boolean;
+  statistics: boolean;
+  oauthApps: boolean;
+}
+
 export interface AppConfig {
   issuerUrl: string;
   jwtPrivateJwk: JsonWebKey;
@@ -70,12 +100,15 @@ export interface AppConfig {
   devicePollIntervalSeconds: number;
   refreshTokenTtlSeconds: number;
   allowedCorsOrigins: readonly string[];
+  features: FeatureAvailability;
+  maintenanceCleanupTelemetryEnabled: boolean;
   storageLimits: StorageLimits;
   storageDefaultPageSize: number;
   storageMaxPageSize: number;
   storageReadRateLimit: number;
   storageWriteRateLimit: number;
   adminSubjects: readonly string[];
+  privacy: PrivacyConfig;
   isTest: boolean;
   isProduction: boolean;
 }
@@ -205,6 +238,28 @@ export interface StorageFileMetadata {
   updatedAt: number;
 }
 
+export interface StorageFileOrphanRepair {
+  userId: string;
+  clientId: string;
+  r2Key: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StorageFileWriteFence {
+  userId: string;
+  clientId: string;
+  r2Key: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export type StorageFileOrphanRepairDisposition =
+  | "missing"
+  | "referenced"
+  | "conflict"
+  | "orphan";
+
 export interface StorageListPosition {
   updatedAt: number;
   key: string;
@@ -220,8 +275,77 @@ export interface StorageUsage {
   byteCount: number;
 }
 
-export interface AuthStore {
-  cleanup(now: number): Promise<void>;
+export interface AccountFilePurgeStageResult {
+  selected: number;
+  staged: number;
+}
+
+export type AccountDeletionJobState =
+  | "pending"
+  | "running"
+  | "retryable"
+  | "completed";
+
+/** Internal repository state. It is never an HTTP representation. */
+export interface AccountDeletionJob {
+  subject: string;
+  state: AccountDeletionJobState;
+  attempt: number;
+  availableAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+}
+
+export interface AccountDeletionJobStartResult {
+  created: boolean;
+  job: AccountDeletionJob;
+}
+
+/** Internal bounded progress; it is never an HTTP representation. */
+export interface AccountCredentialPurgeBatchResult {
+  deletedCount: number;
+  done: boolean;
+}
+
+export interface AccountRecordPurgeBatch {
+  deletedCount: number;
+  done: boolean;
+}
+
+export interface AccountCredentialPurgeRepository {
+  purgeAccountCredentialsAndGrants(
+    subject: string,
+    limit: number,
+  ): Promise<AccountCredentialPurgeBatchResult>;
+}
+
+export interface AccountRecordPurgeRepository {
+  purgeAccountRecords(
+    subject: string,
+    limit: number,
+  ): Promise<AccountRecordPurgeBatch>;
+}
+
+export interface AccountDeletionFinalizationRepository {
+  finalizeAccountDeletion(
+    subject: string,
+    attempt: number,
+    now: number,
+  ): Promise<boolean>;
+}
+
+export interface AuditEventAttribution {
+  /** Unpadded SHA-256 digest in canonical 43-character base64url form. */
+  actorSubjectHash: string;
+}
+
+export interface AuthStore
+  extends
+    AccountCredentialPurgeRepository,
+    AccountRecordPurgeRepository,
+    AccountDeletionFinalizationRepository {
+  cleanup(now: number): Promise<CleanupReport>;
   rateLimit(
     key: string,
     limit: number,
@@ -232,11 +356,44 @@ export interface AuthStore {
     type: string,
     data: Record<string, unknown>,
     now: number,
+    attribution?: AuditEventAttribution,
   ): Promise<void>;
 
+  /** Atomically resolves one exact email mapping; repeats preserve identity and creation metadata. */
   findOrCreateUser(identity: UpstreamIdentity, now: number): Promise<LocalUser>;
+  getUserByEmail(email: string): Promise<LocalUser | null>;
   getUser(id: string): Promise<LocalUser | null>;
   countUsers(): Promise<number>;
+
+  startAccountDeletionJob(
+    subject: string,
+    now: number,
+  ): Promise<AccountDeletionJobStartResult>;
+  getAccountDeletionJob(subject: string): Promise<AccountDeletionJob | null>;
+  claimAccountDeletionJobs(
+    now: number,
+    leaseSeconds: number,
+    limit: number,
+  ): Promise<AccountDeletionJob[]>;
+  retryAccountDeletionJob(
+    subject: string,
+    attempt: number,
+    now: number,
+    retryAt: number,
+  ): Promise<boolean>;
+  stageAccountFilePurgeBatch(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountFilePurgeStageResult>;
+  stageExpiredAccountFileWriteFences(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<number>;
+  hasStorageFilesForSubject(subject: string): Promise<boolean>;
 
   createClient(
     input: ClientRegistrationInput,
@@ -246,6 +403,7 @@ export interface AuthStore {
   listClients(): Promise<ClientView[]>;
   getClient(id: string): Promise<ClientView | null>;
   getClientSecretHash(id: string): Promise<string | null>;
+  hasServicePrincipal(id: string): Promise<boolean>;
   hasActiveClientOrigin(origin: string): Promise<boolean>;
   setClientDisabled(id: string, disabledAt: number | null): Promise<void>;
   rotateClientSecret(
@@ -254,6 +412,17 @@ export interface AuthStore {
     now: number,
   ): Promise<void>;
   revokeClientGrants(clientId: string, now: number): Promise<void>;
+  claimAdminOperationSubmission(
+    tokenHash: string,
+    userId: string,
+    now: number,
+    expiresAt: number,
+  ): Promise<boolean>;
+  consumeAdminOperationResult(
+    tokenHash: string,
+    userId: string,
+    now: number,
+  ): Promise<boolean>;
 
   createDeviceGrant(grant: DeviceGrant): Promise<void>;
   getDeviceGrantByDeviceHash(hash: string): Promise<DeviceGrant | null>;
@@ -311,6 +480,7 @@ export interface AuthStore {
 
   revokeAccessTokenJti(
     jti: string,
+    subject: string,
     expiresAt: number,
     now: number,
   ): Promise<void>;
@@ -358,6 +528,33 @@ export interface AuthStore {
     clientId: string,
     key: string,
     expectedR2Key: string,
+  ): Promise<boolean>;
+  recordStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean>;
+  reserveStorageFileWriteFence(fence: StorageFileWriteFence): Promise<boolean>;
+  completeStorageFileWriteFence(fence: StorageFileWriteFence): Promise<boolean>;
+  convertStorageFileWriteFenceToRepair(
+    fence: StorageFileWriteFence,
+    now: number,
+  ): Promise<boolean>;
+  listStorageFileOrphanRepairs(
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]>;
+  listStorageFileOrphanRepairsForSubject(
+    subject: string,
+    limit: number,
+  ): Promise<StorageFileOrphanRepair[]>;
+  hasStorageFileOrphanRepairsForSubject(subject: string): Promise<boolean>;
+  classifyStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<StorageFileOrphanRepairDisposition>;
+  completeStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+  ): Promise<boolean>;
+  deferStorageFileOrphanRepair(
+    repair: StorageFileOrphanRepair,
+    now: number,
   ): Promise<boolean>;
   getStorageUsage(userId: string, clientId: string): Promise<StorageUsage>;
 }

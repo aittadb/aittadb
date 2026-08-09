@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 
 import { D1AuthStore } from "../../src/store/d1";
+import type { AuthorizationRequest } from "../../src/types";
 
 interface Call {
   query: string;
@@ -87,6 +90,155 @@ test("D1 one-time transitions fail closed unless exactly one row changes", async
     "https://client/cb",
     10,
   ]);
+});
+
+test("D1 authorization requests have one terminal winner against migrated SQL", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    for (const name of [
+      "0001_initial.sql",
+      "0002_browser_session_client.sql",
+      "0003_browser_session_openid.sql",
+      "0004_security_indexes.sql",
+      "0005_admin_submission_results.sql",
+    ]) {
+      sqlite.exec(
+        await readFile(
+          new URL(`../../db/migrations/${name}`, import.meta.url),
+          "utf8",
+        ),
+      );
+    }
+    const store = new D1AuthStore(sqliteD1(sqlite));
+    const sequential = authorizationRequest("sequential");
+    await store.createAuthorizationRequest(sequential);
+    assert.equal(
+      await store.transitionAuthorizationRequest(
+        sequential.id,
+        "approved",
+        "user-approved",
+        10,
+      ),
+      true,
+    );
+    assert.equal(
+      await store.transitionAuthorizationRequest(
+        sequential.id,
+        "denied",
+        null,
+        10,
+      ),
+      false,
+    );
+    assert.deepEqual(await store.getAuthorizationRequest(sequential.id), {
+      ...sequential,
+      status: "approved",
+      userId: "user-approved",
+    });
+
+    const concurrent = authorizationRequest("concurrent");
+    await store.createAuthorizationRequest(concurrent);
+    const results = await Promise.all([
+      store.transitionAuthorizationRequest(
+        concurrent.id,
+        "approved",
+        "user-concurrent",
+        10,
+      ),
+      store.transitionAuthorizationRequest(concurrent.id, "denied", null, 10),
+    ]);
+    assert.equal(results.filter(Boolean).length, 1);
+    const stored = await store.getAuthorizationRequest(concurrent.id);
+    assert.ok(stored);
+    assert.notEqual(stored.status, "pending");
+    assert.equal(
+      await store.transitionAuthorizationRequest(
+        concurrent.id,
+        "approved",
+        "different-user",
+        10,
+      ),
+      false,
+    );
+    assert.equal(
+      await store.transitionAuthorizationRequest(
+        concurrent.id,
+        "denied",
+        null,
+        10,
+      ),
+      false,
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("D1 admin submissions gate mutation and result replay atomically", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    for (const name of [
+      "0001_initial.sql",
+      "0002_browser_session_client.sql",
+      "0003_browser_session_openid.sql",
+      "0004_security_indexes.sql",
+      "0005_admin_submission_results.sql",
+    ]) {
+      sqlite.exec(
+        await readFile(
+          new URL(`../../db/migrations/${name}`, import.meta.url),
+          "utf8",
+        ),
+      );
+    }
+    sqlite.exec(
+      "INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES ('user', 'admin@example.test', 'Admin', 1, 1)",
+    );
+    const store = new D1AuthStore(sqliteD1(sqlite));
+    const claims = await Promise.all([
+      store.claimAdminOperationSubmission("submission-hash", "user", 10, 20),
+      store.claimAdminOperationSubmission("submission-hash", "user", 10, 20),
+    ]);
+    assert.equal(claims.filter(Boolean).length, 1);
+    assert.equal(
+      await store.consumeAdminOperationResult(
+        "submission-hash",
+        "different-user",
+        11,
+      ),
+      false,
+    );
+    const resultReads = await Promise.all([
+      store.consumeAdminOperationResult("submission-hash", "user", 11),
+      store.consumeAdminOperationResult("submission-hash", "user", 11),
+    ]);
+    assert.equal(resultReads.filter(Boolean).length, 1);
+    assert.deepEqual(
+      {
+        ...sqlite
+          .prepare(
+            "SELECT token_hash, user_id, expires_at, result_consumed_at FROM admin_operation_submissions",
+          )
+          .get(),
+      },
+      {
+        token_hash: "submission-hash",
+        user_id: "user",
+        expires_at: 20,
+        result_consumed_at: 11,
+      },
+    );
+    const columns = sqlite
+      .prepare("PRAGMA table_info(admin_operation_submissions)")
+      .all()
+      .map((column) => String(column.name));
+    assert.equal(
+      columns.some((name) => /secret|plaintext|value/.test(name)),
+      false,
+    );
+  } finally {
+    sqlite.close();
+  }
 });
 
 test("D1 device compare-and-set returns only the row changed by the winner", async () => {
@@ -212,3 +364,52 @@ test("D1 refresh reuse races revoke the bound token family", async () => {
     ),
   );
 });
+
+function authorizationRequest(id: string): AuthorizationRequest {
+  return {
+    id,
+    clientId: "client",
+    redirectUri: "https://client.example.test/callback",
+    scope: "openid",
+    state: "state",
+    nonce: null,
+    codeChallenge: "A".repeat(43),
+    createdAt: 1,
+    expiresAt: 20,
+    userId: null,
+    status: "pending",
+  };
+}
+
+function sqliteD1(database: DatabaseSync): D1Database {
+  return {
+    prepare(query: string): D1PreparedStatement {
+      let values: SQLInputValue[] = [];
+      const statement: D1PreparedStatement = {
+        bind(...nextValues: unknown[]): D1PreparedStatement {
+          values = nextValues as SQLInputValue[];
+          return statement;
+        },
+        async first<T>(): Promise<T | null> {
+          return (
+            (database.prepare(query).get(...values) as T | undefined) ?? null
+          );
+        },
+        async all<T>(): Promise<D1Result<T>> {
+          return {
+            success: true,
+            results: database.prepare(query).all(...values) as T[],
+          };
+        },
+        async run<T>(): Promise<D1Result<T>> {
+          const result = database.prepare(query).run(...values);
+          return {
+            success: true,
+            meta: { changes: Number(result.changes) },
+          };
+        },
+      };
+      return statement;
+    },
+  };
+}

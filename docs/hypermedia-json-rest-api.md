@@ -26,6 +26,8 @@ returns the human interface for the same record and currently available operatio
 
 `Accept` selects the response representation. `Content-Type` identifies a submitted request body's format, such as JSON, form data, or file bytes. AittaDB never selects HTML by inspecting `User-Agent` or guessing whether the caller is a browser.
 
+When a client gives no `Accept` preference, HTTP permits the server to choose any available representation. AittaDB normally uses compatible JSON as that fallback. The public root is the deliberate exception: a missing field or a wildcard that is otherwise indifferent between supported representations selects HTML so link-preview clients receive the root's Open Graph metadata. Explicit `application/json` and versioned vendor requests still select JSON, and explicit exclusions remain authoritative. The public `robots.txt` permits crawling of this entry surface.
+
 The HTML and JSON do not need identical layout. They expose equivalent business state and capabilities:
 
 | Application concept  | JSON                          | HTML                                       |
@@ -86,13 +88,13 @@ AittaDB application resources use this shape during the `0.1` preview:
 
 `data` is current resource state. `links` identify the resource and its relationships. Every link has one or more stable semantic `rel` values and a server-supplied `href`. `actions` describe currently available state transitions, including a stable semantic name, human title, HTTP method, request media type, target, and typed fields.
 
-Fields may state where a value belongs (`path`, `query`, `header`, or `body`), whether it is required or sensitive, its current/default value, valid choices, conditional availability, and length, numeric, or byte constraints. Templated action targets use RFC 6570-style `{field}` variables and declare the matching path fields. Clients substitute only variables advertised by the action; they do not infer other URL patterns.
+Fields may state where a value belongs (`path`, `query`, `header`, or `body`), whether it is required or sensitive, its current/default value, valid choices, conditional availability, and length, numeric, or byte constraints. When a field has both `required: true` and `visible_when`, it is required only while that condition matches; an inactive field is omitted or disabled and is not required. Templated action targets use RFC 6570-style `{field}` variables and declare the matching path fields. Clients substitute only variables advertised by the action; they do not infer other URL patterns.
 
 Link relations and action names are API semantics. A generic hypermedia client needs to understand only this document format to display and invoke controls. A domain-aware client may attach richer behavior to stable names such as `open-record`, `replace-record`, or `delete-file`.
 
 ## State and Authorization
 
-Controls describe what the current caller can do now. A read-only storage token receives read controls but no write or delete action. A non-admin session does not receive client-administration controls. An operation that no longer applies after a state transition disappears from the next representation.
+Controls describe what the current caller can do now. A read-only storage token receives read controls but no write or delete action. A non-admin session does not receive client-administration controls. An active eligible non-administrator session receives `request-account-deletion` with the same CSRF, encrypted confirmation, and explicit-phrase fields as HTML; administrator and inactive sessions receive no such action. A first accepted deletion returns only coarse `accepted: true` plus `read-account-deletion-status` and issues the separate protected status cookie. The status resource returns only pending, running, retry, or completed with exactly one action: same-URI refresh for pending/running, same-URI recovery for retry, or Sites sign-out for completed. HTML exposes the same one transition and never links completed status to an identity-creating route. No representation advertises deployment-wide deletion or a special re-registration operation; after clean completion, ordinary session resolution may separately create a fresh local account. An operation that no longer applies after a state transition disappears from the next representation.
 
 Omission is not the only authorization control: the server always enforces identity, scopes, ownership, state, CSRF, origin, and input rules when a request arrives. Hypermedia prevents clients from being invited to perform unavailable work; it never replaces server-side authorization.
 
@@ -121,6 +123,8 @@ OpenAPI and hypermedia are complementary.
 OpenAPI statically describes every operation a version can support: paths, methods, schemas, authentication schemes, and possible responses. It is useful for reference, validation, and generated tooling.
 
 Hypermedia describes the current resource and what this caller can do next. A particular response supplies the actual target and only the controls valid in that context. A client can use AittaDB from its entry resource without first loading OpenAPI.
+
+Collection clients follow the concrete `next` link returned by the current representation rather than constructing cursor URLs. For an unchanged record or file collection, this produces bounded forward traversal in which every authorized logical item appears exactly once; HTML exposes the same transition as its next-page link. File collection controls expose logical metadata and item URLs, never physical object-store keys.
 
 ## Protocol Representations
 

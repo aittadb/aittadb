@@ -5,6 +5,12 @@ import type {
   DeviceGrantStatus,
   LocalUser,
 } from "./types";
+import type { PrivacyPolicyData } from "./privacy";
+import {
+  adminClientControls,
+  type AdminClientControl,
+  type AdminMutationResult,
+} from "./admin-clients";
 
 export interface PageAction {
   href: string;
@@ -51,30 +57,89 @@ export function serviceHomePage(
       credentialsForwarded: boolean;
     };
     sessionIssuer: string;
+    features: {
+      records: boolean;
+      files: boolean;
+      statistics: boolean;
+      oauthApps: boolean;
+    };
     capabilities: readonly string[];
     plannedCapabilities: readonly string[];
   },
   options: { showAdmin?: boolean; signedIn?: boolean } = {},
 ): string {
+  const privateResources =
+    metadata.features.records && metadata.features.files
+      ? "records and files"
+      : metadata.features.records
+        ? "records"
+        : metadata.features.files
+          ? "files"
+          : "identity details";
   const sessionOperationCopy = options.signedIn
-    ? "View your AittaDB identity and open your private records and files."
-    : "Sign in to view your AittaDB identity and reach your private records and files.";
+    ? `View your AittaDB identity and open your private ${privateResources}.`
+    : `Sign in to view your AittaDB identity and reach your private ${privateResources}.`;
+  const recordOperation = metadata.features.records
+    ? `<a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a>`
+    : "";
+  const fileOperation = metadata.features.files
+    ? `<a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a>`
+    : "";
+  const featureStatus = [
+    ["Records", metadata.features.records],
+    ["Files", metadata.features.files],
+    ["Statistics", metadata.features.statistics],
+    ["OAuth Apps", metadata.features.oauthApps],
+  ]
+    .map(([name, enabled]) => `${name} ${enabled ? "on" : "off"}`)
+    .join(" · ");
+  const statisticsOperation = metadata.features.statistics
+    ? '<a href="/statistics"><strong>Service statistics</strong><span>View the public aggregate identity count without exposing personal information.</span></a>'
+    : "";
+  const socialDescription =
+    metadata.features.records && metadata.features.files
+      ? "A hosted application backend with ChatGPT sign-in, AittaDB-issued sessions, isolated JSON records, and file storage."
+      : metadata.features.records
+        ? "A hosted application backend with ChatGPT sign-in, AittaDB-issued sessions, and isolated JSON records."
+        : metadata.features.files
+          ? "A hosted application backend with ChatGPT sign-in, AittaDB-issued sessions, and isolated file storage."
+          : "A hosted application backend with ChatGPT sign-in and AittaDB-issued sessions.";
 
   return pageDocument({
     title: metadata.service,
     eyebrow: "Hosted application backend",
     heading: metadata.service,
-    summary: metadata.description,
+    summary:
+      metadata.features.records && metadata.features.files
+        ? "Identity, sessions, JSON data, and files for connected applications."
+        : metadata.features.records
+          ? "Identity, sessions, and JSON data for connected applications."
+          : metadata.features.files
+            ? "Identity, sessions, and files for connected applications."
+            : "Identity and sessions for connected applications.",
     visualEyebrow: "ChatGPT sign-in boundary",
-    visualHeading: "One hosted backend for sign-in, data, and files.",
+    visualHeading:
+      metadata.features.records && metadata.features.files
+        ? "One hosted backend for sign-in, data, and files."
+        : metadata.features.records
+          ? "One hosted backend for sign-in and data."
+          : metadata.features.files
+            ? "One hosted backend for sign-in and files."
+            : "One hosted backend for application identity.",
     visualSummary:
-      "Third-party apps use AittaDB for identity, sessions, isolated JSON records, and file storage while ChatGPT credentials stay inside Sites.",
+      metadata.features.records && metadata.features.files
+        ? "Third-party apps use AittaDB for identity, sessions, isolated JSON records, and file storage while ChatGPT credentials stay inside Sites."
+        : metadata.features.records
+          ? "Third-party apps use AittaDB for identity, sessions, and isolated JSON records while ChatGPT credentials stay inside Sites."
+          : metadata.features.files
+            ? "Third-party apps use AittaDB for identity, sessions, and isolated file storage while ChatGPT credentials stay inside Sites."
+            : "Third-party apps use AittaDB for identity and sessions while ChatGPT credentials stay inside Sites.",
     social: {
-      description: metadata.description,
+      description: socialDescription,
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Persistent storage</span><strong>D1 records + R2 files</strong></div></section><p class="note"><strong>This public AittaDB instance runs on OpenAI-hosted ChatGPT Sites.</strong> AittaDB is reusable software: developers can deploy an independent instance in their own ChatGPT Sites project to provide authentication, JSON records, and file storage to their applications. Each instance creates its own identities and credentials, never forwards ChatGPT credentials, and remains independent from OpenAI. Persistent events are planned. <a class="note-cta" href="https://github.com/aittadb/aittadb#built-for-chatgpt-sites">How AittaDB works</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a><a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a><a href="/statistics"><strong>Service statistics</strong><span>View the public aggregate identity count without exposing personal information.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> ChatGPT provides browser sign-in inside ChatGPT Sites; AittaDB creates a separate local identity, issues its own credentials, and never receives or forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a>${recordOperation}${fileOperation}${statisticsOperation}<a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
       options.signedIn
         ? {
@@ -93,21 +158,56 @@ export function serviceHomePage(
   });
 }
 
-export function sessionPage(user: LocalUser, showAdmin = false): string {
+export function sessionPage(
+  user: LocalUser,
+  showAdmin = false,
+  recordsEnabled = true,
+  filesEnabled = true,
+  userInfoEnabled = true,
+  accountDeletion?: {
+    csrf: string;
+    confirmationToken: string;
+    confirmationPhrase: string;
+  },
+): string {
+  const recordOperation = recordsEnabled
+    ? `<a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a>`
+    : "";
+  const fileOperation = filesEnabled
+    ? `<a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a>`
+    : "";
+  const userInfoOperation = userInfoEnabled
+    ? `<a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>`
+    : "";
+  const accountDeletionOperation = accountDeletion
+    ? `<section aria-labelledby="account-deletion-heading"><h2 id="account-deletion-heading">Delete account</h2><p class="note">This permanently starts removal of this local AittaDB account, its credentials, records, and files. Access is blocked as soon as deletion starts.</p><form method="post" action="/account/deletion" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(accountDeletion.csrf)}"><input type="hidden" name="confirmation_token" value="${escapeHtml(accountDeletion.confirmationToken)}"><label for="account-deletion-confirmation">Type <code>${escapeHtml(accountDeletion.confirmationPhrase)}</code> to confirm</label><input id="account-deletion-confirmation" name="confirmation" autocomplete="off" minlength="${accountDeletion.confirmationPhrase.length}" maxlength="${accountDeletion.confirmationPhrase.length}" pattern="${escapeHtml(accountDeletion.confirmationPhrase)}" required><div class="actions"><button class="danger" type="submit">Delete my account</button></div></form></section>`
+    : "";
   return pageDocument({
     title: "My AittaDB session",
     eyebrow: "Authenticated identity",
     heading: "My AittaDB session",
-    summary:
-      "Use the AittaDB identity created from your ChatGPT sign-in to access private data or approve a registered application's request.",
+    summary: userInfoEnabled
+      ? "Use the AittaDB identity created from your ChatGPT sign-in to access private data or approve a registered application's request."
+      : "Use the AittaDB identity created from your ChatGPT sign-in to access private data in this deployment.",
     visualEyebrow: "Identity boundary",
-    visualHeading: "Your AittaDB identity, records, and files.",
+    visualHeading:
+      recordsEnabled && filesEnabled
+        ? "Your AittaDB identity, records, and files."
+        : recordsEnabled
+          ? "Your AittaDB identity and records."
+          : filesEnabled
+            ? "Your AittaDB identity and files."
+            : "Your AittaDB identity and sessions.",
     visualSummary:
       "ChatGPT establishes the upstream sign-in. AittaDB uses its own immutable user ID for sessions and persistent storage.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace and identity claims. Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes.</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid"><a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a><a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace${userInfoEnabled ? " and identity claims" : ""}.${userInfoEnabled ? " Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes." : ""}</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}${fileOperation}${userInfoOperation}${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>${accountDeletionOperation}`,
     actions: [
-      { href: "/storage/records", label: "Open my records" },
-      { href: "/storage/files", label: "Open my files", secondary: true },
+      ...(recordsEnabled
+        ? [{ href: "/storage/records", label: "Open my records" }]
+        : []),
+      ...(filesEnabled
+        ? [{ href: "/storage/files", label: "Open my files", secondary: true }]
+        : []),
       {
         href: "/signout-with-chatgpt?return_to=%2F",
         label: "Sign out",
@@ -115,6 +215,60 @@ export function sessionPage(user: LocalUser, showAdmin = false): string {
       },
       { href: "/", label: "Service home", secondary: true },
     ],
+  });
+}
+
+export function accountDeletionAcceptedPage(): string {
+  return pageDocument({
+    title: "Account deletion accepted",
+    eyebrow: "Account deletion",
+    heading: "Deletion has started",
+    summary:
+      "The request was accepted for the signed-in local AittaDB account.",
+    visualEyebrow: "Bounded deletion",
+    visualHeading: "Access stops before removal proceeds.",
+    visualSummary:
+      "AittaDB continues the deletion in finite background passes without exposing account or storage details.",
+    tone: "warning",
+    status: 202,
+    statusLabel: "Accepted",
+    body: `<p class="note">The account can no longer use AittaDB credentials, sessions, records, or files while deletion proceeds. This response confirms acceptance, not completion.</p>`,
+    actions: [{ href: "/account/deletion", label: "View deletion status" }],
+  });
+}
+
+export function accountDeletionStatusPage(
+  status: "pending" | "running" | "retry" | "completed",
+): string {
+  const completed = status === "completed";
+  const retry = status === "retry";
+  const action = completed
+    ? {
+        href: "/signout-with-chatgpt?return_to=%2F",
+        label: "Sign out",
+      }
+    : retry
+      ? { href: "/account/deletion", label: "Retry deletion" }
+      : { href: "/account/deletion", label: "Refresh status" };
+  return pageDocument({
+    title: "Account deletion status",
+    eyebrow: "Account deletion",
+    heading: completed ? "Deletion completed" : "Deletion in progress",
+    summary: completed
+      ? "The local AittaDB account deletion is complete."
+      : "AittaDB is continuing the accepted deletion in bounded background passes.",
+    visualEyebrow: "Deletion status",
+    visualHeading: completed
+      ? "The deletion is complete."
+      : "Access remains blocked while deletion proceeds.",
+    visualSummary: retry
+      ? "The next bounded pass can safely resume the deletion."
+      : completed
+        ? "This status remains available only through the protected deletion handle."
+        : "Refresh this resource to read the latest coarse state.",
+    ...(completed ? {} : { tone: "warning" as const }),
+    body: `<section class="info-grid" aria-label="Account deletion status"><div><span>Status</span><strong>${escapeHtml(status)}</strong></div></section>`,
+    actions: [action],
   });
 }
 
@@ -158,9 +312,65 @@ export function statisticsPage(identityCount: number): string {
     visualHeading: "One count, no personal details.",
     visualSummary:
       "This aggregate reports how many durable AittaDB identities exist without exposing names, email addresses, subjects, activity, or application data.",
-    body: `<section class="info-grid" aria-label="AittaDB statistics"><div><span>Local identities</span><strong>${escapeHtml(String(identityCount))}</strong></div><div><span>Privacy</span><strong>Aggregate count only</strong></div></section><p class="note">The count belongs to this independent AittaDB deployment. It does not describe ChatGPT or OpenAI users and contains no personal information.</p>`,
+    body: `<section class="info-grid" aria-label="AittaDB statistics"><div><span>Local identities</span><strong>${escapeHtml(String(identityCount))}</strong></div><div><span>Privacy</span><strong>Aggregate count only</strong></div></section><p class="note">The count belongs to this AittaDB deployment. It does not describe ChatGPT or OpenAI users and contains no personal information.</p>`,
     actions: [
       { href: "/", label: "Service home" },
+      { href: "/docs", label: "API docs", secondary: true },
+    ],
+  });
+}
+
+export function privacyPolicyPage(policy: PrivacyPolicyData): string {
+  const controller = policy.controller;
+  const contactRows = [
+    ["Controller", controller.name],
+    ...(controller.identifier
+      ? [["Controller identifier", controller.identifier]]
+      : []),
+    ...(controller.contact_name
+      ? [["Privacy contact", controller.contact_name]]
+      : []),
+    [
+      "Email",
+      `<a href="mailto:${escapeHtml(controller.email)}">${escapeHtml(controller.email)}</a>`,
+    ],
+    ...(controller.phone ? [["Phone", controller.phone]] : []),
+    ...(controller.postal_address
+      ? [["Postal address", controller.postal_address]]
+      : []),
+  ]
+    .map(
+      ([label, value]) =>
+        `<div><span>${escapeHtml(label)}</span><strong>${label === "Email" ? value : escapeHtml(value)}</strong></div>`,
+    )
+    .join("");
+  const sections = policy.sections
+    .map(
+      (section) =>
+        `<section class="policy-section" aria-labelledby="privacy-${escapeHtml(section.id)}"><h2 id="privacy-${escapeHtml(section.id)}">${escapeHtml(section.title)}</h2>${section.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}${section.items ? `<ul>${section.items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}</section>`,
+    )
+    .join("");
+  const references = policy.references
+    .map(
+      (reference) =>
+        `<li><a href="${escapeHtml(reference.href)}" rel="noreferrer">${escapeHtml(reference.title)}</a></li>`,
+    )
+    .join("");
+
+  return pageDocument({
+    title: "AittaDB Privacy Policy",
+    eyebrow: "Privacy",
+    heading: "Privacy Policy",
+    summary:
+      "How this AittaDB deployment handles sign-in identity, application data, files, authorization records, and security metadata.",
+    visualEyebrow: "Deployment responsibility",
+    visualHeading: "Clear boundaries for identity and stored data.",
+    visualSummary:
+      "The operator named here controls this deployment's Hosted Data. Other AittaDB deployments and client applications have their own privacy responsibilities.",
+    body: `<section class="info-grid" aria-label="Privacy controller and contact">${contactRows}</section><p class="note">This policy describes the implemented AittaDB core and must be reviewed by each deployment operator against its applications, agreements, providers, users, and applicable law.</p>${sections}<section class="policy-section" aria-labelledby="privacy-references"><h2 id="privacy-references">Related information</h2><ul class="policy-reference-list">${references}</ul></section>`,
+    actions: [
+      { href: `mailto:${controller.email}`, label: "Contact the operator" },
+      { href: "/", label: "Service home", secondary: true },
       { href: "/docs", label: "API docs", secondary: true },
     ],
   });
@@ -249,12 +459,17 @@ export function consentPage(
 export function adminClientsPage(
   clients: readonly ClientView[],
   csrf: string,
-  secret: string | null,
+  submissionToken: string,
+  result: AdminMutationResult | null,
 ): string {
   const rows = clients
     .map((client) => {
       const status = client.disabledAt ? "disabled" : "active";
-      return `<tr><td><code>${escapeHtml(client.id)}</code></td><td>${escapeHtml(client.name)}</td><td>${escapeHtml(client.type)}</td><td>${escapeHtml(status)}</td><td><code>${escapeHtml(client.scopes.join(" "))}</code></td><td class="table-actions">${adminAction(client.id, csrf, client.disabledAt ? "enable" : "disable", client.disabledAt ? "Enable" : "Disable")}${client.type === "confidential" ? adminAction(client.id, csrf, "rotate_secret", "Rotate secret") : ""}${adminAction(client.id, csrf, "revoke_grants", "Revoke grants")}</td></tr>`;
+      return `<tr><td><code>${escapeHtml(client.id)}</code></td><td>${escapeHtml(client.name)}</td><td>${escapeHtml(client.type)}</td><td>${escapeHtml(status)}</td><td><code>${escapeHtml(client.scopes.join(" "))}</code></td><td class="table-actions">${adminClientControls(
+        client,
+      )
+        .map((control) => adminAction(client, csrf, submissionToken, control))
+        .join("")}</td></tr>`;
     })
     .join("");
   return pageDocument({
@@ -262,13 +477,13 @@ export function adminClientsPage(
     eyebrow: "Administration",
     heading: "Client administration",
     summary:
-      "Register OAuth clients and manage grants. New confidential client secrets are shown once.",
+      "Register OAuth clients and manage grants. New confidential and service client secrets are shown once.",
     visualEyebrow: "Client control",
     visualHeading: "Trust begins with narrow permissions.",
     visualSummary:
       "Redirects, scopes, origins, secrets, and active grants remain bounded per registered client.",
-    tone: secret ? "warning" : "default",
-    body: `${secret ? alertMessage(`New client secret, shown once: ${secret}`) : ""}<form method="post" action="/admin/clients" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><label for="name">Client name</label><input id="name" name="name" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option></select><label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" required></textarea><label for="scopes">Allowed scopes</label><input id="scopes" name="scopes" value="openid email profile offline_access storage.read storage.write storage.delete"><label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea><div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
+    tone: result?.secret ? "warning" : result ? "success" : "default",
+    body: `${adminResultNotice(result)}<form method="post" action="/admin/clients" class="stacked-form" data-conditional-form><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="submission_token" value="${escapeHtml(submissionToken)}"><label for="name">Client name</label><input id="name" name="name" maxlength="120" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option><option value="service">service</option></select>${conditionalField("type:public,confidential", `<label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" data-required-when-visible="true"></textarea><label for="interactive_scopes">Allowed scopes</label><input id="interactive_scopes" name="interactive_scopes" value="openid email profile offline_access storage.read storage.write storage.delete">`)}${conditionalField("type:service", `<label for="service_scopes">Allowed storage scopes</label><input id="service_scopes" name="service_scopes" value="storage.read storage.write storage.delete"><p class="note">Service clients use no redirect URI or browser origin and receive no user identity claims.</p>`)}${conditionalField("type:public,confidential", `<label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea>`)}<div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
   });
 }
 
@@ -376,10 +591,13 @@ export function pageDocument(options: PageOptions): string {
       ? `<h1 class="brand-heading" aria-label="AittaDB">${brandWordmark()}</h1>`
       : `<h1>${escapeHtml(options.heading)}</h1>`;
   const social = options.social
-    ? `<meta name="description" content="${escapeHtml(options.social.description)}"><link rel="canonical" href="${escapeHtml(options.social.url)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(options.title)}"><meta property="og:description" content="${escapeHtml(options.social.description)}"><meta property="og:url" content="${escapeHtml(options.social.url)}"><meta property="og:image" content="${escapeHtml(options.social.imageUrl)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="AittaDB: ChatGPT sign-in, app-ready identity and data."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(options.title)}"><meta name="twitter:description" content="${escapeHtml(options.social.description)}"><meta name="twitter:image" content="${escapeHtml(options.social.imageUrl)}">`
+    ? `<meta name="description" content="${escapeHtml(options.social.description)}"><link rel="canonical" href="${escapeHtml(options.social.url)}"><meta property="og:type" content="website"><meta property="og:site_name" content="AittaDB"><meta property="og:title" content="${escapeHtml(options.title)}"><meta property="og:description" content="${escapeHtml(options.social.description)}"><meta property="og:url" content="${escapeHtml(options.social.url)}"><meta property="og:image" content="${escapeHtml(options.social.imageUrl)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="AittaDB: ChatGPT sign-in, app-ready identity and data."><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${escapeHtml(options.title)}"><meta name="twitter:description" content="${escapeHtml(options.social.description)}"><meta name="twitter:image" content="${escapeHtml(options.social.imageUrl)}">`
     : "";
   const layout = options.layout ?? "default";
-  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner"><a class="brand-lockup" href="/" aria-label="AittaDB service home"><img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}</a><div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application backend")}</p><h2>${escapeHtml(options.visualHeading ?? "Hosted identity, data, and files for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate user, its own credentials, and isolated persistent storage without forwarding ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Identity + sessions</strong></div><div><span>App data</span><strong>JSON + files</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">Identity / Data / Files / Events</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div><a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a><span>Source-available under FSL-1.1-MIT</span></div><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></footer></section></main>${options.scripts ?? ""}</body></html>`;
+  const visualBrandContent = `<img class="brand-mark" src="/aittadb-mark.svg" width="44" height="44" alt="">${brandWordmark()}`;
+  const visualBrand = `<a class="brand-lockup" href="/" aria-label="AittaDB service home">${visualBrandContent}</a>`;
+  const footerBrand = `<a class="footer-brand" href="/" aria-label="AittaDB service home">${brandWordmark()}</a>`;
+  return `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0B234A"><title>${escapeHtml(options.title)}</title>${social}<link rel="icon" href="/aittadb-mark.svg"><link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/aittadb-boundary.jpg" as="image"><link rel="stylesheet" href="/auth-ui.css">${options.head ?? ""}</head><body class="aittadb-page"><main class="aittadb-shell tone-${tone} layout-${layout}"><aside class="visual-panel" aria-label="AittaDB sign-in and application-data boundary"><img class="visual-image" src="/aittadb-boundary.jpg" width="1254" height="1254" alt="" aria-hidden="true" fetchpriority="high" decoding="async"><div class="visual-inner">${visualBrand}<div class="visual-copy"><p class="visual-eyebrow">${escapeHtml(options.visualEyebrow ?? "Application backend")}</p><h2>${escapeHtml(options.visualHeading ?? "Hosted identity, data, and files for your app.")}</h2><p>${escapeHtml(options.visualSummary ?? "AittaDB creates a separate user, its own credentials, and isolated persistent storage without forwarding ChatGPT credentials.")}</p></div><div class="visual-legend" aria-label="ChatGPT sign-in to AittaDB application backend"><div><span>Upstream</span><strong>ChatGPT sign-in</strong></div><div><span>AittaDB</span><strong>Identity + sessions</strong></div><div><span>App data</span><strong>JSON + files</strong></div></div></div></aside><section class="content-panel"><header class="content-topline"><span class="authority-status"><span aria-hidden="true"></span>${toneLabel}</span><span class="protocol-label">Identity / Data / Files / Events</span></header><div class="content-frame"><p class="eyebrow">${escapeHtml(options.eyebrow ?? "AittaDB")}</p>${heading}${options.summary ? `<p class="summary">${escapeHtml(options.summary)}</p>` : ""}${options.body}${actions}</div><footer class="page-footer"><div>${footerBrand}<span>Source-available under FSL-1.1-MIT</span></div><nav class="footer-links" aria-label="Project information"><a href="/privacy">Privacy</a><a class="repo-link" href="https://github.com/aittadb/aittadb" rel="noreferrer">View source on GitHub</a></nav></footer></section></main>${options.scripts ?? ""}</body></html>`;
 }
 
 function brandWordmark(): string {
@@ -387,12 +605,32 @@ function brandWordmark(): string {
 }
 
 function adminAction(
-  clientId: string,
+  client: ClientView,
   csrf: string,
-  action: string,
-  label: string,
+  submissionToken: string,
+  control: AdminClientControl,
 ): string {
-  return `<form method="post" action="/admin/clients"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="client_id" value="${escapeHtml(clientId)}"><button class="secondary compact" name="action" value="${escapeHtml(action)}" type="submit">${escapeHtml(label)}</button></form>`;
+  const label = `${control.label} ${client.name}`;
+  return `<form method="post" action="/admin/clients" aria-label="${escapeHtml(label)}"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="submission_token" value="${escapeHtml(submissionToken)}"><input type="hidden" name="client_id" value="${escapeHtml(client.id)}"><button class="secondary compact" name="action" value="${escapeHtml(control.operation)}" type="submit">${escapeHtml(control.label)}</button></form>`;
+}
+
+function adminResultNotice(result: AdminMutationResult | null): string {
+  if (!result) return "";
+  const client = `<code>${escapeHtml(result.clientId)}</code>`;
+  if (result.secret) {
+    return `<p class="notice" role="status">New secret for client ${client}, shown once: <code>${escapeHtml(result.secret)}</code></p>`;
+  }
+  const message =
+    result.operation === "create"
+      ? `Client ${client} created.`
+      : result.operation === "enable"
+        ? `Client ${client} enabled.`
+        : result.operation === "disable"
+          ? `Client ${client} disabled.`
+          : result.operation === "revoke_grants"
+            ? `Active grants for client ${client} revoked.`
+            : `Client ${client} updated.`;
+  return `<p class="notice" role="status">${message}</p>`;
 }
 
 function alertMessage(message: string): string {
@@ -541,6 +779,7 @@ export function authUiCss(): string {
   .operation-grid strong{font-size:.94rem}.operation-grid span{color:#647287;font-size:.82rem;line-height:1.42}
   .resource-address{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 14px;margin:22px 0 30px;padding:16px 0;border-top:1px solid #dbe3eb;border-bottom:1px solid #dbe3eb}.resource-address span{color:#68768a;font-size:.72rem;font-weight:800;text-transform:uppercase}.resource-address code{min-width:0;overflow-wrap:anywhere;color:#183764}
   .storage-state{margin:8px 0 34px}.storage-state>h2,.storage-state-heading h2{margin:0 0 8px;color:#13284b;font-size:1.18rem}.storage-state-heading p,.storage-status p{margin:0;color:#647287}.storage-status{border-left:4px solid var(--accent);padding:14px 16px;background:#eef9fa;border-radius:6px}.empty-state{margin:10px 0;padding:20px;border:1px dashed #b9c5d2;border-radius:6px;background:#f7f9fb;color:#5e6c80}.record-value{white-space:pre-wrap;overflow:auto;max-height:420px;border:1px solid #ccd6e0;border-radius:6px;background:#f7f9fb;color:#183764;padding:16px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86rem}.table-value{display:block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.table-link{font-weight:750;text-underline-offset:3px}
+  .policy-section{padding:8px 0 20px;border-top:1px solid #e2e7ed}.policy-section:first-of-type{margin-top:30px}.policy-section h2{margin:18px 0 10px}.policy-section p{margin:10px 0;color:#43536a}.policy-section ul{margin:12px 0;padding-left:22px;color:#43536a}.policy-section li+li{margin-top:8px}.policy-reference-list{list-style:none;padding-left:0!important}.policy-reference-list a{font-weight:720;text-underline-offset:3px}
   .resource-workbench{margin-top:28px}.resource-operation{padding:22px 0;border-top:1px solid #dbe3eb}.resource-operation:last-of-type{border-bottom:1px solid #dbe3eb}.resource-operation>header{display:flex;align-items:flex-start;gap:13px;margin-bottom:8px}.resource-operation>header div{min-width:0}.resource-operation h3{margin:0;color:#13284b;font-size:1rem;letter-spacing:0}.resource-operation header p{margin:5px 0 0;color:#647287;font-size:.88rem}.method-badge{flex:none;min-width:58px;border:1px solid #99cdd1;border-radius:4px;background:#e7f6f7;color:#0b6f77;padding:4px 7px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.72rem;font-weight:800}.method-post{border-color:#9eb6d3;background:#eef4fb;color:#183764}.method-put{border-color:#f0b6aa;background:#fff0ed;color:#a82c1d}.method-delete{border-color:#e8aaa3;background:#fdecea;color:#94231c}
   .resource-operation .stacked-form{margin-top:16px}.resource-operation .stacked-form .actions{margin-top:20px}
   .content-frame>code,.content-frame>p code,.content-frame>section code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
@@ -569,10 +808,10 @@ export function authUiCss(): string {
   .table-wrap th{color:#5e6c80;font-size:.72rem;text-transform:uppercase;letter-spacing:0;background:#f4f7fa}
   .table-actions{display:flex;flex-wrap:wrap;gap:8px}.table-actions form{margin:0}
   .page-footer{width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:22px;padding-top:20px;border-top:1px solid #e2e7ed;color:#667488;font-size:.82rem}
-  .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}
+  .page-footer>div{display:grid;gap:5px}.page-footer>div>span{font-size:.75rem}.footer-brand{width:max-content;text-decoration:none}.footer-brand .brand-wordmark{font-size:.95rem}.footer-links{display:flex;align-items:center;gap:16px}
   .repo-link{flex:none;font-weight:760;text-decoration-thickness:1px;text-underline-offset:3px}
   @media (max-width:860px){body.aittadb-page{padding:14px}.aittadb-shell{grid-template-columns:1fr;min-height:auto}.visual-panel,.visual-inner{min-height:360px}.visual-inner{padding:24px;gap:20px}.visual-image{object-position:center 55%}.visual-copy h2{max-width:16ch;font-size:2.55rem}.visual-copy>p:last-child{max-width:52ch;margin-top:12px}.visual-legend{display:none}.content-panel{padding:24px 28px}.content-frame{padding:38px 0}.content-frame>h1{font-size:2.75rem}}
-  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}.content-frame>h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.resource-address{grid-template-columns:1fr;gap:4px}.resource-address code{margin-bottom:8px}.content-frame>.actions,.stacked-form .actions{display:grid}.content-frame>.actions>.button,.stacked-form button,.table-actions button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.repo-link{align-self:flex-start}}
+  @media (max-width:540px){body.aittadb-page{padding:0}.aittadb-shell{border-width:0;border-radius:0;box-shadow:none}.visual-panel,.visual-inner{min-height:330px}.visual-inner{padding:20px}.brand-lockup{padding:6px 11px 6px 7px}.brand-mark{width:36px;height:36px}.visual-copy h2{font-size:2.15rem}.visual-copy>p:last-child{font-size:.92rem}.content-panel{padding:20px}.content-topline{align-items:flex-start;padding-bottom:18px}.protocol-label{display:none}.content-frame{padding:32px 0}.content-frame>h1{font-size:2.35rem}.info-grid,.operation-grid{grid-template-columns:1fr}.resource-address{grid-template-columns:1fr;gap:4px}.resource-address code{margin-bottom:8px}.content-frame>.actions,.stacked-form .actions{display:grid}.content-frame>.actions>.button,.stacked-form button,.table-actions button{width:100%}.page-footer{align-items:flex-start;flex-direction:column}.footer-links{align-items:flex-start;flex-direction:column;gap:8px}.repo-link{align-self:flex-start}}
   `;
 }
 

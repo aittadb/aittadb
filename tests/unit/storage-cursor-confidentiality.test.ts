@@ -13,25 +13,47 @@ const KEY_DOMAIN = "aittadb-storage-cursor-aes-256-gcm-key-v1\0";
 const AAD_DOMAIN = "aittadb-storage-cursor-aad-v1";
 const IV_BYTES = 12;
 
-test("encrypted storage cursor round-trips without exposing its position", async () => {
-  const config = await testConfig();
-  const position = { updatedAt: 1_777_777_777, key: "private/path/alpha.json" };
+test("encrypted storage cursor omits namespace, position, and signing secrets", async () => {
+  const config = await testConfig("cursor-confidentiality-key");
+  const kind = "records";
+  const userId = "d9a4dc84-2e88-4fe7-bdb1-4da0319557ae";
+  const clientId = "client-confidentiality-evidence-4f24c15d";
+  const position = {
+    updatedAt: 1_777_777_777,
+    key: "private/path/customer-confidentiality-evidence.json",
+  };
   const cursor = await encodeStorageCursor(
-    "records",
-    "user-a",
-    "client-a",
+    kind,
+    userId,
+    clientId,
     position,
     config,
   );
 
   assert.deepEqual(
-    await decodeStorageCursor(cursor, "records", "user-a", "client-a", config),
+    await decodeStorageCursor(cursor, kind, userId, clientId, config),
     position,
   );
-  const tokenBytes = base64UrlDecode(cursor);
-  assert.equal(includesBytes(tokenBytes, position.key), false);
-  assert.equal(includesBytes(tokenBytes, String(position.updatedAt)), false);
-  assert.equal(includesBytes(tokenBytes, "updatedAt"), false);
+  const envelope = base64UrlDecode(cursor);
+  const privateScalar = config.jwtPrivateJwk.d;
+  const publicX = config.jwtPrivateJwk.x;
+  const publicY = config.jwtPrivateJwk.y;
+  assert.ok(privateScalar);
+  assert.ok(publicX);
+  assert.ok(publicY);
+  for (const [label, sensitiveValue] of [
+    ["logical key", position.key],
+    ["timestamp", String(position.updatedAt)],
+    ["local user UUID", userId],
+    ["OAuth client ID", clientId],
+    ["private signing scalar", privateScalar],
+    ["public signing x-coordinate", publicX],
+    ["public signing y-coordinate", publicY],
+    ["signing key ID", config.jwtKeyId],
+  ] as const) {
+    assertCursorOmits(cursor, envelope, sensitiveValue, label);
+  }
+  assert.equal(includesBytes(envelope, "updatedAt"), false);
 });
 
 test("storage cursor authentication binds kind, user, and client", async () => {
@@ -54,6 +76,72 @@ test("storage cursor authentication binds kind, user, and client", async () => {
   );
   assert.equal(
     await decodeStorageCursor(cursor, "records", "user-a", "client-b", config),
+    null,
+  );
+});
+
+test("private signing-key rotation immediately invalidates outstanding cursors", async () => {
+  const originalConfig = await testConfig("cursor-key-before-rotation");
+  const rotatedConfig = await testConfig("cursor-key-after-rotation");
+  assert.notEqual(
+    originalConfig.jwtPrivateJwk.d,
+    rotatedConfig.jwtPrivateJwk.d,
+  );
+  const position = { updatedAt: 314_159_265, key: "rotation/evidence" };
+  const originalCursor = await encodeStorageCursor(
+    "records",
+    "rotation-user",
+    "rotation-client",
+    position,
+    originalConfig,
+  );
+
+  assert.deepEqual(
+    await decodeStorageCursor(
+      originalCursor,
+      "records",
+      "rotation-user",
+      "rotation-client",
+      originalConfig,
+    ),
+    position,
+  );
+  assert.equal(
+    await decodeStorageCursor(
+      originalCursor,
+      "records",
+      "rotation-user",
+      "rotation-client",
+      rotatedConfig,
+    ),
+    null,
+  );
+
+  const rotatedCursor = await encodeStorageCursor(
+    "records",
+    "rotation-user",
+    "rotation-client",
+    position,
+    rotatedConfig,
+  );
+  assert.deepEqual(
+    await decodeStorageCursor(
+      rotatedCursor,
+      "records",
+      "rotation-user",
+      "rotation-client",
+      rotatedConfig,
+    ),
+    position,
+  );
+  assert.equal(
+    await decodeStorageCursor(
+      rotatedCursor,
+      "records",
+      "rotation-user",
+      "rotation-client",
+      originalConfig,
+    ),
     null,
   );
 });
@@ -118,7 +206,7 @@ test("storage cursor rejects unsupported and malformed encrypted payloads", asyn
   }
 });
 
-async function testConfig(): Promise<AppConfig> {
+async function testConfig(keyId = "cursor-test-key"): Promise<AppConfig> {
   const keyPair = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,
@@ -130,10 +218,33 @@ async function testConfig(): Promise<AppConfig> {
     {
       NODE_ENV: "test",
       ISSUER_URL: issuer,
-      JWT_KEY_ID: "cursor-test-key",
+      JWT_KEY_ID: keyId,
       JWT_PRIVATE_JWK: JSON.stringify(privateJwk),
     },
     issuer,
+  );
+}
+
+function assertCursorOmits(
+  cursor: string,
+  envelope: Uint8Array,
+  sensitiveValue: string,
+  label: string,
+): void {
+  assert.equal(
+    cursor.includes(sensitiveValue),
+    false,
+    `cursor token exposed ${label}`,
+  );
+  assert.equal(
+    cursor.includes(base64UrlEncode(new TextEncoder().encode(sensitiveValue))),
+    false,
+    `cursor token exposed encoded ${label}`,
+  );
+  assert.equal(
+    includesBytes(envelope, sensitiveValue),
+    false,
+    `decoded cursor envelope exposed ${label}`,
   );
 }
 
