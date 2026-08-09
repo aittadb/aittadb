@@ -6,6 +6,21 @@ Open `/docs` for the self-hosted Swagger UI or follow the operation links from t
 
 Credential-bearing browser forms send values in a same-origin request body and do not persist them in browser storage. UserInfo and storage forms can instead use the current signed-in session; AittaDB creates a minimal short-lived internal access token, calls the canonical endpoint, and never displays or persists that token. A successful browser token exchange deliberately displays newly issued credentials once in a `Cache-Control: no-store` response. Do not put access tokens, refresh tokens, device codes, authorization codes, client secrets, or PKCE verifiers in query strings.
 
+## Service Client Credentials
+
+An administrator first registers a `service` client with only the required storage scopes and saves the displayed secret once in the caller's server-side secret configuration. The server can then obtain a renewable short-lived token without a browser:
+
+```sh
+curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
+  --request POST https://aittadb.com/oauth/token \
+  --header 'Accept: application/json' \
+  --header 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'scope=storage.read storage.write'
+```
+
+The response contains `access_token`, `token_type`, `expires_in`, and `scope`; it contains no ID token, refresh token, email, or display name. Request another token before expiry. The token authorizes only the service client's stable isolated namespace, and must stay in server-side memory or secret handling rather than URLs, logs, or browser storage.
+
 The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; Events is planned and is not an available API in the MVP.
 
 ## Hypermedia Traversal
@@ -78,9 +93,11 @@ Fetch `$ISSUER_URL/.well-known/jwks.json`, select the configured `kid`, require 
 make generate-local-jwt-key
 ```
 
-The private JWK is written to `.secrets/jwt-signing-key.json`; that directory is ignored by Git.
+The private bundle is written under ignored `.secrets/signing-keys/` with a unique filename and mode `0600`; the command prints only its path and public key ID. It does not print or overwrite private material. See `docs/key-rotation.md` for validation, protected rollback preparation, and the boolean JWKS preflight.
 
 To enable administration, sign in at `/session`, copy the deployment-local AittaDB UUID shown there, and add that canonical UUIDv4 to `ADMIN_SUBJECTS` through Sites configuration. The current trusted Sites session can then open `/admin/clients`; no separate administrator password or key is used. Keep the list narrow. UUID allowlisting does not eliminate reassignment risk because AittaDB still locates that UUID by upstream email.
+
+Request `/admin/clients` with `Accept: text/html` for the human interface or `Accept: application/vnd.aittadb+json; version=0.1` for machine controls. Both expose create, the currently valid enable/disable transition, secret rotation for confidential/service clients, and grant revocation. Follow the returned action target and fields, including the one-time submission token, rather than constructing an operation. JSON returns a no-store mutation result directly. HTML returns `303 See Other`, then displays the result once on the redirected collection GET so refreshing does not repeat the POST. Save a returned secret immediately; it never enters the URL or durable plaintext storage and later collection reads never repeat it.
 
 ## AittaDB Storage
 

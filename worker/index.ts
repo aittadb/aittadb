@@ -9,6 +9,7 @@ import { createAittaDB, isAittaDBRoute, isAssetRoute } from "../src/handler";
 export interface Env {
   ASSETS: Fetcher;
   DB?: D1Database;
+  BUCKET?: R2Bucket;
   ISSUER_URL?: string;
   JWT_PRIVATE_JWK?: string;
   JWT_KEY_ID?: string;

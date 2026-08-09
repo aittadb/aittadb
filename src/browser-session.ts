@@ -6,6 +6,7 @@ import {
 import { oauthError } from "./http";
 import { issueTokens } from "./oauth";
 import { BROWSER_SESSION_CLIENT_ID } from "./system-client";
+import { isSubjectAuthorizationDenied } from "./subject-access";
 import type { AppConfig, AuthStore } from "./types";
 
 export type BrowserSessionScope =
@@ -45,15 +46,23 @@ export async function issueBrowserSessionAccessToken(
 
   const now = nowSeconds();
   const user = await store.findOrCreateUser(identity, now);
-  const tokens = await issueTokens({
-    config,
-    store,
-    user,
-    client,
-    scope: scopes.join(" "),
-    includeRefresh: false,
-    now,
-  });
+  let tokens: Record<string, unknown>;
+  try {
+    tokens = await issueTokens({
+      config,
+      store,
+      user,
+      client,
+      scope: scopes.join(" "),
+      includeRefresh: false,
+      now,
+    });
+  } catch (error) {
+    if (isSubjectAuthorizationDenied(error)) {
+      return oauthError("login_required", "Browser session unavailable", 401);
+    }
+    throw error;
+  }
   const accessToken = tokens.access_token;
   return typeof accessToken === "string"
     ? accessToken

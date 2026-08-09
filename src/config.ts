@@ -1,4 +1,4 @@
-import type { AppConfig, RuntimeEnv } from "./types";
+import type { AppConfig, PrivacyConfig, RuntimeEnv } from "./types";
 
 const DEFAULT_ACCESS_TOKEN_TTL = 600;
 const DEFAULT_AUTH_CODE_TTL = 300;
@@ -77,6 +77,16 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       DEFAULT_REFRESH_TOKEN_TTL,
     ),
     allowedCorsOrigins: splitList(env.ALLOWED_CORS_ORIGINS),
+    features: {
+      records: readBoolean(env.FEATURE_RECORDS_ENABLED, true),
+      files: readBoolean(env.FEATURE_FILES_ENABLED, true),
+      statistics: readBoolean(env.FEATURE_STATISTICS_ENABLED, true),
+      oauthApps: readBoolean(env.FEATURE_OAUTH_APPS_ENABLED, false),
+    },
+    maintenanceCleanupTelemetryEnabled: readBoolean(
+      env.MAINTENANCE_CLEANUP_TELEMETRY_ENABLED,
+      false,
+    ),
     storageLimits: {
       writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),
       globalMaxItems: readPositiveInt(
@@ -115,9 +125,69 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       DEFAULT_STORAGE_WRITE_RATE_LIMIT,
     ),
     adminSubjects: readAdminSubjects(env.ADMIN_SUBJECTS),
+    privacy: readPrivacyConfig(env),
     isTest,
     isProduction,
   };
+}
+
+function readPrivacyConfig(env: RuntimeEnv): PrivacyConfig {
+  const values = {
+    controllerName: readPrivacyText(env.PRIVACY_CONTROLLER_NAME, 200),
+    controllerIdentifier: readPrivacyText(
+      env.PRIVACY_CONTROLLER_IDENTIFIER,
+      100,
+    ),
+    contactName: readPrivacyText(env.PRIVACY_CONTACT_NAME, 200),
+    contactEmail: readPrivacyText(env.PRIVACY_CONTACT_EMAIL, 254),
+    contactPhone: readPrivacyText(env.PRIVACY_CONTACT_PHONE, 80),
+    contactAddress: readPrivacyText(env.PRIVACY_CONTACT_ADDRESS, 500),
+  };
+  const parsed = Object.fromEntries(
+    Object.entries(values).map(([key, result]) => [key, result.value]),
+  ) as Omit<PrivacyConfig, "valid">;
+  const valid =
+    Object.values(values).every((result) => result.valid) &&
+    (!parsed.contactEmail || isContactEmail(parsed.contactEmail));
+  return { ...parsed, valid };
+}
+
+function readPrivacyText(
+  value: string | undefined,
+  maxLength: number,
+): { value: string | null; valid: boolean } {
+  if (value === undefined || value.trim() === "") {
+    return { value: null, valid: true };
+  }
+  if (hasUnsupportedControl(value)) {
+    return { value: null, valid: false };
+  }
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length <= maxLength
+    ? { value: normalized, valid: true }
+    : { value: null, valid: false };
+}
+
+function hasUnsupportedControl(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (
+      (codePoint < 32 &&
+        codePoint !== 9 &&
+        codePoint !== 10 &&
+        codePoint !== 13) ||
+      codePoint === 127
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isContactEmail(value: string): boolean {
+  return /^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+$/i.test(
+    value,
+  );
 }
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {

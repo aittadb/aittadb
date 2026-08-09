@@ -195,7 +195,7 @@ export function endpointActions(issuer: string): {
           field("code_challenge", "S256 code challenge", "string", "query", {
             required: true,
             min_length: 43,
-            max_length: 128,
+            max_length: 43,
           }),
           field(
             "code_challenge_method",
@@ -221,7 +221,7 @@ export function endpointActions(issuer: string): {
         authorization: {
           scheme: "none",
           description:
-            "Public clients send client_id; confidential clients also authenticate.",
+            "Public clients send client_id; confidential clients authenticate. Service clients cannot use this interactive grant.",
         },
         fields: [
           field("client_id", "Client ID", "string", "body", {
@@ -247,7 +247,7 @@ export function endpointActions(issuer: string): {
         authorization: {
           scheme: "none",
           description:
-            "Public clients send client_id; confidential clients authenticate with Basic or body credentials.",
+            "Public clients send client_id; confidential and service clients authenticate with Basic or body credentials.",
         },
         fields: [
           field("grant_type", "Grant type", "string", "body", {
@@ -259,6 +259,7 @@ export function endpointActions(issuer: string): {
               },
               { value: "authorization_code", title: "Authorization code" },
               { value: "refresh_token", title: "Refresh token" },
+              { value: "client_credentials", title: "Client credentials" },
             ],
           }),
           field("client_id", "Client ID", "string", "body", {
@@ -266,9 +267,10 @@ export function endpointActions(issuer: string): {
           }),
           field("client_secret", "Client secret", "string", "body", {
             secret: true,
-            description: "Confidential clients only.",
+            description: "Confidential and service clients only.",
           }),
           field("device_code", "Device code", "string", "body", {
+            required: true,
             secret: true,
             visible_when: {
               field: "grant_type",
@@ -276,21 +278,34 @@ export function endpointActions(issuer: string): {
             },
           }),
           field("code", "Authorization code", "string", "body", {
+            required: true,
             secret: true,
             visible_when: { field: "grant_type", value: "authorization_code" },
           }),
           field("redirect_uri", "Redirect URI", "string", "body", {
+            required: true,
             visible_when: { field: "grant_type", value: "authorization_code" },
           }),
           field("code_verifier", "PKCE code verifier", "string", "body", {
+            required: true,
             secret: true,
             min_length: 43,
             max_length: 128,
             visible_when: { field: "grant_type", value: "authorization_code" },
           }),
           field("refresh_token", "Refresh token", "string", "body", {
+            required: true,
             secret: true,
             visible_when: { field: "grant_type", value: "refresh_token" },
+          }),
+          field("scope", "Service storage scopes", "string", "body", {
+            value: "storage.read storage.write storage.delete",
+            visible_when: {
+              field: "grant_type",
+              value: "client_credentials",
+            },
+            description:
+              "Optional subset of the service client's registered storage scopes.",
           }),
         ],
       },
@@ -507,12 +522,13 @@ export function parseAcceptHeader(value: string | null): AcceptMediaRange[] {
   return ranges;
 }
 
-/** Select the best representation supported by AittaDB application resources. */
+/** Select the best representation using the supplied server preference for ties. */
 export function negotiateHypermediaRepresentation(
   request: Request,
+  serverPreference: HypermediaRepresentation = "json",
 ): HypermediaRepresentation | null {
   const accept = request.headers.get("accept");
-  if (!accept?.trim()) return "json";
+  if (!accept?.trim()) return serverPreference;
   const ranges = parseAcceptHeader(accept);
   let selected: RepresentationMatch | null = null;
 
@@ -525,7 +541,10 @@ export function negotiateHypermediaRepresentation(
       specificity: match.specificity,
       parameterCount: match.parameterCount,
       order: match.order,
-      preference: representation.preference,
+      preference:
+        representation.name === serverPreference
+          ? -1
+          : representation.preference,
     };
     if (!selected || compareMatches(candidate, selected) < 0) {
       selected = candidate;

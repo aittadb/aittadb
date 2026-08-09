@@ -50,6 +50,7 @@ const STANDARD_HTML = [JSON_MEDIA, HTML_MEDIA] as const;
 const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/", "get", "200", HYPERMEDIA_HTML),
   response("/health", "get", "200", HYPERMEDIA_HTML),
+  response("/privacy", "get", "200", HYPERMEDIA_HTML),
   response("/statistics", "get", "200", HYPERMEDIA_HTML),
   response("/session", "get", "200", HYPERMEDIA_HTML),
   response("/authorize", "get", "200", HYPERMEDIA_HTML),
@@ -85,7 +86,8 @@ const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/consent", "get", "302"),
   response("/consent", "post", "302"),
   response("/admin/clients", "get", "200", HYPERMEDIA_HTML),
-  response("/admin/clients", "post", "200", HYPERMEDIA_HTML),
+  response("/admin/clients", "post", "200", HYPERMEDIA_JSON),
+  response("/admin/clients", "post", "303"),
 
   // Successful protocol payloads remain standards-defined rather than wrapped.
   response("/.well-known/openid-configuration", "get", "200", STANDARD_HTML),

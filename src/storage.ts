@@ -4,7 +4,7 @@ import {
   hypermediaJson,
   isJsonMediaType,
   oauthError,
-  readBoundedBody,
+  readBoundedRequestBody,
 } from "./http";
 import {
   HYPERMEDIA_MEDIA_TYPE,
@@ -18,12 +18,14 @@ import {
 } from "./hypermedia";
 import { parseScopes, verifyAccessToken } from "./oauth";
 import { decodeStorageCursor, encodeStorageCursor } from "./storage-cursor";
+import { storageFileWriteFence } from "./storage-file-write-fence";
 import type {
   AppConfig,
   AuthStore,
   ClientView,
   RuntimeEnv,
   StorageFileMetadata,
+  StorageFileWriteFence,
   StorageListPosition,
   StorageRecord,
   StorageUsage,
@@ -443,18 +445,19 @@ async function writeStorageFile(
   const now = nowSeconds();
   // Copy-on-write keeps the committed object untouched until its new metadata
   // is durable, so a failed replacement cannot change bytes behind old metadata.
-  const r2Key = `users/${principal.userId}/clients/${principal.client.id}/files/${uuid()}`;
+  const r2Key = `objects/${uuid()}`;
   const contentType =
     request.headers.get("content-type") || "application/octet-stream";
   const digest = await sha256(new Uint8Array(body));
-  await env.BUCKET.put(r2Key, body, {
-    httpMetadata: { contentType },
-    customMetadata: {
-      userId: principal.userId,
-      clientId: principal.client.id,
-      keySha256: await sha256(fileKey),
-    },
-  });
+  const fence = storageFileWriteFence(
+    principal.userId,
+    principal.client.id,
+    r2Key,
+    nowSeconds(),
+  );
+  if (!(await store.reserveStorageFileWriteFence(fence))) {
+    return oauthError("invalid_token", "Invalid token", 401);
+  }
   const file: StorageFileMetadata = {
     userId: principal.userId,
     clientId: principal.client.id,
@@ -467,7 +470,11 @@ async function writeStorageFile(
     updatedAt: now,
   };
   const expectedR2Key = existing?.r2Key ?? null;
+  let metadataCommitted = false;
   try {
+    await env.BUCKET.put(r2Key, body, {
+      httpMetadata: { contentType },
+    });
     if (
       !(await store.upsertStorageFileMetadata(
         file,
@@ -475,7 +482,7 @@ async function writeStorageFile(
         config.storageLimits,
       ))
     ) {
-      await deleteR2Object(env.BUCKET, r2Key);
+      await retireFencedStorageObject(env.BUCKET, store, file, fence);
       const current = await store.getStorageFileMetadata(
         principal.userId,
         principal.client.id,
@@ -489,15 +496,30 @@ async function writeStorageFile(
       }
       return storageLimitExceeded();
     }
+    metadataCommitted = true;
   } catch (error) {
-    await deleteR2Object(env.BUCKET, r2Key);
+    const current = await store.getStorageFileMetadata(
+      principal.userId,
+      principal.client.id,
+      fileKey,
+    );
+    metadataCommitted = current?.r2Key === r2Key;
+    if (!metadataCommitted) {
+      await retireFencedStorageObject(env.BUCKET, store, file, fence);
+    }
     throw error;
   }
-  if (existing) {
-    if (
-      !(await retireReplacedStorageObject(env.BUCKET, store, existing, file))
-    ) {
-      return storageConflict();
+  try {
+    if (existing) {
+      if (
+        !(await retireReplacedStorageObject(env.BUCKET, store, existing, file))
+      ) {
+        return storageConflict();
+      }
+    }
+  } finally {
+    if (metadataCommitted) {
+      await releaseStorageFileWriteFence(store, fence);
     }
   }
   return hypermediaJson(
@@ -515,6 +537,47 @@ async function writeStorageFile(
         }
       : undefined,
   );
+}
+
+async function retireFencedStorageObject(
+  bucket: R2Bucket,
+  store: AuthStore,
+  file: StorageFileMetadata,
+  fence: StorageFileWriteFence,
+): Promise<void> {
+  try {
+    await deleteR2Object(bucket, file.r2Key);
+    await releaseStorageFileWriteFence(store, fence);
+  } catch {
+    if (
+      !(await store.convertStorageFileWriteFenceToRepair(fence, nowSeconds()))
+    ) {
+      throw new Error("storage_file_write_fence_conversion_failed");
+    }
+  }
+}
+
+async function releaseStorageFileWriteFence(
+  store: AuthStore,
+  fence: StorageFileWriteFence,
+): Promise<void> {
+  try {
+    await store.completeStorageFileWriteFence(fence);
+  } catch {
+    // The expiring durable fence remains fail-closed and becomes repair work.
+  }
+}
+
+async function retireUncommittedStorageObject(
+  bucket: R2Bucket,
+  store: AuthStore,
+  file: StorageFileMetadata,
+): Promise<void> {
+  try {
+    await deleteR2Object(bucket, file.r2Key);
+  } catch {
+    await recordStorageFileOrphanRepairs(store, file);
+  }
 }
 
 async function deleteStorageFileConsistently(
@@ -538,10 +601,14 @@ async function deleteStorageFileConsistently(
   } catch (deleteError) {
     const present = await r2ObjectPresent(bucket, file.r2Key);
     if (present === false) return true;
+    if (present === null) {
+      await recordStorageFileOrphanRepairs(store, file);
+      throw deleteError;
+    }
     if (present === true) {
       try {
         if (!(await store.upsertStorageFileMetadata(file, null))) {
-          await deleteR2Object(bucket, file.r2Key);
+          await retireUncommittedStorageObject(bucket, store, file);
           return false;
         }
       } catch (restoreError) {
@@ -551,6 +618,7 @@ async function deleteStorageFileConsistently(
           await deleteR2Object(bucket, file.r2Key);
           return true;
         } catch {
+          await recordStorageFileOrphanRepairs(store, file);
           throw restoreError;
         }
       }
@@ -572,13 +640,16 @@ async function retireReplacedStorageObject(
     if (previousPresent === false) {
       return currentFileIs(store, replacement);
     }
-    if (previousPresent !== true) throw deleteError;
+    if (previousPresent === null) {
+      await recordStorageFileOrphanRepairs(store, previous);
+      throw deleteError;
+    }
 
     try {
       if (
         !(await store.upsertStorageFileMetadata(previous, replacement.r2Key))
       ) {
-        await deleteR2Object(bucket, previous.r2Key);
+        await retireUncommittedStorageObject(bucket, store, previous);
         return false;
       }
     } catch (restoreError) {
@@ -588,6 +659,7 @@ async function retireReplacedStorageObject(
         await deleteR2Object(bucket, previous.r2Key);
         return false;
       } catch {
+        await recordStorageFileOrphanRepairs(store, previous);
         throw restoreError;
       }
     }
@@ -595,25 +667,57 @@ async function retireReplacedStorageObject(
     try {
       await deleteR2Object(bucket, replacement.r2Key);
     } catch (cleanupError) {
-      if ((await r2ObjectPresent(bucket, replacement.r2Key)) === true) {
+      const replacementPresent = await r2ObjectPresent(
+        bucket,
+        replacement.r2Key,
+      );
+      let repairCandidates = replacementPresent === false ? [] : [replacement];
+      if (replacementPresent === true) {
         // Keep metadata paired with the object that is known to exist if
         // rollback cleanup itself fails.
         try {
           if (
             await store.upsertStorageFileMetadata(replacement, previous.r2Key)
           ) {
-            await deleteR2Object(bucket, previous.r2Key);
-            return true;
+            repairCandidates = [previous];
+            try {
+              await deleteR2Object(bucket, previous.r2Key);
+              return true;
+            } catch {
+              // The previous object is now the only repair candidate.
+            }
           }
         } catch {
-          // The outer request still fails generically; no internal key leaks.
+          // The D1 outcome is uncertain, so repair must verify both objects.
+          repairCandidates = [previous, replacement];
         }
       }
+      await recordStorageFileOrphanRepairs(store, ...repairCandidates);
       throw cleanupError;
     }
     throw deleteError;
   }
   return currentFileIs(store, replacement);
+}
+
+async function recordStorageFileOrphanRepairs(
+  store: AuthStore,
+  ...files: StorageFileMetadata[]
+): Promise<void> {
+  const recordedAt = nowSeconds();
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.r2Key)) continue;
+    seen.add(file.r2Key);
+    const recorded = await store.recordStorageFileOrphanRepair({
+      userId: file.userId,
+      clientId: file.clientId,
+      r2Key: file.r2Key,
+      createdAt: recordedAt,
+      updatedAt: recordedAt,
+    });
+    if (!recorded) throw new Error("storage_file_repair_owner_conflict");
+  }
 }
 
 async function currentFileIs(
@@ -678,16 +782,32 @@ async function requireStorageScope(
         403,
       );
     }
-    const user = await store.getUser(verified.claims.sub);
     const client = await store.getClient(audience);
-    if (!user || !client || client.disabledAt)
+    if (!client || client.disabledAt)
       return oauthError("invalid_token", "Invalid token", 401);
+    let userId: string;
+    if (client.type === "service") {
+      if (
+        verified.claims.subject_type !== "service" ||
+        verified.claims.sub !== client.id ||
+        !(await store.hasServicePrincipal(client.id))
+      ) {
+        return oauthError("invalid_token", "Invalid token", 401);
+      }
+      userId = client.id;
+    } else {
+      if (verified.claims.subject_type !== undefined)
+        return oauthError("invalid_token", "Invalid token", 401);
+      const user = await store.getUser(verified.claims.sub);
+      if (!user) return oauthError("invalid_token", "Invalid token", 401);
+      userId = user.id;
+    }
     const rateKind = requiredScope === "storage.read" ? "read" : "write";
     const rateLimit =
       rateKind === "read"
         ? config.storageReadRateLimit
         : config.storageWriteRateLimit;
-    const ownerHash = await sha256(`${user.id}:${client.id}`);
+    const ownerHash = await sha256(`${userId}:${client.id}`);
     if (
       !(await store.rateLimit(
         `storage:${rateKind}:${ownerHash}`,
@@ -711,7 +831,7 @@ async function requireStorageScope(
       );
     }
     return {
-      userId: user.id,
+      userId,
       client,
       scopes,
       writesEnabled: config.storageLimits.writesEnabled,
@@ -731,10 +851,12 @@ async function readJsonBody(
   let text: string;
   try {
     text = new TextDecoder().decode(
-      await readBoundedBody(request.body, maxBytes),
+      await readBoundedRequestBody(request, maxBytes),
     );
-  } catch {
-    return oauthError("invalid_request", "Storage record is too large", 413);
+  } catch (error) {
+    return error instanceof Error && error.message === "request_too_large"
+      ? oauthError("invalid_request", "Storage record is too large", 413)
+      : oauthError("invalid_request", "Malformed JSON body");
   }
   try {
     return JSON.parse(text) as unknown;
@@ -747,16 +869,13 @@ async function readBytes(
   request: Request,
   maxBytes: number,
 ): Promise<ArrayBuffer | Response> {
-  const length = Number(request.headers.get("content-length") || "0");
-  if (Number.isFinite(length) && length > maxBytes)
-    return oauthError("invalid_request", "Storage file is too large", 413);
-  let body: ArrayBuffer;
   try {
-    body = await readBoundedBody(request.body, maxBytes);
-  } catch {
-    return oauthError("invalid_request", "Storage file is too large", 413);
+    return await readBoundedRequestBody(request, maxBytes);
+  } catch (error) {
+    return error instanceof Error && error.message === "request_too_large"
+      ? oauthError("invalid_request", "Storage file is too large", 413)
+      : oauthError("invalid_request", "Malformed request body");
   }
-  return body;
 }
 
 function decodeStorageKey(pathname: string, prefix: string): string | null {
@@ -887,6 +1006,8 @@ function storageCollectionLinks(
   page: StorageCollectionPage,
 ) {
   const other = kind === "records" ? "files" : "records";
+  const otherEnabled =
+    kind === "records" ? config.features.files : config.features.records;
   return [
     link("self", storagePageHref(config, kind, page.pageSize, page.cursor), {
       type: HYPERMEDIA_MEDIA_TYPE,
@@ -900,9 +1021,13 @@ function storageCollectionLinks(
           ),
         ]
       : []),
-    link(`storage-${other}`, `${config.issuerUrl}/storage/${other}`, {
-      type: HYPERMEDIA_MEDIA_TYPE,
-    }),
+    ...(!otherEnabled
+      ? []
+      : [
+          link(`storage-${other}`, `${config.issuerUrl}/storage/${other}`, {
+            type: HYPERMEDIA_MEDIA_TYPE,
+          }),
+        ]),
     link("item", `${config.issuerUrl}/storage/${kind}/{key}`, {
       type: HYPERMEDIA_MEDIA_TYPE,
       templated: true,
@@ -1307,9 +1432,10 @@ function storageNotFound(
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
     ],
-    actions: hasScope(context.scopes, "storage.write")
-      ? [storagePutAction(config, kind, context, key, undefined, "missing")]
-      : [],
+    actions:
+      context.writesEnabled && hasScope(context.scopes, "storage.write")
+        ? [storagePutAction(config, kind, context, key, undefined, "missing")]
+        : [],
   });
 }
 

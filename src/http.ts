@@ -12,6 +12,9 @@ import {
   type HypermediaLink,
 } from "./hypermedia";
 
+const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32}$/;
+export const DEFAULT_FORM_MAX_BYTES = 16_384;
+
 export function json(data: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
@@ -86,6 +89,7 @@ export function defaultHypermediaLinks(): HypermediaLink[] {
     link("service", "/", { type: HYPERMEDIA_MEDIA_TYPE }),
     link("session", "/session", { type: HYPERMEDIA_MEDIA_TYPE }),
     link("health", "/health", { type: HYPERMEDIA_MEDIA_TYPE }),
+    link("privacy-policy", "/privacy", { type: HYPERMEDIA_MEDIA_TYPE }),
     link("documentation", "/docs", { type: "text/html" }),
     link("describedby", "/openapi.json", { type: "application/json" }),
     link("openid-configuration", "/.well-known/openid-configuration", {
@@ -137,16 +141,31 @@ export function addSecurityHeaders(headers: Headers): void {
 
 export async function readForm(
   request: Request,
-  maxBytes = 16_384,
+  maxBytes = DEFAULT_FORM_MAX_BYTES,
 ): Promise<URLSearchParams> {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.includes("application/x-www-form-urlencoded")) {
     throw new Error("unsupported_media_type");
   }
   const text = new TextDecoder().decode(
-    await readBoundedBody(request.body, maxBytes),
+    await readBoundedRequestBody(request, maxBytes),
   );
   return new URLSearchParams(text);
+}
+
+export async function readBoundedRequestBody(
+  request: Request,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  const declaredLength = request.headers.get("content-length")?.trim();
+  if (declaredLength && /^\d+$/.test(declaredLength)) {
+    const parsedLength = Number(declaredLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength > maxBytes) {
+      await request.body?.cancel().catch(() => undefined);
+      throw new Error("request_too_large");
+    }
+  }
+  return readBoundedBody(request.body, maxBytes);
 }
 
 export async function readBoundedBody(
@@ -211,6 +230,7 @@ export function requireSameOrigin(
   request: Request,
   canonicalOrigin?: string,
 ): boolean {
+  // This classifies only the browser origin signal; callers enforce CSRF separately.
   return isSameOrigin(request, canonicalOrigin);
 }
 
@@ -268,7 +288,7 @@ export function csrfCookie(value: string): string {
 
 export function csrfTokenForRequest(request: Request): string {
   const existing = parseCookies(request).get("aittadb_csrf");
-  return existing && /^[A-Za-z0-9_-]{32}$/.test(existing)
+  return existing && CSRF_TOKEN_PATTERN.test(existing)
     ? existing
     : randomToken(24);
 }
@@ -278,7 +298,13 @@ export function csrfTokenMatches(
   submittedValue: string | null,
 ): boolean {
   const cookie = parseCookies(request).get("aittadb_csrf");
-  return Boolean(cookie && submittedValue && cookie === submittedValue);
+  return Boolean(
+    cookie &&
+    submittedValue &&
+    CSRF_TOKEN_PATTERN.test(cookie) &&
+    CSRF_TOKEN_PATTERN.test(submittedValue) &&
+    cookie === submittedValue,
+  );
 }
 
 export function acceptsHtml(request: Request): boolean {

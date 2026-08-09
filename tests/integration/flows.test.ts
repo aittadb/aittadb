@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { loadConfig } from "../../src/config";
 import { MemoryAuthStore } from "../../src/store/memory";
 import { createClientRegistration, issueTokens } from "../../src/oauth";
-import { nowSeconds, sha256 } from "../../src/crypto";
+import { nowSeconds, publicJwk, sha256, verifyJwt } from "../../src/crypto";
 import { BROWSER_SESSION_CLIENT_ID } from "../../src/system-client";
 import {
   cookieValue,
@@ -42,6 +42,12 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       };
       sessionIssuer: string;
       officialOpenAIProduct: boolean;
+      features: {
+        records: boolean;
+        files: boolean;
+        statistics: boolean;
+        oauthApps: boolean;
+      };
       capabilities: string[];
       plannedCapabilities: string[];
     };
@@ -52,9 +58,27 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiRootJson.api_version, "0.1");
   assert.equal(apiRootJson.type, "service");
   assert.equal(apiRootJson.data.service, "AittaDB");
+  assert.match(apiRootJson.data.description, /source-available project/i);
   assert.match(
     apiRootJson.data.description,
     /hosted application backend for third-party apps/i,
+  );
+  assert.match(apiRootJson.data.description, /FSL-1\.1-MIT/);
+  assert.match(
+    apiRootJson.data.description,
+    /MIT license for immediate use is also available commercially/i,
+  );
+  assert.doesNotMatch(
+    apiRootJson.data.description,
+    /third-party, non-official project/i,
+  );
+  assert.match(
+    apiRootJson.data.description,
+    /depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets/,
+  );
+  assert.match(
+    apiRootJson.data.description,
+    /never forwards ChatGPT credentials/,
   );
   assert.equal(apiRootJson.data.hostingPlatform, "OpenAI-hosted ChatGPT Sites");
   assert.equal(
@@ -69,9 +93,15 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(apiRootJson.data.upstreamSignIn.credentialsForwarded, false);
   assert.equal(apiRootJson.data.sessionIssuer, "AittaDB");
   assert.equal(apiRootJson.data.officialOpenAIProduct, false);
+  assert.deepEqual(apiRootJson.data.features, {
+    records: true,
+    files: true,
+    statistics: true,
+    oauthApps: false,
+  });
   assert.deepEqual(apiRootJson.data.capabilities, [
     "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
-    "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
+    "AittaDB-issued private sessions and verifiable JWT credentials",
     "D1-backed JSON records isolated by AittaDB user and client",
     "R2-backed files with D1 metadata isolated by AittaDB user and client",
   ]);
@@ -95,6 +125,10 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.equal(
     apiRootJson.links.find((item) => item.rel.includes("statistics"))?.href,
     "https://aittadb.example.test/statistics",
+  );
+  assert.equal(
+    apiRootJson.links.find((item) => item.rel.includes("privacy-policy"))?.href,
+    "https://aittadb.example.test/privacy",
   );
   assert.equal(
     apiRootJson.actions.find((item) => item.name === "sign-out")?.href,
@@ -167,21 +201,47 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /ChatGPT sign-in/);
   assert.match(
     browserRootHtml,
-    /hosted application backend for third-party apps/i,
+    /Identity, sessions, JSON data, and files for connected applications\./,
   );
-  assert.match(browserRootHtml, /Persistent events are planned/);
-  assert.match(
+  const rootTrustNotice = /<p class="note">([\s\S]*?)<\/p>/.exec(
     browserRootHtml,
-    /deploy an independent instance in their own ChatGPT Sites project/,
+  )?.[1];
+  assert.ok(rootTrustNotice);
+  assert.doesNotMatch(rootTrustNotice, /Persistent events are planned/);
+  assert.match(rootTrustNotice, /Source-available under FSL-1\.1-MIT/);
+  assert.match(rootTrustNotice, /FSL-1\.1-MIT/);
+  assert.match(
+    rootTrustNotice,
+    /ChatGPT provides browser sign-in inside ChatGPT Sites/,
   );
-  assert.match(browserRootHtml, /creates its own identities and credentials/);
-  assert.match(browserRootHtml, /remains independent from OpenAI/);
+  assert.match(rootTrustNotice, /creates a separate local identity/);
+  assert.match(rootTrustNotice, /issues its own credentials/);
+  assert.match(
+    rootTrustNotice,
+    /never receives or forwards ChatGPT credentials/,
+  );
+  assert.doesNotMatch(
+    rootTrustNotice,
+    /AittaDB runs on OpenAI-hosted ChatGPT Sites/,
+  );
+  assert.doesNotMatch(rootTrustNotice, /ChatGPT OAuth/i);
+  assert.doesNotMatch(rootTrustNotice, /available commercially/);
+  assert.doesNotMatch(
+    rootTrustNotice,
+    /not affiliated with or endorsed by OpenAI/,
+  );
+  assert.doesNotMatch(rootTrustNotice, /third-party, non-official project/);
+  assert.doesNotMatch(rootTrustNotice, /remains independent from OpenAI/);
   assert.match(browserRootHtml, /Session issuer/);
   assert.match(browserRootHtml, /Hosting platform/);
   assert.match(browserRootHtml, /OpenAI-hosted ChatGPT Sites/);
-  assert.match(browserRootHtml, /Persistent storage/);
+  assert.match(browserRootHtml, /Feature availability/);
+  assert.match(
+    browserRootHtml,
+    /Records on · Files on · Statistics on · OAuth Apps off/,
+  );
   assert.doesNotMatch(browserRootHtml, /Official OpenAI product/);
-  assert.match(browserRootHtml, />How AittaDB works<\/a>/);
+  assert.match(browserRootHtml, />Licensing and platform details<\/a>/);
   assert.match(browserRootHtml, /Identity \/ Data \/ Files \/ Events/);
   assert.match(browserRootHtml, />Sign out<\/a>/);
   assert.doesNotMatch(browserRootHtml, />Sign in to AittaDB<\/a>/);
@@ -194,6 +254,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /href="\/storage\/records"/);
   assert.match(browserRootHtml, /href="\/storage\/files"/);
   assert.match(browserRootHtml, /href="\/statistics"/);
+  assert.match(browserRootHtml, /href="\/privacy"/);
   assert.match(browserRootHtml, /href="\/docs"/);
   assert.doesNotMatch(browserRootHtml, /href="\/authorize"/);
   assert.doesNotMatch(browserRootHtml, /href="\/device"/);
@@ -206,6 +267,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.doesNotMatch(browserRootHtml, /Sites Auth Broker/);
   assert.match(browserRootHtml, /https:\/\/github\.com\/aittadb\/aittadb/);
   assert.match(browserRootHtml, /View source on GitHub/);
+  assert.match(browserRootHtml, /aria-label="Project information"/);
   assert.match(browserRoot!.headers.get("content-type") ?? "", /^text\/html/);
   const contentSecurityPolicy =
     browserRoot!.headers.get("content-security-policy") ?? "";
@@ -333,10 +395,13 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       { headers: { accept: "text/html" } },
     ),
   );
+  const browserDiscoveryHtml = await browserDiscovery!.text();
+  assert.match(browserDiscoveryHtml, /<h1>OpenID configuration<\/h1>/);
   assert.match(
-    await browserDiscovery!.text(),
-    /<h1>OpenID configuration<\/h1>/,
+    browserDiscoveryHtml,
+    /Published OpenID Provider metadata for this AittaDB issuer\./,
   );
+  assert.doesNotMatch(browserDiscoveryHtml, /independent AittaDB issuer/i);
   const rawDiscovery = await app.fetch(
     new Request(
       "https://aittadb.example.test/.well-known/openid-configuration?format=json",
@@ -394,7 +459,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserMissingHtml, /This request stopped here/);
   assert.match(browserMissingHtml, /src="\/aittadb-boundary\.jpg"/);
 
-  const forbiddenAdmin = await app.fetch(
+  const unavailableAdmin = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
       headers: {
         accept:
@@ -402,10 +467,10 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
       },
     }),
   );
-  assert.equal(forbiddenAdmin?.status, 403);
-  const forbiddenAdminHtml = await forbiddenAdmin!.text();
-  assert.match(forbiddenAdminHtml, /<h1>Forbidden<\/h1>/);
-  assert.match(forbiddenAdminHtml, /Access stops at the boundary/);
+  assert.equal(unavailableAdmin?.status, 503);
+  const unavailableAdminHtml = await unavailableAdmin!.text();
+  assert.match(unavailableAdminHtml, /<h1>Service unavailable<\/h1>/);
+  assert.match(unavailableAdminHtml, /OAuth Apps is disabled/);
 });
 
 test("public home enters the real protected local AittaDB session", async () => {
@@ -431,6 +496,7 @@ test("public home enters the real protected local AittaDB session", async () => 
   assert.doesNotMatch(browserHtml, /href="\/authorize"/);
   assert.doesNotMatch(browserHtml, /href="\/device"/);
   assert.doesNotMatch(browserHtml, /href="\/oauth\/device_authorization"/);
+  assert.match(browserHtml, /<a href="\/privacy">Privacy<\/a>/);
 
   const apiSession = await app.fetch(
     new Request("https://aittadb.example.test/session", {
@@ -453,6 +519,11 @@ test("public home enters the real protected local AittaDB session", async () => 
     apiSessionJson.links.find((item) => item.rel.includes("storage-records"))
       ?.href,
     "https://aittadb.example.test/storage/records",
+  );
+  assert.equal(
+    apiSessionJson.links.find((item) => item.rel.includes("privacy-policy"))
+      ?.href,
+    "https://aittadb.example.test/privacy",
   );
 
   const repeated = await app.fetch(
@@ -524,6 +595,148 @@ test("public home enters the real protected local AittaDB session", async () => 
     anonymousRootJson.actions.some((item) => item.name === "sign-out"),
     false,
   );
+});
+
+test("privacy policy provides equivalent HTML and versioned hypermedia JSON", async () => {
+  const env = await testEnv({
+    PRIVACY_CONTROLLER_NAME:
+      'Aitta <script>alert("controller")</script> Services',
+    PRIVACY_CONTACT_NAME: "Privacy Contact",
+    PRIVACY_CONTACT_EMAIL: "privacy@example.test",
+  });
+  const app = createTestAittaDB(env, new MemoryAuthStore());
+
+  const vendorResponse = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: {
+        accept: "application/vnd.aittadb+json; version=0.1",
+      },
+    }),
+  );
+  assert.equal(vendorResponse?.status, 200);
+  assert.match(
+    vendorResponse?.headers.get("content-type") ?? "",
+    /^application\/vnd\.aittadb\+json; version=0\.1/,
+  );
+  assert.equal(vendorResponse?.headers.get("aittadb-api-version"), "0.1");
+  const vendorDocument = (await vendorResponse?.json()) as {
+    api_version: string;
+    type: string;
+    id: string;
+    data: {
+      title: string;
+      deployment: string;
+      controller: Record<string, string>;
+      sections: Array<{ id: string; title: string }>;
+    };
+    links: Array<{ rel: string[]; href: string }>;
+    actions: unknown[];
+  };
+  assert.equal(vendorDocument.api_version, "0.1");
+  assert.equal(vendorDocument.type, "privacy-policy");
+  assert.equal(vendorDocument.id, "https://aittadb.example.test/privacy");
+  assert.equal(vendorDocument.data.title, "Privacy Policy");
+  assert.equal(vendorDocument.data.deployment, "https://aittadb.example.test");
+  assert.deepEqual(vendorDocument.data.controller, {
+    name: 'Aitta <script>alert("controller")</script> Services',
+    contact_name: "Privacy Contact",
+    email: "privacy@example.test",
+  });
+  assert.ok(vendorDocument.data.sections.some(({ id }) => id === "rights"));
+  assert.deepEqual(vendorDocument.actions, []);
+  assert.equal(
+    vendorDocument.links.find(({ rel }) => rel.includes("self"))?.href,
+    "https://aittadb.example.test/privacy",
+  );
+  assert.equal(
+    vendorDocument.links.find(({ rel }) => rel.includes("contact"))?.href,
+    "mailto:privacy@example.test",
+  );
+
+  const compatibleResponse = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "application/json" },
+    }),
+  );
+  assert.equal(compatibleResponse?.status, 200);
+  assert.equal(
+    compatibleResponse?.headers.get("content-type"),
+    "application/json; charset=utf-8",
+  );
+  assert.deepEqual(await compatibleResponse?.json(), vendorDocument);
+
+  const htmlResponse = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "text/html" },
+    }),
+  );
+  assert.equal(htmlResponse?.status, 200);
+  assert.match(htmlResponse?.headers.get("content-type") ?? "", /^text\/html/);
+  const policyHtml = await htmlResponse!.text();
+  assert.match(policyHtml, /<html lang="en">/);
+  assert.match(policyHtml, /<h1>Privacy Policy<\/h1>/);
+  assert.match(policyHtml, /aria-label="Privacy controller and contact"/);
+  assert.match(policyHtml, /aria-labelledby="privacy-rights"/);
+  assert.match(policyHtml, /href="mailto:privacy@example\.test"/);
+  assert.match(
+    policyHtml,
+    /Aitta &lt;script&gt;alert\(&quot;controller&quot;\)&lt;\/script&gt; Services/,
+  );
+  assert.doesNotMatch(policyHtml, /<script>/i);
+  assert.match(policyHtml, /<a href="\/privacy">Privacy<\/a>/);
+
+  const unsupported = await app.fetch(
+    new Request("https://aittadb.example.test/privacy", {
+      headers: { accept: "application/xml" },
+    }),
+  );
+  assert.equal(unsupported?.status, 406);
+  assert.equal(
+    ((await unsupported?.json()) as { error: string }).error,
+    "not_acceptable",
+  );
+});
+
+test("privacy policy failures are generic and preserve HTML and JSON parity", async () => {
+  const cases = [
+    await testEnv(),
+    await testEnv({
+      PRIVACY_CONTROLLER_NAME: "AittaDB Operator",
+      PRIVACY_CONTACT_EMAIL: "malformed-email",
+    }),
+  ];
+
+  for (const env of cases) {
+    const app = createTestAittaDB(env, new MemoryAuthStore());
+    const jsonResponse = await app.fetch(
+      new Request("https://aittadb.example.test/privacy", {
+        headers: { accept: "application/json" },
+      }),
+    );
+    assert.equal(jsonResponse?.status, 503);
+    const jsonBody = (await jsonResponse?.json()) as {
+      error: string;
+      data: { error: string };
+      links: Array<{ rel: string[]; href: string }>;
+    };
+    assert.equal(jsonBody.error, "privacy_policy_unavailable");
+    assert.equal(jsonBody.data.error, "privacy_policy_unavailable");
+    assert.equal(JSON.stringify(jsonBody).includes("ADMIN_SUBJECTS"), false);
+    assert.equal(JSON.stringify(jsonBody).includes("malformed-email"), false);
+
+    const htmlResponse = await app.fetch(
+      new Request("https://aittadb.example.test/privacy", {
+        headers: { accept: "text/html" },
+      }),
+    );
+    assert.equal(htmlResponse?.status, 503);
+    const htmlBody = await htmlResponse!.text();
+    assert.match(htmlBody, /<h1>Service unavailable<\/h1>/);
+    assert.match(htmlBody, /privacy_policy_unavailable/);
+    assert.match(htmlBody, /<a href="\/privacy">Privacy<\/a>/);
+    assert.equal(htmlBody.includes("ADMIN_SUBJECTS"), false);
+    assert.equal(htmlBody.includes("malformed-email"), false);
+  }
 });
 
 test("public statistics expose only the aggregate local identity count", async () => {
@@ -615,7 +828,7 @@ test("public statistics expose only the aggregate local identity count", async (
 });
 
 test("device and consent transactions negotiate equivalent hypermedia controls", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(
@@ -760,7 +973,9 @@ test("device and consent transactions negotiate equivalent hypermedia controls",
     ["approve-authorization", "deny-authorization"],
   );
 
-  const anonymousEnv = await testEnv();
+  const anonymousEnv = await testEnv({
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  });
   const anonymousApp = createTestAittaDB(anonymousEnv, store, null);
   const anonymousConsent = await anonymousApp.fetch(
     new Request(consentLocation, { headers: { accept: "application/json" } }),
@@ -778,7 +993,10 @@ test("device and consent transactions negotiate equivalent hypermedia controls",
 });
 
 test("browser protocol representations execute real device, token, UserInfo, introspection, and revocation operations", async () => {
-  const env = await testEnv({ DEVICE_POLL_INTERVAL_SECONDS: "1" });
+  const env = await testEnv({
+    DEVICE_POLL_INTERVAL_SECONDS: "1",
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(
@@ -903,6 +1121,8 @@ test("browser protocol representations execute real device, token, UserInfo, int
   assert.equal(tokenResult?.status, 200);
   const tokenResultHtml = await tokenResult!.text();
   assert.match(tokenResultHtml, /<h1>Credentials issued<\/h1>/);
+  assert.match(tokenResultHtml, /AittaDB-issued credentials are ready\./);
+  assert.doesNotMatch(tokenResultHtml, /Independent AittaDB credentials/i);
   assert.doesNotMatch(tokenResultHtml, /access_token=/);
   const accessToken = textAreaValue(tokenResultHtml, "result_access_token");
   const refreshToken = textAreaValue(tokenResultHtml, "result_refresh_token");
@@ -1050,7 +1270,10 @@ test("browser protocol representations execute real device, token, UserInfo, int
     }),
   );
   assert.equal(wrongOrigin?.status, 403);
-  assert.match(await wrongOrigin!.text(), /Origin is not allowed/);
+  assert.match(
+    await wrongOrigin!.text(),
+    /Same-origin form submission is required/,
+  );
 
   const apiGetToken = await app.fetch(
     new Request("https://aittadb.example.test/oauth/token", {
@@ -1072,7 +1295,10 @@ test("browser protocol representations execute real device, token, UserInfo, int
 });
 
 test("device flow succeeds with local UUID subject, ID token, refresh token, UserInfo, introspection, and revocation", async () => {
-  const env = await testEnv({ DEVICE_POLL_INTERVAL_SECONDS: "1" });
+  const env = await testEnv({
+    DEVICE_POLL_INTERVAL_SECONDS: "1",
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  });
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const { client } = await createClientRegistration(
@@ -1353,7 +1579,8 @@ test("device flow succeeds with local UUID subject, ID token, refresh token, Use
 });
 
 test("authorization code with PKCE enforces exact redirect URI and one-time code use", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
+  const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
   const verifier =
@@ -1441,7 +1668,24 @@ test("authorization code with PKCE enforces exact redirect URI and one-time code
       }),
     }),
   );
-  assert.ok(((await token?.json()) as { access_token: string }).access_token);
+  const tokenJson = (await token?.json()) as {
+    access_token: string;
+    id_token: string;
+  };
+  assert.ok(tokenJson.access_token);
+  assert.ok(tokenJson.id_token);
+  const verifiedIdToken = await verifyJwt(
+    tokenJson.id_token,
+    [publicJwk(config.jwtPrivateJwk, config.jwtKeyId)],
+    {
+      issuer: config.issuerUrl,
+      audience: client.id,
+      now: nowSeconds(),
+    },
+  );
+  assert.equal(verifiedIdToken.claims.aud, client.id);
+  assert.equal(verifiedIdToken.claims.nonce, "n");
+  assert.equal(verifiedIdToken.claims.token_use, "id");
 
   const secondUse = await app.fetch(
     new Request("https://aittadb.example.test/oauth/token", {
@@ -1594,7 +1838,12 @@ test("AittaDB storage API stores D1 records and R2 files for the local user and 
   );
   assert.equal(fileCreate?.status, 201);
   const fileCreateJson = (await fileCreate?.json()) as {
-    data: { key: string; content_type: string; size: number };
+    data: {
+      key: string;
+      content_type: string;
+      size: number;
+      updated_at: number;
+    };
     actions: Array<{ name: string; method: string }>;
   };
   assert.match(fileCreateJson.data.key, /^[0-9a-f-]{36}$/);
@@ -1607,6 +1856,31 @@ test("AittaDB storage API stores D1 records and R2 files for the local user and 
   assert.equal(
     fileCreateJson.actions.find((item) => item.name === "replace-file")?.method,
     "PUT",
+  );
+
+  const compatibilityFileCreate = await app.fetch(
+    new Request("https://aittadb.example.test/storage/files", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "text/plain",
+      },
+      body: "compatibility bytes",
+    }),
+  );
+  assert.equal(compatibilityFileCreate?.status, 201);
+  assert.equal(
+    compatibilityFileCreate?.headers.get("content-type"),
+    "application/json; charset=utf-8",
+  );
+  const compatibilityFileCreateJson =
+    (await compatibilityFileCreate?.json()) as {
+      data: { key: string; updated_at: number };
+    };
+  assert.equal(
+    compatibilityFileCreate?.headers.get("location"),
+    `https://aittadb.example.test/storage/files/${compatibilityFileCreateJson.data.key}`,
   );
 
   const filePut = await app.fetch(
@@ -1626,6 +1900,7 @@ test("AittaDB storage API stores D1 records and R2 files for the local user and 
       content_type: string;
       size: number;
       sha256: string;
+      updated_at: number;
     };
   };
   assert.equal(filePutJson.data.key, "notes/hello.txt");
@@ -1669,10 +1944,23 @@ test("AittaDB storage API stores D1 records and R2 files for the local user and 
       actions: Array<{ name: string; method: string }>;
     }
   ).data.items.map((file) => file.data.key);
-  assert.deepEqual(listedFileKeys, [
-    fileCreateJson.data.key,
-    "notes/hello.txt",
-  ]);
+  const expectedFileKeys = [
+    {
+      key: fileCreateJson.data.key,
+      updatedAt: fileCreateJson.data.updated_at,
+    },
+    {
+      key: compatibilityFileCreateJson.data.key,
+      updatedAt: compatibilityFileCreateJson.data.updated_at,
+    },
+    { key: "notes/hello.txt", updatedAt: filePutJson.data.updated_at },
+  ]
+    .sort(
+      (left, right) =>
+        right.updatedAt - left.updatedAt || left.key.localeCompare(right.key),
+    )
+    .map((file) => file.key);
+  assert.deepEqual(listedFileKeys, expectedFileKeys);
 
   const deleteRecord = await app.fetch(
     new Request("https://aittadb.example.test/storage/records/app/settings", {
@@ -1823,8 +2111,10 @@ test("storage is isolated by local user and client without exposing deployment i
   assert.ok(ownerFile);
   assert.match(
     ownerFile.r2Key,
-    new RegExp(`^users/${owner.id}/clients/${ownerClient.id}/files/`),
+    /^objects\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
   );
+  assert.equal(ownerFile.r2Key.includes(owner.id), false);
+  assert.equal(ownerFile.r2Key.includes(ownerClient.id), false);
   assert.equal(ownerFile.r2Key.includes("internal/secrets.html"), false);
   assert.equal(bucket.objects.has(ownerFile.r2Key), true);
 
@@ -2211,6 +2501,11 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   assert.match(fileFormHtml, /name="_method" value="POST"/);
   assert.match(fileFormHtml, /enctype="multipart\/form-data"/);
   assert.match(fileFormHtml, /data-file-drop-zone/);
+  assert.match(fileFormHtml, /<label for="files_create_file">File /);
+  assert.match(
+    fileFormHtml,
+    /<input id="files_create_file" name="file" type="file" aria-describedby="files_create_file_status" required>/,
+  );
   assert.match(fileFormHtml, /Choose a file, or drag and drop it here\./);
   assert.doesNotMatch(fileFormHtml, /name="operation"/);
   assert.match(
@@ -2250,6 +2545,11 @@ test("browser storage representations execute real scoped D1 and R2 operations",
   const collectionUploadHtml = await collectionUpload!.text();
   assert.match(collectionUploadHtml, /<h2 id="file-details-heading">/);
   assert.match(collectionUploadHtml, /<h3>Update file<\/h3>/);
+  const collectionItemPath = new URL(collectionLocation).pathname;
+  assert.equal(
+    collectionUploadHtml.split(`action="${collectionItemPath}"`).length - 1,
+    3,
+  );
 
   const uploadForm = new FormData();
   uploadForm.set("ui", "1");
@@ -2467,7 +2767,7 @@ test("browser storage representations execute real scoped D1 and R2 operations",
 });
 
 test("current signed-in session drives UserInfo and isolated record and file operations", async () => {
-  const env = await testEnv();
+  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
   const config = loadConfig(env, env.ISSUER_URL!);
   const store = new MemoryAuthStore();
   const app = createTestAittaDB(env, store);
@@ -2679,7 +2979,11 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
     displayName: "AittaDB Admin",
   };
   const adminUser = await store.findOrCreateUser(adminIdentity, nowSeconds());
-  const env = { ...baseEnv, ADMIN_SUBJECTS: adminUser.id };
+  const env = {
+    ...baseEnv,
+    ADMIN_SUBJECTS: adminUser.id,
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+  };
   const app = createTestAittaDB(env, store, adminIdentity);
   const internalClient = await store.getClient(BROWSER_SESSION_CLIENT_ID);
   assert.ok(internalClient);
@@ -2711,10 +3015,12 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
     }),
   );
   const adminCsrf = cookieValue(admin!, "aittadb_csrf");
-  assert.equal(
-    (await admin!.text()).includes(BROWSER_SESSION_CLIENT_ID),
-    false,
-  );
+  const adminHtml = await admin!.text();
+  const adminSubmission = adminHtml.match(
+    /name="submission_token" value="([^"]+)"/,
+  )?.[1];
+  assert.match(adminSubmission ?? "", /^[A-Za-z0-9_-]{32}$/);
+  assert.equal(adminHtml.includes(BROWSER_SESSION_CLIENT_ID), false);
   const guessedMutation = await app.fetch(
     new Request("https://aittadb.example.test/admin/clients", {
       method: "POST",
@@ -2725,6 +3031,7 @@ test("reserved browser-session client is hidden, non-administrable, and rejected
       },
       body: form({
         csrf_token: adminCsrf,
+        submission_token: adminSubmission!,
         action: "disable",
         client_id: BROWSER_SESSION_CLIENT_ID,
       }),

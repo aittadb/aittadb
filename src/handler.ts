@@ -1,6 +1,10 @@
 import { loadConfig } from "./config";
 import { nowSeconds, publicJwk, randomToken, sha256 } from "./crypto";
 import { D1AuthStore } from "./store/d1";
+import {
+  CLEANUP_FAILURE_EVENT,
+  cleanupTelemetryPayload,
+} from "./store/cleanup";
 import type {
   RuntimeEnv,
   AuthStore,
@@ -31,6 +35,8 @@ import {
   json,
   oauthError,
   parseBasicAuth,
+  DEFAULT_FORM_MAX_BYTES,
+  readBoundedRequestBody,
   readForm,
   redirect,
   requireSameOrigin,
@@ -44,25 +50,68 @@ import {
   field,
   hypermediaNegotiationError,
   link,
+  negotiateHypermediaRepresentation,
   prefersVendorHypermedia,
   resourceDocument,
   type HypermediaAction,
 } from "./hypermedia";
 import { oidcConfiguration, openApiSpec } from "./openapi";
-import { storageEndpoint } from "./storage";
-import { storageBrowserEndpoint } from "./storage-browser";
+import { MAX_RECORD_BYTES, storageEndpoint } from "./storage";
+import {
+  MAX_STORAGE_FORM_BYTES,
+  storageBrowserEndpoint,
+} from "./storage-browser";
 import {
   hasBrowserSession,
   issueBrowserSessionAccessToken,
 } from "./browser-session";
 import { isBrowserSessionClientId } from "./system-client";
 import {
+  adminClientControls,
+  hasAdminClientControl,
+  parseAdminClientOperation,
+  type AdminMutationResult,
+} from "./admin-clients";
+import {
+  ADMIN_SUBMISSION_TTL_SECONDS,
+  adminResultCookie,
+  clearAdminResultCookie,
+  createAdminSubmissionToken,
+  isAdminSubmissionToken,
+  openAdminResult,
+  readAdminResultCookie,
+  sealAdminResult,
+} from "./admin-result";
+import {
   authorizationConsentDocument,
   deviceApprovalDocument,
   deviceDecisionDocument,
   deviceEntryDocument,
 } from "./transaction-resources";
+import { repairStorageFileOrphans } from "./storage-orphan-repair";
+import { accountCredentialPurgeFailureTelemetry } from "./store/account-credential-purge";
 import {
+  accountDeletionCoordinatorDeferredTelemetry,
+  accountDeletionCoordinatorFailureTelemetry,
+  coordinateAccountDeletionBatch,
+} from "./account-deletion-coordinator";
+import {
+  ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  ACCOUNT_DELETION_REQUEST_MAX_BYTES,
+  openAccountDeletionConfirmation,
+  sealAccountDeletionConfirmation,
+} from "./account-deletion-request";
+import {
+  accountDeletionPublicStatus,
+  accountDeletionStatusCookie,
+  openAccountDeletionStatus,
+  readAccountDeletionStatusHandle,
+  sealAccountDeletionStatus,
+  type AccountDeletionPublicStatus,
+} from "./account-deletion-status";
+import {
+  accountDeletionAcceptedPage,
+  accountDeletionStatusPage,
   adminClientsPage,
   authUiJs,
   authUiCss,
@@ -73,10 +122,18 @@ import {
   docsPage,
   errorPage,
   healthPage,
+  privacyPolicyPage,
   sessionPage,
   serviceHomePage,
   statisticsPage,
 } from "./pages";
+import {
+  buildPrivacyPolicy,
+  EU_PRIVACY_RIGHTS_URL,
+  resolvePrivacyContact,
+  SITES_DPA_URL,
+  SITES_TERMS_URL,
+} from "./privacy";
 import {
   authorizationFormPage,
   deviceAuthorizationFormPage,
@@ -98,12 +155,19 @@ import {
   createDeviceAuthorization,
   denyAuthorizationRequest,
   exchangeAuthorizationCode,
+  issueClientCredentialsToken,
   normalizeUserCode,
   parseScopes,
   pollDeviceToken,
   rotateRefreshToken,
+  validateClientRegistrationInput,
   verifyAccessToken,
 } from "./oauth";
+import {
+  isSubjectAuthorizationDenied,
+  requireActiveSubject,
+  startSubjectAccountDeletion,
+} from "./subject-access";
 
 export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
@@ -132,6 +196,113 @@ export function createAittaDBWithStore(
   return {
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
+      if (!config.features.oauthApps && url.pathname === "/admin/clients") {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
+      if (
+        !config.features.oauthApps &&
+        isExternalOAuthInitiationRoute(url.pathname)
+      ) {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
+      if (!config.features.oauthApps && url.pathname === "/oauth/token") {
+        const negotiationError =
+          request.method === "GET" ? hypermediaNegotiationError(request) : null;
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : request.method === "POST"
+              ? oauthError(
+                  "temporarily_unavailable",
+                  "OAuth Apps is disabled for this deployment",
+                  503,
+                )
+              : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
+      if (
+        !config.features.oauthApps &&
+        (url.pathname === "/oauth/revoke" ||
+          url.pathname === "/oauth/introspect")
+      ) {
+        const negotiationError =
+          request.method === "GET" ? hypermediaNegotiationError(request) : null;
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : request.method === "POST"
+              ? oauthError(
+                  "temporarily_unavailable",
+                  "OAuth Apps is disabled for this deployment",
+                  503,
+                )
+              : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
+      if (!config.features.oauthApps && url.pathname === "/userinfo") {
+        const negotiationError =
+          request.method === "GET" ? hypermediaNegotiationError(request) : null;
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "OAuth Apps"),
+          config,
+        );
+      }
+      if (!config.features.records && isRecordsRoute(url.pathname)) {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "JSON Records"),
+          config,
+        );
+      }
+      if (!config.features.files && isFilesRoute(url.pathname)) {
+        const negotiationError = usesApplicationNegotiation(request, url)
+          ? hypermediaNegotiationError(request)
+          : null;
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "File Storage"),
+          config,
+        );
+      }
+      const browserOriginRejection = rejectInvalidBrowserMutationOrigin(
+        request,
+        url,
+        config.issuerUrl,
+      );
+      if (browserOriginRejection) {
+        return finalizeResponse(request, browserOriginRejection, config);
+      }
+      const prebuffered = await prebufferAcceptedRequestBody(request, url);
+      if (prebuffered instanceof Response) {
+        return finalizeResponse(request, prebuffered, config);
+      }
+      request = prebuffered;
       const corsHeaders = isCorsControlledRoute(url.pathname)
         ? await corsHeadersForRequest(request, url, config, store)
         : new Headers();
@@ -166,8 +337,57 @@ export function createAittaDBWithStore(
         );
       }
 
+      const multipartIdentityRejection = rejectUntrustedBrowserFileMultipart(
+        request,
+        url,
+        identityProvider,
+      );
+      if (multipartIdentityRejection) {
+        return finalizeResponse(
+          request,
+          multipartIdentityRejection,
+          config,
+          corsHeaders,
+        );
+      }
+
+      if (
+        url.pathname === "/statistics" &&
+        request.method === "GET" &&
+        !config.features.statistics
+      ) {
+        return finalizeResponse(
+          request,
+          hypermediaError(
+            request,
+            "feature_unavailable",
+            "Service statistics are disabled by deployment configuration",
+            503,
+            {
+              links: [
+                link("service", config.issuerUrl, {
+                  type: HYPERMEDIA_MEDIA_TYPE,
+                }),
+                link("health", `${config.issuerUrl}/health`, {
+                  type: HYPERMEDIA_MEDIA_TYPE,
+                }),
+                link("documentation", `${config.issuerUrl}/docs`, {
+                  type: "text/html",
+                }),
+              ],
+            },
+          ),
+          config,
+          corsHeaders,
+        );
+      }
+
       try {
-        if (!store && needsStore(url.pathname))
+        if (
+          !store &&
+          needsStore(url.pathname) &&
+          !(url.pathname === "/account/deletion" && request.method === "GET")
+        )
           return finalizeResponse(
             request,
             oauthError("database_unavailable", "Database is unavailable", 503),
@@ -182,6 +402,7 @@ export function createAittaDBWithStore(
           store,
           config,
           identityProvider,
+          ctx,
         );
         const finalized = await finalizeResponse(
           request,
@@ -189,8 +410,18 @@ export function createAittaDBWithStore(
           config,
           corsHeaders,
         );
-        if (store && needsStore(url.pathname)) {
-          scheduleCleanup(store, ctx, nowSeconds());
+        if (
+          store &&
+          needsStore(url.pathname) &&
+          url.pathname !== "/account/deletion"
+        ) {
+          scheduleCleanup(
+            store,
+            env.BUCKET,
+            ctx,
+            nowSeconds(),
+            config.maintenanceCleanupTelemetryEnabled,
+          );
         }
         return finalized;
       } catch (error) {
@@ -221,6 +452,86 @@ export function createAittaDBWithStore(
   };
 }
 
+interface RequestBodyPolicy {
+  maxBytes: number;
+  tooLargeDescription: string;
+}
+
+const URL_ENCODED_POST_PATHS = new Set([
+  "/oauth/device_authorization",
+  "/oauth/token",
+  "/oauth/revoke",
+  "/oauth/introspect",
+  "/userinfo",
+  "/device",
+  "/device/decision",
+  "/consent",
+  "/admin/clients",
+]);
+
+async function prebufferAcceptedRequestBody(
+  request: Request,
+  url: URL,
+): Promise<Request | Response> {
+  const policy = acceptedRequestBodyPolicy(request, url);
+  if (!policy) return request;
+  try {
+    const body = await readBoundedRequestBody(request, policy.maxBytes);
+    return new Request(request, { body });
+  } catch (error) {
+    if (error instanceof Error && error.message === "request_too_large") {
+      return oauthError("invalid_request", policy.tooLargeDescription, 413);
+    }
+    return oauthError("invalid_request", "Malformed request body", 400);
+  }
+}
+
+function acceptedRequestBodyPolicy(
+  request: Request,
+  url: URL,
+): RequestBodyPolicy | null {
+  const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+  if (
+    request.method === "POST" &&
+    url.pathname === "/account/deletion" &&
+    (contentType.includes("application/x-www-form-urlencoded") ||
+      isJsonMediaType(contentType))
+  ) {
+    return {
+      maxBytes: ACCOUNT_DELETION_REQUEST_MAX_BYTES,
+      tooLargeDescription: "Account deletion request is too large",
+    };
+  }
+  if (
+    request.method === "POST" &&
+    contentType.includes("application/x-www-form-urlencoded")
+  ) {
+    if (isRecordsRoute(url.pathname) || isFilesRoute(url.pathname)) {
+      return {
+        maxBytes: MAX_STORAGE_FORM_BYTES,
+        tooLargeDescription: "Storage browser form is too large",
+      };
+    }
+    if (URL_ENCODED_POST_PATHS.has(url.pathname)) {
+      return {
+        maxBytes: DEFAULT_FORM_MAX_BYTES,
+        tooLargeDescription: "Request is too large",
+      };
+    }
+  }
+  if (
+    request.method === "PUT" &&
+    isRecordsRoute(url.pathname) &&
+    contentType.includes("application/json")
+  ) {
+    return {
+      maxBytes: MAX_RECORD_BYTES,
+      tooLargeDescription: "Storage record is too large",
+    };
+  }
+  return null;
+}
+
 async function route(
   request: Request,
   url: URL,
@@ -228,6 +539,7 @@ async function route(
   store: AuthStore | null,
   config: ReturnType<typeof loadConfig>,
   identityProvider: UpstreamIdentityProvider,
+  ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
 ): Promise<Response> {
   if (url.pathname === "/" && request.method === "GET") {
     const identity = identityProvider.read(request);
@@ -237,12 +549,14 @@ async function route(
         ? await store.findOrCreateUser(identity, nowSeconds())
         : null;
     const showAdmin = Boolean(
-      signedInUser && config.adminSubjects.includes(signedInUser.id),
+      config.features.oauthApps &&
+      signedInUser &&
+      config.adminSubjects.includes(signedInUser.id),
     );
     const metadata = {
       service: "AittaDB",
       description:
-        "A hosted application backend for third-party apps, with ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, and file storage.",
+        "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. AittaDB issues its own sessions and never forwards ChatGPT credentials.",
       hostingPlatform: "OpenAI-hosted ChatGPT Sites",
       issuer: config.issuerUrl,
       docs: `${config.issuerUrl}/docs`,
@@ -255,11 +569,20 @@ async function route(
         credentialsForwarded: false,
       },
       sessionIssuer: "AittaDB",
+      features: config.features,
       capabilities: [
         "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
-        "AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions",
-        "D1-backed JSON records isolated by AittaDB user and client",
-        "R2-backed files with D1 metadata isolated by AittaDB user and client",
+        ...(config.features.oauthApps
+          ? ["AittaDB-issued OAuth 2.0, OpenID Connect, and JWT sessions"]
+          : ["AittaDB-issued private sessions and verifiable JWT credentials"]),
+        ...(config.features.records
+          ? ["D1-backed JSON records isolated by AittaDB user and client"]
+          : []),
+        ...(config.features.files
+          ? [
+              "R2-backed files with D1 metadata isolated by AittaDB user and client",
+            ]
+          : []),
       ],
       plannedCapabilities: ["Persistent events and long-polling delivery"],
     };
@@ -269,18 +592,33 @@ async function route(
       link("health", `${config.issuerUrl}/health`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
-      link("statistics", `${config.issuerUrl}/statistics`, {
+      ...(config.features.statistics
+        ? [
+            link("statistics", `${config.issuerUrl}/statistics`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+      link("privacy-policy", `${config.issuerUrl}/privacy`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
       link("session", `${config.issuerUrl}/session`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
-      link("storage-records", `${config.issuerUrl}/storage/records`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
-      link("storage-files", `${config.issuerUrl}/storage/files`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.records
+        ? [
+            link("storage-records", `${config.issuerUrl}/storage/records`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+      ...(config.features.files
+        ? [
+            link("storage-files", `${config.issuerUrl}/storage/files`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       link("documentation", `${config.issuerUrl}/docs`, { type: "text/html" }),
       link("describedby", `${config.issuerUrl}/openapi.json`, {
         type: "application/json",
@@ -293,15 +631,25 @@ async function route(
       link("jwks", `${config.issuerUrl}/.well-known/jwks.json`, {
         type: "application/json",
       }),
-      link("oauth-authorization", endpoints.authorize.href, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
-      link("oauth-device-authorization", endpoints.deviceAuthorization.href, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
-      link("oauth-token", endpoints.token.href, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
+      ...(config.features.oauthApps
+        ? [
+            link("oauth-authorization", endpoints.authorize.href, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+            link(
+              "oauth-device-authorization",
+              endpoints.deviceAuthorization.href,
+              { type: HYPERMEDIA_MEDIA_TYPE },
+            ),
+          ]
+        : []),
+      ...(config.features.oauthApps
+        ? [
+            link("oauth-token", endpoints.token.href, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       ...(showAdmin
         ? [
             link("client-administration", `${config.issuerUrl}/admin/clients`, {
@@ -320,14 +668,25 @@ async function route(
           : `${config.issuerUrl}/session`,
         { authorization: { scheme: "sites-session" }, fields: [] },
       ),
+      ...(config.features.statistics
+        ? [
+            action(
+              "read-statistics",
+              "View service statistics",
+              "GET",
+              `${config.issuerUrl}/statistics`,
+              { authorization: { scheme: "none" }, fields: [] },
+            ),
+          ]
+        : []),
       action(
-        "read-statistics",
-        "View service statistics",
+        "read-privacy-policy",
+        "Read Privacy Policy",
         "GET",
-        `${config.issuerUrl}/statistics`,
+        `${config.issuerUrl}/privacy`,
         { authorization: { scheme: "none" }, fields: [] },
       ),
-      ...(signedIn
+      ...(signedIn && config.features.records
         ? [
             action(
               "open-records",
@@ -336,6 +695,10 @@ async function route(
               `${config.issuerUrl}/storage/records`,
               { authorization: { scheme: "sites-session" }, fields: [] },
             ),
+          ]
+        : []),
+      ...(signedIn && config.features.files
+        ? [
             action(
               "open-files",
               "Open file storage",
@@ -364,7 +727,7 @@ async function route(
       links,
       actions,
     });
-    return acceptsHtml(request)
+    return negotiateHypermediaRepresentation(request, "html") === "html"
       ? html(serviceHomePage(metadata, { showAdmin, signedIn }))
       : hypermediaJson(request, document);
   }
@@ -403,7 +766,9 @@ async function route(
     url.pathname === "/.well-known/openid-configuration" &&
     request.method === "GET"
   ) {
-    const configuration = oidcConfiguration(config.issuerUrl);
+    const configuration = oidcConfiguration(config.issuerUrl, {
+      oauthAppsEnabled: config.features.oauthApps,
+    });
     return prefersRawJson(request, url)
       ? json(configuration)
       : html(
@@ -411,7 +776,7 @@ async function route(
             title: "OpenID configuration",
             eyebrow: "Issuer discovery",
             summary:
-              "Published OpenID Provider metadata for this independent AittaDB issuer.",
+              "Published OpenID Provider metadata for this AittaDB issuer.",
             payload: configuration,
             rawHref: "/.well-known/openid-configuration?format=json",
             visualHeading: "Every endpoint begins with one issuer.",
@@ -457,6 +822,70 @@ async function route(
   if (url.pathname === "/docs" && request.method === "GET")
     return html(docsPage());
 
+  if (url.pathname === "/privacy" && request.method === "GET") {
+    const contact = await resolvePrivacyContact(config, store);
+    if (!contact) {
+      return hypermediaError(
+        request,
+        "privacy_policy_unavailable",
+        "The deployment operator has not configured an available privacy contact",
+        503,
+        {
+          links: [
+            link("self", `${config.issuerUrl}/privacy`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+            link("service", config.issuerUrl, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+            link("documentation", `${config.issuerUrl}/docs`, {
+              type: "text/html",
+            }),
+          ],
+        },
+      );
+    }
+    const policy = buildPrivacyPolicy(config, contact);
+    const document = resourceDocument({
+      type: "privacy-policy",
+      id: `${config.issuerUrl}/privacy`,
+      data: policy,
+      links: [
+        link("self", `${config.issuerUrl}/privacy`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("contact", `mailto:${contact.email}`, {
+          title: "Contact the deployment operator",
+        }),
+        link("terms", SITES_TERMS_URL, { type: "text/html" }),
+        link("service-provider-privacy", SITES_DPA_URL, {
+          type: "text/html",
+        }),
+        link("privacy-rights", EU_PRIVACY_RIGHTS_URL, {
+          type: "text/html",
+        }),
+        link("documentation", `${config.issuerUrl}/docs`, {
+          type: "text/html",
+        }),
+      ],
+    });
+    return acceptsHtml(request)
+      ? html(privacyPolicyPage(policy))
+      : hypermediaJson(request, document);
+  }
+
+  if (url.pathname === "/account/deletion" && request.method === "GET") {
+    return accountDeletionStatusGet(
+      request,
+      env,
+      store,
+      config,
+      identityProvider,
+      ctx,
+    );
+  }
+
   if (!store)
     return oauthError("database_unavailable", "Database is unavailable", 503);
 
@@ -484,7 +913,23 @@ async function route(
   }
 
   if (url.pathname === "/session" && request.method === "GET") {
-    return localSessionEndpoint(request, store, config, identityProvider);
+    return localSessionEndpoint(
+      request,
+      store,
+      config,
+      identityProvider,
+      Boolean(env.BUCKET && ctx),
+    );
+  }
+  if (url.pathname === "/account/deletion" && request.method === "POST") {
+    return accountDeletionRequestPost(
+      request,
+      env,
+      store,
+      config,
+      identityProvider,
+      ctx,
+    );
   }
   if (url.pathname === "/authorize" && request.method === "GET") {
     if (!url.searchParams.has("client_id")) {
@@ -584,7 +1029,15 @@ async function route(
     }
     const response = await tokenEndpoint(request, config, store, form);
     return browser
-      ? browserJsonResponse(response, tokenResultPage, "/oauth/token")
+      ? browserJsonResponse(
+          response,
+          (payload) =>
+            tokenResultPage(
+              payload,
+              form.get("grant_type") === "client_credentials",
+            ),
+          "/oauth/token",
+        )
       : response;
   }
   if (url.pathname === "/oauth/revoke" && request.method === "GET") {
@@ -887,6 +1340,7 @@ async function localSessionEndpoint(
   store: AuthStore,
   config: ReturnType<typeof loadConfig>,
   identityProvider: UpstreamIdentityProvider,
+  accountDeletionAvailable: boolean,
 ): Promise<Response> {
   const identity = identityProvider.read(request);
   if (!identity) {
@@ -899,6 +1353,9 @@ async function localSessionEndpoint(
       {
         links: [
           link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+          link("privacy-policy", `${config.issuerUrl}/privacy`, {
+            type: HYPERMEDIA_MEDIA_TYPE,
+          }),
           link(
             "sign-in",
             `${config.issuerUrl}/signin-with-chatgpt?return_to=%2Fsession`,
@@ -922,8 +1379,33 @@ async function localSessionEndpoint(
   }
 
   const user = await store.findOrCreateUser(identity, nowSeconds());
-  const isAdmin = config.adminSubjects.includes(user.id);
+  try {
+    await requireActiveSubject(store, user.id);
+  } catch (error) {
+    if (!isSubjectAuthorizationDenied(error)) throw error;
+    return acceptsHtml(request)
+      ? html(
+          errorPage("Session unavailable", "Authentication is required", {
+            status: 401,
+            error: "login_required",
+          }),
+          { status: 401 },
+        )
+      : oauthError("login_required", "Authentication is required", 401);
+  }
+  const showAdmin =
+    config.features.oauthApps && config.adminSubjects.includes(user.id);
   const csrf = csrfTokenForRequest(request);
+  const canRequestAccountDeletion =
+    accountDeletionAvailable && !config.adminSubjects.includes(user.id);
+  const accountDeletionConfirmation = canRequestAccountDeletion
+    ? await sealAccountDeletionConfirmation(
+        user.id,
+        identity.email,
+        config,
+        nowSeconds(),
+      )
+    : null;
   const session = {
     authenticated: true,
     user: {
@@ -946,16 +1428,31 @@ async function localSessionEndpoint(
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
       link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
-      link("userinfo", `${config.issuerUrl}/userinfo`, {
+      link("privacy-policy", `${config.issuerUrl}/privacy`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
-      link("storage-records", `${config.issuerUrl}/storage/records`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
-      link("storage-files", `${config.issuerUrl}/storage/files`, {
-        type: HYPERMEDIA_MEDIA_TYPE,
-      }),
-      ...(isAdmin
+      ...(config.features.oauthApps
+        ? [
+            link("userinfo", `${config.issuerUrl}/userinfo`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+      ...(config.features.records
+        ? [
+            link("storage-records", `${config.issuerUrl}/storage/records`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+      ...(config.features.files
+        ? [
+            link("storage-files", `${config.issuerUrl}/storage/files`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+      ...(showAdmin
         ? [
             link("client-administration", `${config.issuerUrl}/admin/clients`, {
               type: HYPERMEDIA_MEDIA_TYPE,
@@ -969,49 +1466,64 @@ async function localSessionEndpoint(
       ),
     ],
     actions: [
-      action(
-        "read-userinfo-with-session",
-        "Read current identity claims",
-        "POST",
-        `${config.issuerUrl}/userinfo`,
-        {
-          type: "application/x-www-form-urlencoded",
-          authorization: { scheme: "sites-session" },
-          fields: [
-            field("ui", "Browser operation", "string", "body", {
-              required: true,
-              value: "1",
-            }),
-            field("csrf_token", "CSRF token", "string", "body", {
-              required: true,
-              secret: true,
-              value: csrf,
-            }),
-            field("auth_mode", "Authentication", "string", "body", {
-              required: true,
-              value: "session",
-              options: [
-                { value: "session", title: "Current signed-in session" },
-              ],
-            }),
-          ],
-        },
-      ),
-      action(
-        "manage-session-records",
-        "Manage JSON records",
-        "GET",
-        `${config.issuerUrl}/storage/records`,
-        { authorization: { scheme: "sites-session" }, fields: [] },
-      ),
-      action(
-        "manage-session-files",
-        "Manage files",
-        "GET",
-        `${config.issuerUrl}/storage/files`,
-        { authorization: { scheme: "sites-session" }, fields: [] },
-      ),
-      ...(isAdmin
+      ...(config.features.oauthApps
+        ? [
+            action(
+              "read-userinfo-with-session",
+              "Read current identity claims",
+              "POST",
+              `${config.issuerUrl}/userinfo`,
+              {
+                type: "application/x-www-form-urlencoded",
+                authorization: { scheme: "sites-session" },
+                fields: [
+                  field("ui", "Browser operation", "string", "body", {
+                    required: true,
+                    value: "1",
+                  }),
+                  field("csrf_token", "CSRF token", "string", "body", {
+                    required: true,
+                    secret: true,
+                    value: csrf,
+                  }),
+                  field("auth_mode", "Authentication", "string", "body", {
+                    required: true,
+                    value: "session",
+                    options: [
+                      {
+                        value: "session",
+                        title: "Current signed-in session",
+                      },
+                    ],
+                  }),
+                ],
+              },
+            ),
+          ]
+        : []),
+      ...(config.features.records
+        ? [
+            action(
+              "manage-session-records",
+              "Manage JSON records",
+              "GET",
+              `${config.issuerUrl}/storage/records`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+      ...(config.features.files
+        ? [
+            action(
+              "manage-session-files",
+              "Manage files",
+              "GET",
+              `${config.issuerUrl}/storage/files`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+      ...(showAdmin
         ? [
             action(
               "manage-clients",
@@ -1019,6 +1531,53 @@ async function localSessionEndpoint(
               "GET",
               `${config.issuerUrl}/admin/clients`,
               { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+      ...(accountDeletionConfirmation
+        ? [
+            action(
+              "request-account-deletion",
+              "Delete my AittaDB account",
+              "POST",
+              `${config.issuerUrl}/account/deletion`,
+              {
+                type: "application/x-www-form-urlencoded",
+                authorization: { scheme: "sites-session" },
+                description:
+                  "Starts deletion only for the currently signed-in local AittaDB account after explicit confirmation.",
+                fields: [
+                  field("csrf_token", "CSRF token", "string", "body", {
+                    required: true,
+                    secret: true,
+                    value: csrf,
+                  }),
+                  field(
+                    "confirmation_token",
+                    "Account-bound confirmation",
+                    "string",
+                    "body",
+                    {
+                      required: true,
+                      secret: true,
+                      value: accountDeletionConfirmation,
+                      max_length: 512,
+                    },
+                  ),
+                  field(
+                    "confirmation",
+                    "Type delete my account",
+                    "string",
+                    "body",
+                    {
+                      required: true,
+                      min_length: ACCOUNT_DELETION_CONFIRMATION_PHRASE.length,
+                      max_length: ACCOUNT_DELETION_CONFIRMATION_PHRASE.length,
+                      description: `Enter exactly: ${ACCOUNT_DELETION_CONFIRMATION_PHRASE}`,
+                    },
+                  ),
+                ],
+              },
             ),
           ]
         : []),
@@ -1032,10 +1591,347 @@ async function localSessionEndpoint(
     ],
   });
   return acceptsHtml(request)
-    ? html(sessionPage(user, isAdmin))
+    ? html(
+        sessionPage(
+          user,
+          showAdmin,
+          config.features.records,
+          config.features.files,
+          config.features.oauthApps,
+          accountDeletionConfirmation
+            ? {
+                csrf,
+                confirmationToken: accountDeletionConfirmation,
+                confirmationPhrase: ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+              }
+            : undefined,
+        ),
+        { headers: { "set-cookie": csrfCookie(csrf) } },
+      )
     : hypermediaJson(request, document, {
         headers: { "set-cookie": csrfCookie(csrf) },
       });
+}
+
+interface AccountDeletionSubmission {
+  confirmation: string;
+  confirmationToken: string;
+  csrfToken: string;
+}
+
+type AccountDeletionSubmissionResult =
+  | { ok: true; value: AccountDeletionSubmission }
+  | { ok: false; status: 400 | 415 };
+
+async function accountDeletionRequestPost(
+  request: Request,
+  env: RuntimeEnv,
+  store: AuthStore,
+  config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
+  ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
+): Promise<Response> {
+  const limited = await endpointRateLimit(
+    store,
+    request,
+    config,
+    "account-deletion",
+    5,
+  );
+  if (limited) return limited;
+  if (!env.BUCKET || !ctx) {
+    return accountDeletionRejection(request, config, 503);
+  }
+
+  const identity = identityProvider.read(request);
+  if (!identity) return accountDeletionRejection(request, config);
+  const user = await store.getUserByEmail(identity.email);
+  if (!user || config.adminSubjects.includes(user.id)) {
+    return accountDeletionRejection(request, config);
+  }
+
+  const submission = await readAccountDeletionSubmission(request);
+  if (!submission.ok) {
+    return accountDeletionRejection(request, config, submission.status);
+  }
+  const now = nowSeconds();
+  if (
+    submission.value.confirmation !== ACCOUNT_DELETION_CONFIRMATION_PHRASE ||
+    !csrfTokenMatches(request, submission.value.csrfToken) ||
+    !(await openAccountDeletionConfirmation(
+      submission.value.confirmationToken,
+      user.id,
+      identity.email,
+      config,
+      now,
+    ))
+  ) {
+    return accountDeletionRejection(request, config);
+  }
+
+  const statusHandle = await sealAccountDeletionStatus(
+    user.id,
+    identity.email,
+    config,
+    now,
+  );
+
+  let started;
+  try {
+    started = await startSubjectAccountDeletion(
+      store,
+      config.adminSubjects,
+      user.id,
+      now,
+    );
+  } catch (error) {
+    if (
+      isSubjectAuthorizationDenied(error) ||
+      (error instanceof Error &&
+        error.message === "account_deletion_subject_not_found")
+    ) {
+      return accountDeletionRejection(request, config);
+    }
+    throw error;
+  }
+  if (!started.created) {
+    return accountDeletionRejection(request, config);
+  }
+
+  nudgeAccountDeletionCoordinator(store, env.BUCKET, ctx);
+  const document = resourceDocument({
+    type: "account-deletion-request-accepted",
+    id: `${config.issuerUrl}/account/deletion`,
+    data: { accepted: true },
+    links: [
+      link("self", `${config.issuerUrl}/account/deletion`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("privacy-policy", `${config.issuerUrl}/privacy`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+    ],
+    actions: [
+      action(
+        "read-account-deletion-status",
+        "View deletion status",
+        "GET",
+        `${config.issuerUrl}/account/deletion`,
+        {
+          authorization: { scheme: "sites-session" },
+          fields: [],
+        },
+      ),
+    ],
+  });
+  const headers = {
+    "set-cookie": accountDeletionStatusCookie(statusHandle),
+  };
+  return acceptsHtml(request)
+    ? html(accountDeletionAcceptedPage(), { status: 202, headers })
+    : hypermediaJson(request, document, { status: 202, headers });
+}
+
+async function accountDeletionStatusGet(
+  request: Request,
+  env: RuntimeEnv,
+  store: AuthStore | null,
+  config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
+  ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
+): Promise<Response> {
+  const identity = identityProvider.read(request);
+  const handle = readAccountDeletionStatusHandle(request);
+  if (!identity || !handle) {
+    return accountDeletionStatusRejection(request, config);
+  }
+  const opened = await openAccountDeletionStatus(
+    handle,
+    identity.email,
+    config,
+    nowSeconds(),
+  );
+  if (!opened) return accountDeletionStatusRejection(request, config);
+  if (!store) return accountDeletionStatusRejection(request, config, 503);
+
+  const job = await store.getAccountDeletionJob(opened.subject);
+  if (!job) return accountDeletionStatusRejection(request, config);
+  const status = accountDeletionPublicStatus(job.state);
+  if (status !== "completed") {
+    if (!env.BUCKET || !ctx) {
+      return accountDeletionStatusRejection(request, config, 503);
+    }
+    nudgeAccountDeletionCoordinator(store, env.BUCKET, ctx);
+  }
+
+  const currentAction = accountDeletionStatusAction(status, config.issuerUrl);
+  const document = resourceDocument({
+    type: "account-deletion-status",
+    id: `${config.issuerUrl}/account/deletion`,
+    data: { status },
+    links: [
+      link("self", `${config.issuerUrl}/account/deletion`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("privacy-policy", `${config.issuerUrl}/privacy`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+    ],
+    actions: [currentAction],
+  });
+  return acceptsHtml(request)
+    ? html(accountDeletionStatusPage(status))
+    : hypermediaJson(request, document);
+}
+
+function accountDeletionStatusAction(
+  status: AccountDeletionPublicStatus,
+  issuerUrl: string,
+): HypermediaAction {
+  if (status === "completed") {
+    return action(
+      "sign-out",
+      "Sign out",
+      "GET",
+      `${issuerUrl}/signout-with-chatgpt?return_to=%2F`,
+      {
+        authorization: { scheme: "sites-session" },
+        fields: [],
+      },
+    );
+  }
+  return action(
+    status === "retry"
+      ? "retry-account-deletion"
+      : "refresh-account-deletion-status",
+    status === "retry" ? "Retry deletion" : "Refresh deletion status",
+    "GET",
+    `${issuerUrl}/account/deletion`,
+    {
+      authorization: { scheme: "sites-session" },
+      fields: [],
+    },
+  );
+}
+
+function accountDeletionStatusRejection(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  status: 400 | 503 = 400,
+): Response {
+  return hypermediaError(
+    request,
+    status === 503 ? "service_unavailable" : "invalid_request",
+    "The account deletion status is unavailable",
+    status,
+    {
+      links: [
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("privacy-policy", `${config.issuerUrl}/privacy`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+      ],
+    },
+  );
+}
+
+async function readAccountDeletionSubmission(
+  request: Request,
+): Promise<AccountDeletionSubmissionResult> {
+  const contentType = request.headers.get("content-type") ?? "";
+  try {
+    if (contentType.includes("application/x-www-form-urlencoded")) {
+      const form = await readForm(request, ACCOUNT_DELETION_REQUEST_MAX_BYTES);
+      const entries = [...form.entries()];
+      if (
+        entries.length !== 3 ||
+        new Set(entries.map(([name]) => name)).size !== 3
+      ) {
+        return { ok: false, status: 400 };
+      }
+      return accountDeletionSubmissionFromUnknown(Object.fromEntries(entries));
+    }
+    if (!isJsonMediaType(contentType)) return { ok: false, status: 415 };
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(
+      await readBoundedRequestBody(request, ACCOUNT_DELETION_REQUEST_MAX_BYTES),
+    );
+    return accountDeletionSubmissionFromUnknown(JSON.parse(text) as unknown);
+  } catch {
+    return { ok: false, status: 400 };
+  }
+}
+
+function accountDeletionSubmissionFromUnknown(
+  value: unknown,
+): AccountDeletionSubmissionResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, status: 400 };
+  }
+  const input = value as Record<string, unknown>;
+  if (
+    Object.keys(input).length !== 3 ||
+    typeof input.confirmation !== "string" ||
+    typeof input.confirmation_token !== "string" ||
+    typeof input.csrf_token !== "string"
+  ) {
+    return { ok: false, status: 400 };
+  }
+  return {
+    ok: true,
+    value: {
+      confirmation: input.confirmation,
+      confirmationToken: input.confirmation_token,
+      csrfToken: input.csrf_token,
+    },
+  };
+}
+
+function accountDeletionRejection(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  status: 400 | 415 | 503 = 400,
+): Response {
+  return hypermediaError(
+    request,
+    status === 503 ? "service_unavailable" : "invalid_request",
+    "The account deletion request could not be accepted",
+    status,
+    {
+      links: [
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("session", `${config.issuerUrl}/session`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+        link("privacy-policy", `${config.issuerUrl}/privacy`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+      ],
+    },
+  );
+}
+
+function nudgeAccountDeletionCoordinator(
+  store: AuthStore,
+  bucket: R2Bucket,
+  ctx: { waitUntil(promise: Promise<unknown>): void },
+): void {
+  const work = coordinateAccountDeletionBatch(
+    store,
+    bucket,
+    undefined,
+    (phase) => console.error(accountDeletionCoordinatorFailureTelemetry(phase)),
+    (phase) => console.warn(accountDeletionCoordinatorDeferredTelemetry(phase)),
+    (phase) => console.error(accountCredentialPurgeFailureTelemetry(phase)),
+  ).then(
+    () => undefined,
+    () => undefined,
+  );
+  try {
+    ctx.waitUntil(work);
+  } catch {
+    void work;
+  }
 }
 
 async function finalizeResponse(
@@ -1060,6 +1956,35 @@ async function finalizeResponse(
     statusText: negotiated.statusText,
     headers,
   });
+}
+
+function featureUnavailableResponse(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  feature: string,
+): Response {
+  return hypermediaError(
+    request,
+    "feature_unavailable",
+    `${feature} is disabled for this deployment`,
+    503,
+    {
+      links: [
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("privacy-policy", `${config.issuerUrl}/privacy`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+        link("documentation", `${config.issuerUrl}/docs`, {
+          type: "text/html",
+        }),
+      ],
+      actions: [
+        action("open-service", "Open service", "GET", config.issuerUrl, {
+          fields: [],
+        }),
+      ],
+    },
+  );
 }
 
 function negotiateApplicationError(
@@ -1290,7 +2215,20 @@ async function tokenEndpoint(
   if (client instanceof Response)
     return responseWithHeaders(client, corsHeaders);
   let response: Response;
-  if (grantType === "authorization_code") {
+  if (grantType === "client_credentials") {
+    response = await issueClientCredentialsToken({
+      config,
+      store,
+      client,
+      requestedScope: form.get("scope"),
+      now: nowSeconds(),
+    });
+  } else if (client.type === "service") {
+    response = oauthError(
+      "unauthorized_client",
+      "Service clients can use only client_credentials",
+    );
+  } else if (grantType === "authorization_code") {
     response = await exchangeAuthorizationCode(form, config, store, client);
   } else if (grantType === "refresh_token") {
     response = await rotateRefreshToken(form, config, store, client);
@@ -1348,6 +2286,7 @@ async function revokeEndpoint(
       const verified = await verifyAccessToken(token, config, store, client.id);
       await store.revokeAccessTokenJti(
         verified.claims.jti,
+        verified.claims.sub,
         verified.claims.exp,
         now,
       );
@@ -1375,8 +2314,8 @@ async function introspectEndpoint(
   const form = submittedForm ?? (await readForm(request));
   const client = await authenticateClient(request, form, store);
   if (client instanceof Response) return client;
-  if (client.type !== "confidential")
-    return oauthError("invalid_client", "Confidential client required", 401);
+  if (client.type === "public")
+    return oauthError("invalid_client", "Client authentication required", 401);
   try {
     const verified = await verifyAccessToken(
       form.get("token") || "",
@@ -1713,13 +2652,20 @@ async function adminClientsGet(
     identityProvider,
   );
   if (admin instanceof Response) return admin;
+  const clients = await store.listClients();
+  const resultCookie = readAdminResultCookie(request);
+  const result = resultCookie
+    ? await consumeAdminResult(resultCookie, admin.user.id, config, store)
+    : null;
   const csrf = csrfTokenForRequest(request);
   return adminClientsResponse(
     request,
     config,
-    await store.listClients(),
+    clients,
     csrf,
-    null,
+    createAdminSubmissionToken(),
+    result,
+    Boolean(resultCookie),
   );
 }
 
@@ -1739,41 +2685,91 @@ async function adminClientsPost(
   );
   if (admin instanceof Response) return admin;
   if (!requireSameOrigin(request, config.issuerUrl)) {
-    return negotiatedFormError(
+    return adminClientsError(
       request,
+      config.issuerUrl,
       "invalid_request",
       "Same-origin form submission is required",
       403,
     );
   }
-  const form = await readForm(request);
+  let form: URLSearchParams;
+  try {
+    form = await readForm(request);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "unsupported_media_type") {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Unsupported content type",
+        415,
+      );
+    }
+    if (message === "request_too_large") {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Request is too large",
+        413,
+      );
+    }
+    throw error;
+  }
   if (!validCsrf(request, form)) {
-    return negotiatedFormError(
+    return adminClientsError(
       request,
+      config.issuerUrl,
       "invalid_request",
       "CSRF validation failed",
       403,
     );
   }
-  const action = form.get("action");
-  if (action) {
-    const clientId = form.get("client_id") || "";
-    if (isBrowserSessionClientId(clientId)) {
-      return negotiatedFormError(
+  if (form.has("action")) {
+    const action = parseAdminClientOperation(form.get("action"));
+    if (!action) {
+      return adminClientsError(
         request,
+        config.issuerUrl,
+        "invalid_request",
+        "Unsupported administrative action",
+        400,
+      );
+    }
+    const clientId = form.get("client_id") || "";
+    const client = await store.getClient(clientId);
+    if (!client || isBrowserSessionClientId(clientId)) {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
         "not_found",
         "Client is unavailable",
         404,
       );
     }
-    if (
-      !["disable", "enable", "revoke_grants", "rotate_secret"].includes(action)
-    ) {
-      return negotiatedFormError(
+    if (!hasAdminClientControl(client, action)) {
+      return adminClientsError(
         request,
+        config.issuerUrl,
         "invalid_request",
-        "Unsupported administrative action",
-        400,
+        "Client operation is unavailable in its current state",
+        409,
+      );
+    }
+    const submissionToken = await claimAdminSubmission(
+      form,
+      admin.user.id,
+      store,
+    );
+    if (!submissionToken) {
+      return adminClientsError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Administrative submission is unavailable or already used",
+        409,
       );
     }
     if (action === "disable")
@@ -1788,45 +2784,90 @@ async function adminClientsPost(
         await sha256(secret),
         nowSeconds(),
       );
-      const csrf = csrfTokenForRequest(request);
       await auditAdminMutation(store, action, clientId, admin);
-      return adminClientsResponse(
+      return adminMutationSuccess(
         request,
         config,
-        await store.listClients(),
-        csrf,
-        secret,
+        store,
+        admin.user.id,
+        submissionToken,
+        { operation: action, clientId, secret },
       );
     }
     await auditAdminMutation(store, action, clientId, admin);
-    const csrf = csrfTokenForRequest(request);
-    return adminClientsResponse(
+    return adminMutationSuccess(
       request,
       config,
-      await store.listClients(),
-      csrf,
-      null,
+      store,
+      admin.user.id,
+      submissionToken,
+      { operation: action, clientId },
+    );
+  }
+  const requestedType = form.get("type");
+  if (
+    requestedType !== "public" &&
+    requestedType !== "confidential" &&
+    requestedType !== "service"
+  ) {
+    return adminClientsError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "Invalid client type",
+      400,
     );
   }
   const input: ClientRegistrationInput = {
-    type: form.get("type") === "confidential" ? "confidential" : "public",
+    type: requestedType,
     name: form.get("name") || "",
     redirectUris: splitLines(form.get("redirect_uris") || ""),
     scopes: parseScopes(
-      form.get("scopes") ||
-        "openid email profile offline_access storage.read storage.write storage.delete",
+      (requestedType === "service"
+        ? form.get("service_scopes")
+        : form.get("interactive_scopes")) ??
+        form.get("scopes") ??
+        "openid email profile",
     ),
     origins: splitLines(form.get("origins") || ""),
   };
+  const validationError = validateClientRegistrationInput(input);
+  if (validationError) {
+    return adminClientsError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      validationError,
+      400,
+    );
+  }
+  const submissionToken = await claimAdminSubmission(
+    form,
+    admin.user.id,
+    store,
+  );
+  if (!submissionToken) {
+    return adminClientsError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "Administrative submission is unavailable or already used",
+      409,
+    );
+  }
   const result = await createClientRegistration(input, store, nowSeconds());
   await auditAdminMutation(store, "create", result.client.id, admin);
-  const csrf = csrfTokenForRequest(request);
-  return adminClientsResponse(
+  return adminMutationSuccess(
     request,
     config,
-    await store.listClients(),
-    csrf,
-    result.secret,
+    store,
+    admin.user.id,
+    submissionToken,
+    {
+      operation: "create",
+      clientId: result.client.id,
+      ...(result.secret ? { secret: result.secret } : {}),
+    },
   );
 }
 
@@ -1840,11 +2881,20 @@ async function requireAdminIdentity(
   if (!identity) {
     if (acceptsHtml(request))
       return requireSitesIdentity(request, identityProvider) as Response;
-    return oauthError(
+    return hypermediaError(
+      request,
       "login_required",
       "ChatGPT sign-in inside ChatGPT Sites is required",
       401,
       {
+        links: [
+          link("service", config.issuerUrl, {
+            type: HYPERMEDIA_MEDIA_TYPE,
+          }),
+          link("documentation", `${config.issuerUrl}/docs`, {
+            type: "text/html",
+          }),
+        ],
         actions: [
           action(
             "begin-session",
@@ -1858,6 +2908,25 @@ async function requireAdminIdentity(
     );
   }
   const user = await store.findOrCreateUser(identity, nowSeconds());
+  try {
+    await requireActiveSubject(store, user.id);
+  } catch (error) {
+    if (!isSubjectAuthorizationDenied(error)) throw error;
+    return acceptsHtml(request)
+      ? html(
+          errorPage("Forbidden", "Administrative access is not allowed", {
+            status: 403,
+            error: "forbidden",
+          }),
+          { status: 403 },
+        )
+      : hypermediaError(
+          request,
+          "forbidden",
+          "Administrative access is not allowed",
+          403,
+        );
+  }
   if (!config.adminSubjects.includes(user.id)) {
     return acceptsHtml(request)
       ? html(
@@ -1868,10 +2937,21 @@ async function requireAdminIdentity(
           ),
           { status: 403 },
         )
-      : oauthError(
+      : hypermediaError(
+          request,
           "forbidden",
           "Administrative access is not allowed for this account",
           403,
+          {
+            links: [
+              link("service", config.issuerUrl, {
+                type: HYPERMEDIA_MEDIA_TYPE,
+              }),
+              link("documentation", `${config.issuerUrl}/docs`, {
+                type: "text/html",
+              }),
+            ],
+          },
         );
   }
   return {
@@ -1894,10 +2974,10 @@ async function auditAdminMutation(
     {
       action: actionName,
       client_reference: await sha256(clientId),
-      actor_subject_hash: await sha256(admin.user.id),
       identity_source: admin.authorizationSource,
     },
     nowSeconds(),
+    { actorSubjectHash: await sha256(admin.user.id) },
   );
 }
 
@@ -1906,15 +2986,26 @@ function adminClientsResponse(
   config: ReturnType<typeof loadConfig>,
   clients: readonly ClientView[],
   csrf: string,
-  newSecret: string | null,
+  submissionToken: string,
+  result: AdminMutationResult | null,
+  clearResult = false,
 ): Response {
-  const headers = { "set-cookie": csrfCookie(csrf) };
+  const headers = new Headers({ "set-cookie": csrfCookie(csrf) });
+  if (clearResult) headers.append("set-cookie", clearAdminResultCookie());
   if (acceptsHtml(request)) {
-    return html(adminClientsPage(clients, csrf, newSecret), { headers });
+    return html(adminClientsPage(clients, csrf, submissionToken, result), {
+      headers,
+    });
   }
   return hypermediaJson(
     request,
-    adminClientsDocument(config.issuerUrl, clients, csrf, newSecret),
+    adminClientsDocument(
+      config.issuerUrl,
+      clients,
+      csrf,
+      submissionToken,
+      result,
+    ),
     { headers },
   );
 }
@@ -1923,13 +3014,20 @@ function adminClientsDocument(
   issuer: string,
   clients: readonly ClientView[],
   csrf: string,
-  newSecret: string | null,
+  submissionToken: string,
+  result: AdminMutationResult | null,
 ) {
   const operationFields = (clientId: string, operation: string) => [
     field("csrf_token", "CSRF token", "string", "body", {
       required: true,
       secret: true,
       value: csrf,
+    }),
+    field("submission_token", "One-time submission token", "string", "body", {
+      required: true,
+      secret: true,
+      value: submissionToken,
+      description: "Use this value once and refresh the collection after use.",
     }),
     field("action", "Action", "string", "body", {
       required: true,
@@ -1955,6 +3053,19 @@ function adminClientsDocument(
             secret: true,
             value: csrf,
           }),
+          field(
+            "submission_token",
+            "One-time submission token",
+            "string",
+            "body",
+            {
+              required: true,
+              secret: true,
+              value: submissionToken,
+              description:
+                "Use this value once and refresh the collection after use.",
+            },
+          ),
           field("name", "Client display name", "string", "body", {
             required: true,
             max_length: 120,
@@ -1965,63 +3076,37 @@ function adminClientsDocument(
             options: [
               { value: "public", title: "Public" },
               { value: "confidential", title: "Confidential" },
+              { value: "service", title: "Service" },
             ],
           }),
           field("redirect_uris", "Exact redirect URIs", "string", "body", {
-            required: true,
-            description: "One URI per line.",
+            description:
+              "One URI per line for interactive clients; empty for service clients.",
           }),
           field("scopes", "Allowed scopes", "string", "body", {
             required: true,
-            value:
-              "openid email profile offline_access storage.read storage.write storage.delete",
+            value: "storage.read storage.write storage.delete",
           }),
           field("origins", "Allowed browser origins", "string", "body", {
-            description: "One exact origin per line.",
+            description:
+              "One exact origin per line for interactive clients; empty for service clients.",
           }),
         ],
       },
     ),
   ];
   for (const client of clients) {
-    actions.push(
-      action(
-        client.disabledAt ? "enable-client" : "disable-client",
-        client.disabledAt ? `Enable ${client.name}` : `Disable ${client.name}`,
-        "POST",
-        `${issuer}/admin/clients`,
-        {
-          type: "application/x-www-form-urlencoded",
-          authorization: { scheme: "sites-session" },
-          fields: operationFields(
-            client.id,
-            client.disabledAt ? "enable" : "disable",
-          ),
-        },
-      ),
-      action(
-        "revoke-client-grants",
-        `Revoke grants for ${client.name}`,
-        "POST",
-        `${issuer}/admin/clients`,
-        {
-          type: "application/x-www-form-urlencoded",
-          authorization: { scheme: "sites-session" },
-          fields: operationFields(client.id, "revoke_grants"),
-        },
-      ),
-    );
-    if (client.type === "confidential") {
+    for (const control of adminClientControls(client)) {
       actions.push(
         action(
-          "rotate-client-secret",
-          `Rotate secret for ${client.name}`,
+          control.name,
+          `${control.label} ${client.name}`,
           "POST",
           `${issuer}/admin/clients`,
           {
             type: "application/x-www-form-urlencoded",
             authorization: { scheme: "sites-session" },
-            fields: operationFields(client.id, "rotate_secret"),
+            fields: operationFields(client.id, control.operation),
           },
         ),
       );
@@ -2041,8 +3126,20 @@ function adminClientsDocument(
         origins: [...client.origins],
         created_at: client.createdAt,
       })),
-      ...(newSecret
-        ? { new_client_secret: newSecret, secret_displayed_once: true }
+      ...(result
+        ? {
+            operation_result: {
+              operation: result.operation,
+              client_id: result.clientId,
+            },
+            ...(result.secret
+              ? {
+                  new_client_secret_client_id: result.clientId,
+                  new_client_secret: result.secret,
+                  secret_displayed_once: true,
+                }
+              : {}),
+          }
         : {}),
     },
     links: [
@@ -2053,6 +3150,96 @@ function adminClientsDocument(
       link("documentation", `${issuer}/docs`, { type: "text/html" }),
     ],
     actions,
+  });
+}
+
+async function adminMutationSuccess(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore,
+  adminSubject: string,
+  submissionToken: string,
+  result: AdminMutationResult,
+): Promise<Response> {
+  if (acceptsHtml(request)) {
+    const sealedResult = await sealAdminResult(
+      submissionToken,
+      result,
+      adminSubject,
+      config,
+      nowSeconds(),
+    );
+    const response = redirect("/admin/clients", 303);
+    response.headers.append("set-cookie", adminResultCookie(sealedResult));
+    return response;
+  }
+  return adminClientsResponse(
+    request,
+    config,
+    await store.listClients(),
+    csrfTokenForRequest(request),
+    createAdminSubmissionToken(),
+    result,
+  );
+}
+
+async function claimAdminSubmission(
+  form: URLSearchParams,
+  adminSubject: string,
+  store: AuthStore,
+): Promise<string | null> {
+  const submissionToken = form.get("submission_token");
+  if (!isAdminSubmissionToken(submissionToken)) return null;
+  const now = nowSeconds();
+  return (await store.claimAdminOperationSubmission(
+    await sha256(submissionToken),
+    adminSubject,
+    now,
+    now + ADMIN_SUBMISSION_TTL_SECONDS,
+  ))
+    ? submissionToken
+    : null;
+}
+
+async function consumeAdminResult(
+  cookie: string,
+  adminSubject: string,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore,
+): Promise<AdminMutationResult | null> {
+  const now = nowSeconds();
+  const opened = await openAdminResult(cookie, adminSubject, config, now);
+  if (!opened) return null;
+  return (await store.consumeAdminOperationResult(
+    await sha256(opened.submissionToken),
+    adminSubject,
+    now,
+  ))
+    ? opened.result
+    : null;
+}
+
+function adminClientsError(
+  request: Request,
+  issuer: string,
+  error: string,
+  description: string,
+  status: number,
+): Response {
+  if (acceptsHtml(request)) {
+    return html(
+      errorPage(titleForError(error, status), description, { status, error }),
+      { status },
+    );
+  }
+  return hypermediaError(request, error, description, status, {
+    links: [
+      link("service", issuer, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link("client-collection", `${issuer}/admin/clients`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
+      link("documentation", `${issuer}/docs`, { type: "text/html" }),
+    ],
   });
 }
 
@@ -2137,8 +3324,10 @@ export function isAittaDBRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/privacy" ||
     pathname === "/statistics" ||
     pathname === "/session" ||
+    pathname === "/account/deletion" ||
     pathname === "/auth-ui.css" ||
     pathname === "/auth-ui.js" ||
     pathname === "/.well-known/openid-configuration" ||
@@ -2156,6 +3345,96 @@ export function isAittaDBRoute(pathname: string): boolean {
   );
 }
 
+function isRecordsRoute(pathname: string): boolean {
+  return (
+    pathname === "/storage/records" || pathname.startsWith("/storage/records/")
+  );
+}
+
+function isFilesRoute(pathname: string): boolean {
+  return (
+    pathname === "/storage/files" || pathname.startsWith("/storage/files/")
+  );
+}
+
+const BROWSER_ONLY_MUTATION_ROUTES = new Set([
+  "/account/deletion",
+  "/userinfo",
+  "/device",
+  "/device/decision",
+  "/consent",
+  "/admin/clients",
+]);
+
+const DUAL_PROTOCOL_BROWSER_ROUTES = new Set([
+  "/oauth/device_authorization",
+  "/oauth/token",
+  "/oauth/revoke",
+  "/oauth/introspect",
+]);
+
+function rejectInvalidBrowserMutationOrigin(
+  request: Request,
+  url: URL,
+  canonicalOrigin: string,
+): Response | null {
+  if (
+    !isPreBodyBrowserMutation(request, url) ||
+    requireSameOrigin(request, canonicalOrigin)
+  ) {
+    return null;
+  }
+  return negotiatedFormError(
+    request,
+    "invalid_request",
+    "Same-origin form submission is required",
+    403,
+  );
+}
+
+function isPreBodyBrowserMutation(request: Request, url: URL): boolean {
+  if (request.method !== "POST") return false;
+  if (BROWSER_ONLY_MUTATION_ROUTES.has(url.pathname)) return true;
+  if (DUAL_PROTOCOL_BROWSER_ROUTES.has(url.pathname)) {
+    return acceptsHtml(request);
+  }
+  if (!isRecordsRoute(url.pathname) && !isFilesRoute(url.pathname)) {
+    return false;
+  }
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  return (
+    acceptsHtml(request) ||
+    contentType.includes("application/x-www-form-urlencoded") ||
+    contentType.includes("multipart/form-data")
+  );
+}
+
+function isExternalOAuthInitiationRoute(pathname: string): boolean {
+  return (
+    pathname === "/authorize" ||
+    pathname === "/oauth/device_authorization" ||
+    pathname === "/device" ||
+    pathname === "/device/decision" ||
+    pathname === "/consent"
+  );
+}
+
+function rejectUntrustedBrowserFileMultipart(
+  request: Request,
+  url: URL,
+  identityProvider: UpstreamIdentityProvider,
+): Response | null {
+  if (
+    request.method !== "POST" ||
+    !isFilesRoute(url.pathname) ||
+    !request.headers.get("content-type")?.includes("multipart/form-data")
+  ) {
+    return null;
+  }
+  const identity = requireSitesIdentity(request, identityProvider);
+  return identity instanceof Response ? identity : null;
+}
+
 export function isAssetRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/_") ||
@@ -2169,8 +3448,10 @@ function usesApplicationNegotiation(request: Request, url: URL): boolean {
   if (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/privacy" ||
     pathname === "/statistics" ||
     pathname === "/session" ||
+    pathname === "/account/deletion" ||
     pathname === "/device" ||
     pathname === "/device/decision" ||
     pathname === "/consent" ||
@@ -2210,8 +3491,10 @@ function usesApplicationErrorNegotiation(request: Request): boolean {
   return (
     pathname === "/" ||
     pathname === "/health" ||
+    pathname === "/privacy" ||
     pathname === "/statistics" ||
     pathname === "/session" ||
+    pathname === "/account/deletion" ||
     pathname === "/device" ||
     pathname === "/device/decision" ||
     pathname === "/consent" ||
@@ -2220,14 +3503,25 @@ function usesApplicationErrorNegotiation(request: Request): boolean {
   );
 }
 
-function scheduleCleanup(
+export function scheduleCleanup(
   store: AuthStore,
+  bucket: R2Bucket | undefined,
   ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
   now: number,
+  telemetryEnabled: boolean,
 ): void {
   if (!ctx || now < nextCleanupAt) return;
   nextCleanupAt = now + CLEANUP_INTERVAL_SECONDS;
-  ctx.waitUntil(store.cleanup(now));
+  const cleanup = Promise.resolve()
+    .then(() => store.cleanup(now))
+    .then((report) => {
+      if (telemetryEnabled) console.info(cleanupTelemetryPayload(report));
+    })
+    .catch(() => {
+      console.error(CLEANUP_FAILURE_EVENT);
+    });
+  ctx.waitUntil(cleanup);
+  if (bucket) ctx.waitUntil(repairStorageFileOrphans(store, bucket, now));
 }
 
 function isCorsControlledRoute(pathname: string): boolean {
@@ -2286,6 +3580,7 @@ function needsStore(pathname: string): boolean {
   return ![
     "/",
     "/health",
+    "/privacy",
     "/auth-ui.css",
     "/auth-ui.js",
     "/.well-known/openid-configuration",

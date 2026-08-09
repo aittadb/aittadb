@@ -4,21 +4,35 @@
 
 [GitHub repository](https://github.com/aittadb/aittadb)
 
-**An application backend that developers can deploy entirely on OpenAI-hosted ChatGPT Sites.**
+**A source-available application backend that developers can deploy entirely on OpenAI-hosted ChatGPT Sites.**
 
-AittaDB currently provides identity, authentication, persistent JSON data, and object storage through a self-contained ChatGPT Sites deployment. Developers can deploy their own independent AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure. Persistent events and long-polling delivery are planned and are not part of the current MVP.
+AittaDB currently provides identity, authentication, persistent JSON data, and object storage through a self-contained ChatGPT Sites deployment. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Developers can deploy their own separate AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure.
 
 > **Experimental:** AittaDB is under active development. Its interfaces and operational requirements may change before a stable release.
 
-It is not an official OpenAI project. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
+## Quick Install with ChatGPT
+
+In ChatGPT, add the `@Sites` tag and send this prompt:
+
+```text
+@Sites Create a new private AittaDB instance from https://github.com/aittadb/aittadb. Follow the repository instructions, use fresh storage and secrets for this instance, validate it, and deploy it privately. Do not reuse another AittaDB instance's data or secrets, and ask me before making it public.
+```
+
+See the [deployment guide](docs/deployment.md) for configuration, administrator bootstrap, privacy, storage controls, and live acceptance checks.
+
+AittaDB is not affiliated with or endorsed by OpenAI. It does not expose an official "Sign in with ChatGPT" OAuth service, and tokens issued by this project are not OpenAI or ChatGPT tokens. ChatGPT sign-in works only through a compatible Sites environment that supplies authenticated identity headers to server-side code.
 
 The service creates its own user record with an immutable UUID subject. The upstream email address is used only to locate or create that AittaDB user. ChatGPT Sites does not currently document a stable upstream subject, so an email change can create a new AittaDB identity and a reassigned address can inherit the existing identity and namespace. This remains a risk for ordinary users and administrators: putting that local UUID in `ADMIN_SUBJECTS` does not change how it is located. Self-hosting outside Sites requires replacing the upstream Sites identity adapter.
 
-Current releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication.
+## Licensing
+
+Current public releases are source-available under FSL-1.1-MIT. Each released version converts to the MIT License two years after publication. An MIT license for immediate use of a current release is also available commercially from the maintainer; contact [@thejhh](https://github.com/thejhh) for terms.
+
+Because a current public release remains under FSL until its conversion date, describe that release as **source-available**, not open source. A version already converted to MIT, or licensed directly under MIT, is open-source software under the MIT License.
 
 ## Built for ChatGPT Sites
 
-AittaDB is designed to be deployed as an application on [ChatGPT Sites](https://learn.chatgpt.com/docs/sites), an OpenAI-hosted platform. It uses capabilities provided by the Sites platform:
+AittaDB's current implementation is designed to be deployed as an application on [ChatGPT Sites](https://learn.chatgpt.com/docs/sites), an OpenAI-hosted platform. It depends on these Sites capabilities:
 
 - Managed application hosting and runtime.
 - ChatGPT sign-in supplied inside the Sites trust boundary.
@@ -27,6 +41,8 @@ AittaDB is designed to be deployed as an application on [ChatGPT Sites](https://
 - Hosted environment configuration and secrets.
 
 Because these capabilities are provided by ChatGPT Sites, a core AittaDB deployment does not need infrastructure outside Sites. Each deployment has its own issuer, signing keys, D1 database, R2 bucket, configuration, and users. Once deployed, it can act as a shared backend for other websites, ChatGPT Sites, services, native applications, command-line tools, and AI agents through its HTTP APIs.
+
+AittaDB is designed to remain safe when its Sites access mode is public. Public reachability lets any ChatGPT user sign in and receive a separate local AittaDB identity; it does not expose another user's namespace, administrator operations, credentials, internal tables, bindings, or secrets. Finite deployment/user/namespace quotas, rate limits, feature gates, and the storage-write kill switch remain required public-service controls. Private-first setup is still used so an operator can review configuration and privacy information before widening access.
 
 ### Public-Beta Limits
 
@@ -38,7 +54,7 @@ AittaDB separately enforces finite application-level ceilings for the deployment
 
 ## What AittaDB Provides
 
-- ChatGPT-based upstream user identity mapped to an independent AittaDB user.
+- ChatGPT-based upstream user identity mapped to a separate local AittaDB user.
 - OAuth 2.0 and OpenID Connect sessions for third-party applications.
 - Persistent structured application data.
 - Object and file storage.
@@ -47,7 +63,7 @@ AittaDB separately enforces finite application-level ceilings for the deployment
 
 The goal is to let developers build persistent, authenticated applications without first deploying and maintaining a conventional backend stack.
 
-The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, and files are available in the MVP; Events remains an explicitly planned capability. See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
+The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, and files are available in the MVP; Events remains an explicitly planned capability. [PLAN.md](PLAN.md) contains accepted unfinished work, while completed task history moves to [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
 
 ## Why AittaDB?
 
@@ -59,6 +75,7 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 
 - OAuth 2.0 Device Authorization Grant for CLIs.
 - OAuth 2.0 Authorization Code with PKCE for browser and native clients.
+- OAuth 2.0 Client Credentials for service clients that need renewable short-lived access to one isolated storage namespace.
 - Minimal OpenID Connect issuer discovery, JWKS, ID tokens, UserInfo, introspection, and revocation.
 - ES256 JWT signing through Web Crypto with a configured private JWK.
 - Opaque hashed refresh tokens with rotation and reuse detection.
@@ -77,9 +94,9 @@ make generate-local-jwt-key
 npm run validate
 ```
 
-`make generate-local-jwt-key` writes the generated key to `.secrets/jwt-signing-key.json`, which is ignored by Git. Put generated key values into local environment variables or Sites secrets without committing real key material.
+`make generate-local-jwt-key` creates a uniquely named mode-`0600` candidate under the ignored `.secrets/signing-keys/` directory and prints only its path and public key ID. It never prints or overwrites a private JWK. Validate, prepare a protected rollback, and compare a local key with the deployed public JWKS using the non-disclosing commands in [the signing-key operations guide](docs/key-rotation.md). Put real material into local or Sites secrets only through an approved non-disclosing interface. This public repository's tracked examples contain only inert placeholders; `npm run secrets:check` rejects prohibited credential paths and obvious live material without printing values, and release acceptance from a complete clone also runs `npm run secrets:audit-history`.
 
-`npm run validate` includes a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, the root `AGENTS.md` instruction-budget check, tests, and the production build. `AGENTS.md` must remain below 32,000 bytes so Codex loads its complete authoritative contract by default. D1 migrations are maintained as reviewed SQL and packaged into the Sites deployment artifact during the build; request handlers never run schema DDL. The project intentionally has no incomplete ORM generation command.
+`npm run validate` includes tracked-tree secret safety, a high-severity dependency audit, OpenAPI validation, self-hosted Swagger UI asset verification, handwritten D1 migration consistency, the root `AGENTS.md` instruction-budget check, tests, and the production build. `AGENTS.md` must remain below 32,000 bytes so Codex loads its complete authoritative contract by default. D1 migrations are maintained as reviewed SQL and packaged into the Sites deployment artifact during the build; request handlers never run schema DDL. The project intentionally has no incomplete ORM generation command.
 
 ## Required Configuration
 
@@ -87,6 +104,8 @@ npm run validate
 - `JWT_KEY_ID`: configured signing key ID.
 - `JWT_PRIVATE_JWK`: ES256 P-256 private JWK JSON.
 - `ADMIN_SUBJECTS`: comma-separated canonical local UUIDv4 subjects for administrators. Sign in at `/session`, read the deployment-local AittaDB subject, and add it through Sites configuration. Only a current trusted Sites session mapped to an entry can use administration. An empty list disables administration, and UUID allowlisting does not eliminate upstream email-reassignment risk.
+- `PRIVACY_CONTROLLER_*` / `PRIVACY_CONTACT_*`: optional public operator and contact details for `/privacy`. Explicit values take precedence; missing required details fall back to only the stored email and optional display name of the first resolvable `ADMIN_SUBJECTS` user. No UUID, allowlist, or private configuration is published. A generic `503` is returned when neither source resolves a usable controller and contact.
+- `FEATURE_RECORDS_ENABLED`, `FEATURE_FILES_ENABLED`, `FEATURE_STATISTICS_ENABLED`, and `FEATURE_OAUTH_APPS_ENABLED`: strict per-feature booleans. Records, Files, and Statistics default on; downstream OAuth Apps default off. The effective state is visible in service HTML and versioned hypermedia without exposing raw configuration. Setting `FEATURE_RECORDS_ENABLED=false` removes Records controls and rejects `/storage/records` before repository work. Setting `FEATURE_FILES_ENABLED=false` likewise removes Files controls and rejects every `/storage/files` operation before D1 metadata, R2, rate-limit, body-parsing, or cleanup work. When Statistics is off, the root omits its control and `GET /statistics` fails before querying D1. When OAuth Apps is off, client administration, Authorization Code and Device Grant initiation, their browser continuations, token exchange, revocation, introspection, and UserInfo are hidden or rejected before body, identity, client, credential, bearer, or repository work. Discovery retains only the issuer, JWKS URI, and ES256 verification algorithm; the public JWKS remains available so AittaDB's private session JWTs can still be verified. The reserved signed-in-session client remains available for enabled storage. Other enabled feature families remain available.
 - `STORAGE_WRITES_ENABLED`: deployment storage-write kill switch; disabling it leaves authorized reads and deletes available.
 - `STORAGE_GLOBAL_MAX_ITEMS` / `STORAGE_GLOBAL_MAX_BYTES`: combined record-and-file ceiling for the deployment; defaults to 10,000 items and 1 GiB.
 - `STORAGE_USER_MAX_ITEMS` / `STORAGE_USER_MAX_BYTES`: combined ceiling across one local user's client namespaces; defaults to 1,000 items and 100 MiB.
@@ -101,6 +120,9 @@ npm run validate
 - `GET /health`
 - `GET /statistics`
 - `GET /session`
+- `GET /account/deletion`
+- `POST /account/deletion`
+- `GET /privacy`
 - `GET /.well-known/openid-configuration`
 - `GET /.well-known/jwks.json`
 - `GET /authorize`
@@ -121,13 +143,19 @@ npm run validate
 - `GET /openapi.json`
 - `GET /docs`
 
-The public service root does not require authentication because service discovery and OAuth initiation must work before sign-in. Its operation map uses the trusted server-side ChatGPT sign-in signal supplied by Sites: it offers sign-in when no identity is present and sign-out when the caller is already signed in. These controls enter the real Sites-owned sign-in or sign-out routes, not a demo. Sign-in-flow internals such as authorization, consent, token exchange, revocation, and introspection remain available at their canonical URLs and through the API docs, but are not promoted as normal user operations. `/session` starts Sites-owned ChatGPT sign-in when needed and then shows the immutable local AittaDB subject created for the signed-in user. That sign-in can use its own durable AittaDB namespace, but it does not grant any third-party OAuth client a scope or access to that namespace.
+The public service root does not require authentication because service and verification metadata must work before sign-in. Its operation map uses the trusted server-side ChatGPT sign-in signal supplied by Sites: it offers sign-in when no identity is present and sign-out when the caller is already signed in. These controls enter the real Sites-owned sign-in or sign-out routes, not a demo. When OAuth Apps are enabled, sign-in-flow internals such as authorization, consent, token exchange, revocation, introspection, and UserInfo remain available at their canonical URLs and through the API docs, but are not promoted as normal user operations. `/session` starts Sites-owned ChatGPT sign-in when needed and then shows the immutable local AittaDB subject created for the signed-in user. That sign-in can use its own durable AittaDB namespace, but it does not grant any third-party OAuth client a scope or access to that namespace. An eligible non-administrator session also exposes the canonical `POST /account/deletion` form/action. It requires same-origin, CSRF, an explicit phrase, and a short-lived encrypted confirmation bound to the exact current local account and trusted email. The first accepted request blocks account access, starts bounded background deletion, and sets a separate encrypted seven-day status cookie. With that cookie and the same trusted email, content-negotiated `GET /account/deletion` reports only pending, running, retry, or completed plus the currently valid refresh, recovery, or Sites sign-out action. It reveals no account or job details. After clean completion, signing in again with the same email creates one new local UUID with an empty namespace; old credentials and data do not reconnect to it. The old status handle remains bound only to the completed tombstone. There is no deployment-wide deletion or special re-registration route.
 
-Application resources use content negotiation on the same URI. `Accept: text/html` selects a useful human interface; `Accept: application/vnd.aittadb+json; version=0.1` selects the versioned hypermedia contract, and `application/json` remains a compatibility representation. Hypermedia documents contain resource `data`, semantic `links`, and currently available `actions`, and report their contract in `AittaDB-API-Version`. Application errors include the same machine-readable structure and valid recovery controls where protocol compatibility allows. The HTML links, forms, lists, details, and errors expose equivalent authorized capabilities and invoke the same identity, OAuth/OIDC, D1, and R2 logic. The server never selects a representation from `User-Agent`. Version `0.1` remains a development preview; after a stable version is published, breaking contract changes require a new version. OAuth/OIDC responses retain their standards-defined wire formats where wrapping would break interoperability. See [the hypermedia architecture](docs/hypermedia-json-rest-api.md).
+Application resources use content negotiation on the same URI. `Accept: text/html` selects a useful human interface; `Accept: application/vnd.aittadb+json; version=0.1` selects the versioned hypermedia contract, and `application/json` remains a compatibility representation. The public root prefers HTML when `Accept` is absent or only indifferent between supported representations so standards-compliant link-preview clients can read its Open Graph metadata; explicit JSON requests remain JSON, and other resources retain their JSON fallback. Hypermedia documents contain resource `data`, semantic `links`, and currently available `actions`, and report their contract in `AittaDB-API-Version`. Application errors include the same machine-readable structure and valid recovery controls where protocol compatibility allows. The HTML links, forms, lists, details, and errors expose equivalent authorized capabilities and invoke the same identity, OAuth/OIDC, D1, and R2 logic. The server never selects a representation from `User-Agent`. Version `0.1` remains a development preview; after a stable version is published, breaking contract changes require a new version. OAuth/OIDC responses retain their standards-defined wire formats where wrapping would break interoperability. See [the hypermedia architecture](docs/hypermedia-json-rest-api.md).
 
-`/docs` is a self-hosted Swagger UI backed directly by the canonical `/openapi.json`. Its assets are pinned and served from AittaDB without a CDN. "Try it out" sends requests to the origin serving the viewer, so a custom-domain deployment does not accidentally call a legacy hostname embedded in an older specification. Browser forms are also available directly on the authorization, device authorization, token, revocation, introspection, and UserInfo routes; state-changing browser submissions are same-origin and CSRF protected, and credential values are never placed in URLs.
+At `/admin/clients`, an allowlisted signed-in administrator receives the same create, enable/disable, secret-rotation, and grant-revocation capabilities in HTML and hypermedia JSON. Public and confidential clients are interactive; service clients have no redirect URI or browser origin and may register only storage scopes. Controls disappear when the client state or type makes them invalid, and the server independently rejects attempts to invoke an omitted operation. Each mutation consumes an atomically claimed one-time submission hash. JSON returns the no-store result directly; HTML redirects to a safe GET and carries the result in a short-lived encrypted, `HttpOnly` cookie, so refresh cannot repeat the POST. A generated confidential or service secret is identified with its client, never put in a URL or durable plaintext storage, and disappears after that immediate result.
 
-The `/userinfo`, `/storage/records`, and `/storage/files` browser views default to the current signed-in session when one exists. They create only a minimal short-lived internal access token, pass it directly to the canonical UserInfo or storage validator, and never expose or retain it. An explicit AittaDB bearer-token mode remains available for testing a registered application's client-scoped data. Inactive token and OAuth grant fields are hidden and disabled by progressive enhancement; without JavaScript, every field remains visible and server validation remains authoritative. Storage collection pages render a useful list or empty state. The file collection also provides an accessible native upload control with drag-and-drop enhancement. Item pages render readable metadata and the actions valid for that exact URL instead of dumping JSON into the HTML shell.
+### Server-to-server access
+
+Register a `service` client with one or more of `storage.read`, `storage.write`, and `storage.delete`, then save its one-time-displayed secret in the calling service's server-side secret configuration. The service can repeatedly authenticate at `POST /oauth/token` with `grant_type=client_credentials` to obtain normal 10-minute AittaDB access tokens. Each token uses the service client's UUID as a non-user subject and audience, reaches only that client's stable isolated storage namespace, and contains no email or display name. This grant never returns an ID token or refresh token and cannot use interactive authorization flows or browser CORS. See the [curl example](docs/examples.md#service-client-credentials).
+
+`/docs` is a self-hosted Swagger UI backed directly by the canonical `/openapi.json`. Its assets are pinned and served from AittaDB without a CDN. "Try it out" sends requests to the origin serving the viewer, so a custom-domain deployment does not accidentally call a legacy hostname embedded in an older specification. When OAuth Apps are enabled, browser forms are also available directly on the authorization, device authorization, token, revocation, introspection, and UserInfo routes; state-changing browser submissions are same-origin and CSRF protected, and credential values are never placed in URLs.
+
+The `/storage/records` and `/storage/files` browser views default to the current signed-in session when one exists. They create only a minimal short-lived internal access token, pass it directly to the canonical storage validator, and never expose or retain it. When OAuth Apps are enabled, `/userinfo` offers the equivalent current-session adapter and explicit AittaDB bearer-token mode; when disabled, UserInfo disappears from the session representations and rejects before token or identity lookup. Inactive token and OAuth grant fields are hidden and disabled by progressive enhancement; without JavaScript, every field remains visible and server validation remains authoritative. Storage collection pages render a useful list or empty state. The file collection also provides an accessible native upload control with drag-and-drop enhancement. After a successful signed-in upload, the browser follows a validated `303` to the canonical item page, so refresh cannot resubmit the upload. Item pages render readable metadata and the actions valid for that exact URL instead of dumping JSON into the HTML shell.
 
 The browser UI uses a shared responsive AittaDB shell with page-aware trust-boundary copy, the same-origin `aittadb-boundary.jpg` artwork, the supplied `aittadb-mark.svg` storehouse mark, and an AittaDB-specific `og.png` social card. Inter is self-hosted from `/fonts/inter-latin-wght-normal.woff2`, with `system-ui`, `Segoe UI`, and `sans-serif` fallbacks. Styles come from `/auth-ui.css`; one minimal same-origin `/auth-ui.js` script provides conditional fields and canonical item navigation. The UI loads no third-party runtime fonts, images, scripts, or tracking code.
 
@@ -135,15 +163,23 @@ The browser UI uses a shared responsive AittaDB shell with page-aware trust-boun
 
 Client applications may request `storage.read`, `storage.write`, and `storage.delete` AittaDB scopes. These scopes authorize storage only inside AittaDB. They do not grant access to ChatGPT, OpenAI, conversations, files, Projects, connectors, subscriptions, billing, or API quota.
 
-Storage is isolated by the immutable AittaDB user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2. `POST /storage/files` creates a file with a server-generated logical key and returns `201 Created` with its item URI in `Location`; `PUT /storage/files/{key}` creates or replaces the file at a caller-selected logical key. Caller-provided keys are logical metadata only; AittaDB always generates physical R2 object keys.
+Storage is isolated by the immutable AittaDB user UUID and OAuth client ID. JSON records are stored in D1 at `/storage/records/{key}`. File metadata is stored in D1 and file bytes are stored in R2. `POST /storage/files` creates a file with a server-generated logical key. Bearer JSON/hypermedia and explicit-token HTML responses return `201 Created` with the item URI in `Location`; signed-in HTML accepts that URI only from the request or configured issuer origin and redirects with `303 See Other` on the request origin. `PUT /storage/files/{key}` creates or replaces the file at a caller-selected logical key. Caller-provided keys are logical metadata only; AittaDB always generates physical R2 object keys.
+
+Request bodies have finite route-specific limits. AittaDB bounds accepted URL-encoded forms, JSON records, and canonical raw file uploads from the actual stream before resource persistence; `Content-Length` can reject a declared overflow early but is never trusted to make the streamed body smaller. Oversized input returns the documented `413 invalid_request`, and a malformed request stream returns `400 invalid_request` without R2 or D1 resource changes.
 
 Record and file creates or replacements use one conditional D1 write to enforce the configured deployment, user, and user/client item-and-byte ceilings. A rejected write returns `507 storage_limit_exceeded`; disabling writes returns `503 storage_writes_disabled`. File writes use copy-on-write R2 keys and bounded compensation when quota or metadata persistence fails. D1 and R2 do not share a transaction, so simultaneous persistent failures can still require private operator repair.
 
-Storage collections use deterministic encrypted-cursor pagination. `page_size` defaults to 50 and cannot exceed the configured maximum, initially 100. Follow the returned `next` link instead of constructing or reusing a cursor: authenticated encryption binds each cursor to the resource kind, local user, and OAuth client without exposing its logical key or timestamp. Signing-key rotation invalidates outstanding cursors. Collection responses disclose only the combined record-and-file usage and namespace ceiling for the authenticated user/client namespace. They never disclose deployment-wide usage, another user, or another client namespace.
+Storage collections use deterministic encrypted-cursor pagination. `page_size` defaults to 50 and cannot exceed the configured maximum, initially 100. For a collection that is not mutated during traversal, following only the returned `next` links visits every authorized item exactly once in bounded pages. Do not construct or reuse a cursor: authenticated encryption binds each cursor to the resource kind, local user, and OAuth client without exposing its logical key, timestamp, namespace identifiers, or signing secrets. Rotating the private signing-key material immediately invalidates outstanding cursors; clients restart from the collection URI. Collection responses disclose only the combined record-and-file usage and namespace ceiling for the authenticated user/client namespace. They never disclose deployment-wide usage, another user, or another client namespace.
 
 The signed-in browser uses a reserved, hidden AittaDB client ID, so the user's durable signed-in AittaDB namespace remains separate even from an OAuth client belonging to the same local user. That reserved client cannot be selected by device authorization, Authorization Code, token exchange, or administrator operations. AittaDB exposes no generic SQL, internal-table, physical R2-key, environment, binding, or deployment-secret API.
 
 `GET /statistics` is public and returns only the aggregate count of local AittaDB identities in this deployment. It exposes no email address, display name, local subject, client ownership, or other personal or internal data.
+
+## Privacy
+
+Each AittaDB deployment operator is the controller for personal data collected by that published deployment. `GET /privacy` serves the deployment's notice as accessible HTML or versioned hypermedia JSON through normal content negotiation. Operators must review the notice, applicable law, configured clients, retention, and public contact details before publishing. See the [baseline Privacy Policy](docs/privacy.md) and [deployment configuration](docs/deployment.md#privacy-notice-configuration).
+
+OpenAI hosts ChatGPT Sites and processes personal data collected by a published Site ("Hosted Data") under the applicable [ChatGPT Sites Data Processing Addendum](https://openai.com/policies/chatgpt-sites-data-processing-addendum/) or organization agreement. AittaDB makes no fixed data-residency promise; the Sites documentation currently states that deployed Sites, D1/R2 storage, artifacts, and logs do not support data residency at launch.
 
 ## ChatGPT Sites Sign-In Boundary
 
@@ -182,6 +218,7 @@ This is an invitation to start a conversation rather than an announcement of a f
 - Read each repository's documentation.
 - Use [GitHub Issues](https://github.com/aittadb/aittadb/issues) for bug reports and feature proposals.
 - Read the [ChatGPT Sites documentation](https://learn.chatgpt.com/docs/sites).
+- Review the deployment's `/privacy` resource and the [baseline Privacy Policy](docs/privacy.md).
 - Visit the founder's GitHub profile: [@thejhh](https://github.com/thejhh).
 
 ## Fun Fact

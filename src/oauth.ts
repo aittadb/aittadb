@@ -13,6 +13,10 @@ import {
 import { oauthError, parseBasicAuth } from "./http";
 import { HYPERMEDIA_API_VERSION, action, field, link } from "./hypermedia";
 import { isBrowserSessionClientId } from "./system-client";
+import {
+  isSubjectAuthorizationDenied,
+  requireActiveSubject,
+} from "./subject-access";
 import type {
   AppConfig,
   AuthStore,
@@ -25,6 +29,12 @@ import type {
   RefreshTokenFamily,
 } from "./types";
 import { SUPPORTED_SCOPES } from "./types";
+
+export const SERVICE_CLIENT_SCOPES = [
+  "storage.read",
+  "storage.write",
+  "storage.delete",
+] as const;
 
 export function parseScopes(value: string | null | undefined): string[] {
   const scopes = (value || "").split(/\s+/).filter(Boolean);
@@ -58,7 +68,7 @@ export async function authenticateClient(
   const client = await store.getClient(clientId);
   if (!client || client.disabledAt || isBrowserSessionClientId(client.id))
     return oauthError("invalid_client", "Client authentication failed", 401);
-  if (client.type === "confidential") {
+  if (client.type !== "public") {
     const storedHash = await store.getClientSecretHash(client.id);
     if (!storedHash || !secret)
       return oauthError("invalid_client", "Client authentication failed", 401);
@@ -75,17 +85,52 @@ export async function createClientRegistration(
   store: AuthStore,
   now: number,
 ): Promise<{ client: ClientView; secret: string | null }> {
-  if (!input.name.trim()) throw new Error("Client name is required");
-  if (input.type !== "public" && input.type !== "confidential")
-    throw new Error("Invalid client type");
-  for (const uri of input.redirectUris) assertExactUri(uri);
-  for (const origin of input.origins) assertOrigin(origin);
-  const scopeError = validateRawScopes(input.scopes);
-  if (scopeError) throw new Error(scopeError);
-  const secret = input.type === "confidential" ? randomToken(32) : null;
+  const validationError = validateClientRegistrationInput(input);
+  if (validationError) throw new Error(validationError);
+  const secret = input.type === "public" ? null : randomToken(32);
   const secretHash = secret ? await sha256(secret) : null;
   const client = await store.createClient(input, secretHash, now);
   return { client, secret };
+}
+
+export function validateClientRegistrationInput(
+  input: ClientRegistrationInput,
+): string | null {
+  const name = input.name.trim();
+  if (!name) return "Client name is required";
+  if (name.length > 120) return "Client name must be at most 120 characters";
+  if (
+    input.type !== "public" &&
+    input.type !== "confidential" &&
+    input.type !== "service"
+  )
+    return "Invalid client type";
+  if (input.type === "service") {
+    if (input.redirectUris.length)
+      return "Service clients cannot register redirect URIs";
+    if (input.origins.length)
+      return "Service clients cannot register browser origins";
+    if (!input.scopes.length) return "Service clients require a storage scope";
+    for (const scope of input.scopes) {
+      if (!SERVICE_CLIENT_SCOPES.includes(scope as never))
+        return "Service clients may request only storage scopes";
+    }
+  }
+  for (const uri of input.redirectUris) {
+    try {
+      assertExactUri(uri);
+    } catch (error) {
+      return knownValidationMessage(error, "Invalid redirect URI");
+    }
+  }
+  for (const origin of input.origins) {
+    try {
+      assertOrigin(origin);
+    } catch (error) {
+      return knownValidationMessage(error, "Invalid origin");
+    }
+  }
+  return validateRawScopes(input.scopes);
 }
 
 export async function issueTokens(params: {
@@ -98,6 +143,7 @@ export async function issueTokens(params: {
   includeRefresh: boolean;
   now: number;
 }): Promise<Record<string, unknown>> {
+  await requireActiveSubject(params.store, params.user.id);
   const scopeList = parseScopes(params.scope);
   const accessJti = uuid();
   const accessToken = await signJwt(
@@ -173,6 +219,60 @@ export async function issueTokens(params: {
   return response;
 }
 
+export async function issueClientCredentialsToken(params: {
+  config: AppConfig;
+  store: AuthStore;
+  client: ClientView;
+  requestedScope: string | null;
+  now: number;
+}): Promise<Response> {
+  if (params.client.type !== "service") {
+    return oauthError(
+      "unauthorized_client",
+      "Client credentials requires a service client",
+    );
+  }
+  if (!(await params.store.hasServicePrincipal(params.client.id))) {
+    return oauthError("invalid_client", "Client authentication failed", 401);
+  }
+  const scopes = parseScopes(
+    params.requestedScope ?? params.client.scopes.join(" "),
+  );
+  const scopeError = validateScopes(scopes, params.client);
+  if (
+    !scopes.length ||
+    scopeError ||
+    scopes.some((scope) => !SERVICE_CLIENT_SCOPES.includes(scope as never))
+  ) {
+    return oauthError(
+      "invalid_scope",
+      scopeError ?? "Service clients may request only storage scopes",
+    );
+  }
+  return jsonToken({
+    access_token: await signJwt(
+      {
+        iss: params.config.issuerUrl,
+        sub: params.client.id,
+        aud: params.client.id,
+        exp: params.now + params.config.accessTokenTtlSeconds,
+        iat: params.now,
+        nbf: params.now,
+        jti: uuid(),
+        scope: scopes.join(" "),
+        token_use: "access",
+        subject_type: "service",
+        client_id: params.client.id,
+      },
+      params.config.jwtPrivateJwk,
+      params.config.jwtKeyId,
+    ),
+    token_type: "Bearer",
+    expires_in: params.config.accessTokenTtlSeconds,
+    scope: scopes.join(" "),
+  });
+}
+
 export async function createDeviceAuthorization(
   request: Request,
   form: URLSearchParams,
@@ -182,6 +282,12 @@ export async function createDeviceAuthorization(
   const now = nowSeconds();
   const client = await authenticateClient(request, form, store);
   if (client instanceof Response) return client;
+  if (client.type === "service") {
+    return oauthError(
+      "unauthorized_client",
+      "Service clients cannot use the Device Authorization Grant",
+    );
+  }
   const scopes = parseScopes(form.get("scope") || "openid email profile");
   const scopeError = validateScopes(scopes, client);
   if (scopeError) return oauthError("invalid_scope", scopeError);
@@ -303,17 +409,24 @@ export async function pollDeviceToken(
     return oauthError("invalid_grant", "Device grant unavailable");
   const user = await store.getUser(consumed.userId);
   if (!user) return oauthError("invalid_grant", "Device grant unavailable");
-  return jsonToken(
-    await issueTokens({
-      config,
-      store,
-      user,
-      client: authenticatedClient,
-      scope: grant.scope,
-      includeRefresh: parseScopes(grant.scope).includes("offline_access"),
-      now,
-    }),
-  );
+  try {
+    return jsonToken(
+      await issueTokens({
+        config,
+        store,
+        user,
+        client: authenticatedClient,
+        scope: grant.scope,
+        includeRefresh: parseScopes(grant.scope).includes("offline_access"),
+        now,
+      }),
+    );
+  } catch (error) {
+    if (isSubjectAuthorizationDenied(error)) {
+      return oauthError("invalid_grant", "Device grant unavailable");
+    }
+    throw error;
+  }
 }
 
 export async function createAuthorizeRequest(
@@ -324,7 +437,12 @@ export async function createAuthorizeRequest(
   const now = nowSeconds();
   const clientId = url.searchParams.get("client_id") || "";
   const client = await store.getClient(clientId);
-  if (!client || client.disabledAt || isBrowserSessionClientId(client.id))
+  if (
+    !client ||
+    client.disabledAt ||
+    client.type === "service" ||
+    isBrowserSessionClientId(client.id)
+  )
     return oauthError("invalid_client", "Unknown client", 400);
   const redirectUri = url.searchParams.get("redirect_uri") || "";
   if (!client.redirectUris.includes(redirectUri)) {
@@ -468,18 +586,25 @@ export async function exchangeAuthorizationCode(
   }
   const user = await store.getUser(code.userId);
   if (!user) return oauthError("invalid_grant", "Invalid authorization code");
-  return jsonToken(
-    await issueTokens({
-      config,
-      store,
-      user,
-      client,
-      scope: code.scope,
-      nonce: code.nonce,
-      includeRefresh: parseScopes(code.scope).includes("offline_access"),
-      now,
-    }),
-  );
+  try {
+    return jsonToken(
+      await issueTokens({
+        config,
+        store,
+        user,
+        client,
+        scope: code.scope,
+        nonce: code.nonce,
+        includeRefresh: parseScopes(code.scope).includes("offline_access"),
+        now,
+      }),
+    );
+  } catch (error) {
+    if (isSubjectAuthorizationDenied(error)) {
+      return oauthError("invalid_grant", "Invalid authorization code");
+    }
+    throw error;
+  }
 }
 
 export async function rotateRefreshToken(
@@ -497,6 +622,23 @@ export async function rotateRefreshToken(
   if (!existing) return oauthError("invalid_grant", "Invalid refresh token");
   const user = await store.getUser(existing.userId);
   if (!user) return oauthError("invalid_grant", "Invalid refresh token");
+  let tokens: Record<string, unknown>;
+  try {
+    tokens = await issueTokens({
+      config,
+      store,
+      user,
+      client,
+      scope: existing.scope,
+      includeRefresh: false,
+      now,
+    });
+  } catch (error) {
+    if (isSubjectAuthorizationDenied(error)) {
+      return oauthError("invalid_grant", "Invalid refresh token");
+    }
+    throw error;
+  }
   const refreshToken = randomToken(48);
   await store.createRefreshToken({
     id: uuid(),
@@ -508,15 +650,6 @@ export async function rotateRefreshToken(
     expiresAt: now + config.refreshTokenTtlSeconds,
     usedAt: null,
     revokedAt: null,
-  });
-  const tokens = await issueTokens({
-    config,
-    store,
-    user,
-    client,
-    scope: existing.scope,
-    includeRefresh: false,
-    now,
   });
   tokens.refresh_token = refreshToken;
   return jsonToken(tokens);
@@ -539,9 +672,11 @@ export async function verifyAccessToken(
   );
   if (
     verified.claims.token_use !== "access" ||
-    typeof verified.claims.jti !== "string"
+    typeof verified.claims.jti !== "string" ||
+    typeof verified.claims.sub !== "string"
   )
     throw new Error("invalid_token_use");
+  await requireActiveSubject(store, verified.claims.sub);
   if (await store.isAccessTokenJtiRevoked(verified.claims.jti))
     throw new Error("revoked_token");
   return verified;
@@ -581,6 +716,17 @@ function assertOrigin(value: string): void {
   const url = new URL(value);
   if (url.origin !== value)
     throw new Error("Origin must be exact scheme, host, and port");
+}
+
+function knownValidationMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error)) return fallback;
+  return [
+    "Unsupported redirect URI",
+    "Redirect URI must not include a fragment",
+    "Origin must be exact scheme, host, and port",
+  ].includes(error.message)
+    ? error.message
+    : fallback;
 }
 
 function redirectOAuthError(

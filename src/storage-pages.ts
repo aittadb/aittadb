@@ -13,8 +13,18 @@ export function recordStorageFormPage(
   key = "",
   signedIn = false,
   payload?: Record<string, unknown>,
+  filesEnabled = true,
+  writesEnabled = true,
 ): string {
-  return storageFormPage("records", csrf, key, signedIn, payload);
+  return storageFormPage(
+    "records",
+    csrf,
+    key,
+    signedIn,
+    payload,
+    filesEnabled,
+    writesEnabled,
+  );
 }
 
 export function fileStorageFormPage(
@@ -22,8 +32,18 @@ export function fileStorageFormPage(
   key = "",
   signedIn = false,
   payload?: Record<string, unknown>,
+  recordsEnabled = true,
+  writesEnabled = true,
 ): string {
-  return storageFormPage("files", csrf, key, signedIn, payload);
+  return storageFormPage(
+    "files",
+    csrf,
+    key,
+    signedIn,
+    payload,
+    recordsEnabled,
+    writesEnabled,
+  );
 }
 
 function storageFormPage(
@@ -32,6 +52,8 @@ function storageFormPage(
   key: string,
   signedIn: boolean,
   payload?: Record<string, unknown>,
+  siblingStorageEnabled = true,
+  writesEnabled = true,
 ): string {
   const records = kind === "records";
   const collection = `/storage/${kind}`;
@@ -51,6 +73,7 @@ function storageFormPage(
           csrf,
           signedIn,
           availableActions,
+          writesEnabled,
         )
       : collectionOperations(
           kind,
@@ -58,6 +81,7 @@ function storageFormPage(
           csrf,
           signedIn,
           availableActions,
+          writesEnabled,
         );
   const body = `${storageState(kind, payload)}${controls}`;
 
@@ -84,11 +108,15 @@ function storageFormPage(
         href: "/session",
         label: signedIn ? "My signed-in session" : "Sign in with ChatGPT",
       },
-      {
-        href: records ? "/storage/files" : "/storage/records",
-        label: records ? "File storage" : "JSON records",
-        secondary: true,
-      },
+      ...(siblingStorageEnabled
+        ? [
+            {
+              href: records ? "/storage/files" : "/storage/records",
+              label: records ? "File storage" : "JSON records",
+              secondary: true,
+            },
+          ]
+        : []),
       { href: "/docs", label: "API docs", secondary: true },
     ],
     scripts: conditionalFormScript(),
@@ -101,10 +129,16 @@ function collectionOperations(
   csrf: string,
   signedIn: boolean,
   availableActions?: ReadonlySet<string>,
+  writesEnabled = true,
 ): string {
   const records = kind === "records";
   const noun = records ? "record" : "file";
   const sections: string[] = [];
+  const writeActionAvailable =
+    writesEnabled &&
+    (availableActions === undefined ||
+      availableActions.has(`create-or-replace-${noun}`) ||
+      (!records && availableActions.has("create-file")));
   if (actionAvailable(availableActions, `list-${kind}`)) {
     sections.push(
       operationSection({
@@ -122,7 +156,11 @@ function collectionOperations(
       }),
     );
   }
-  if (!records && actionAvailable(availableActions, "create-file")) {
+  if (
+    writeActionAvailable &&
+    !records &&
+    actionAvailable(availableActions, "create-file")
+  ) {
     sections.push(
       operationSection({
         method: "POST",
@@ -144,17 +182,21 @@ function collectionOperations(
   }
   if (
     actionAvailable(availableActions, `open-${noun}`) ||
-    availableActions?.has(`create-or-replace-${noun}`)
+    (writeActionAvailable && availableActions?.has(`create-or-replace-${noun}`))
   ) {
     sections.push(
       operationSection({
         method: "GET",
-        title: records
-          ? "Open or create one record"
-          : "Open or upload one file",
-        summary: records
-          ? "Move to the exact record URL to read an existing value or create a missing record."
-          : "Move to the exact file URL to download an existing file or upload a missing file.",
+        title: writeActionAvailable
+          ? records
+            ? "Open or create one record"
+            : "Open or upload one file"
+          : `Open one ${noun}`,
+        summary: writeActionAvailable
+          ? records
+            ? "Move to the exact record URL to read an existing value or create a missing record."
+            : "Move to the exact file URL to download an existing file or upload a missing file."
+          : `Move to the exact ${noun} URL to ${records ? "read its JSON value" : "inspect its metadata or download its bytes"}.`,
         form: `<form method="get" action="${collection}" class="stacked-form" data-fallback-action="${collection}" data-key-action-template="${collection}/{key}"><label for="${kind}_navigate_key">Logical ${noun} key</label><input id="${kind}_navigate_key" name="key" data-resource-key maxlength="240" autocomplete="off" required><div class="actions"><button type="submit">Continue to ${noun} endpoint</button></div></form>`,
       }),
     );
@@ -169,6 +211,7 @@ function itemOperations(
   csrf: string,
   signedIn: boolean,
   availableActions?: ReadonlySet<string>,
+  writesEnabled = true,
 ): string {
   const records = kind === "records";
   const noun = records ? "record" : "file";
@@ -206,9 +249,10 @@ function itemOperations(
     );
   }
   if (
-    actionAvailable(availableActions, `create-${noun}`) ||
-    actionAvailable(availableActions, `replace-${noun}`) ||
-    actionAvailable(availableActions, `create-or-replace-${noun}`)
+    writesEnabled &&
+    (actionAvailable(availableActions, `create-${noun}`) ||
+      actionAvailable(availableActions, `replace-${noun}`) ||
+      actionAvailable(availableActions, `create-or-replace-${noun}`))
   ) {
     sections.push(
       operationSection({
@@ -304,13 +348,27 @@ export function storageResultPage(options: {
   resourceHref?: string;
   csrf: string;
   signedIn: boolean;
+  recordsEnabled?: boolean;
+  filesEnabled?: boolean;
 }): string {
   const payload = objectValue(options.payload) ?? {};
   const key =
     storagePayloadKey(payload) || keyFromResourceHref(options.resourceHref);
   return options.kind === "records"
-    ? recordStorageFormPage(options.csrf, key, options.signedIn, payload)
-    : fileStorageFormPage(options.csrf, key, options.signedIn, payload);
+    ? recordStorageFormPage(
+        options.csrf,
+        key,
+        options.signedIn,
+        payload,
+        options.filesEnabled,
+      )
+    : fileStorageFormPage(
+        options.csrf,
+        key,
+        options.signedIn,
+        payload,
+        options.recordsEnabled,
+      );
 }
 
 function storageState(
