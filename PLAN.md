@@ -1,3 +1,1 @@
 # AittaDB Implementation Plan
-
-- [ ] TASK-179: Enable OAuth Apps on the canonical AittaDB service after TASK-178 merges. DoD: the exact reviewed `main` commit containing migration `0012` is validated and deployed to `aittadb.com`, `FEATURE_OAUTH_APPS_ENABLED=true` is applied without changing unrelated hosted settings or secrets, discovery advertises `client_credentials`, an administrator can register a storage-only service client, disabled/anonymous behavior and existing signed-in storage remain intact, rollback steps and acceptance evidence are recorded, no AittaSocial-specific client code or secret enters this repository, and the production change is not performed before PR approval and merge.
