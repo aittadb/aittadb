@@ -1,4 +1,8 @@
 import type { AppConfig, PrivacyConfig, RuntimeEnv } from "./types";
+import {
+  APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS,
+  APPLICATION_EVENT_MAX_RETENTION_SECONDS,
+} from "./application-events";
 
 const DEFAULT_ACCESS_TOKEN_TTL = 600;
 const DEFAULT_AUTH_CODE_TTL = 300;
@@ -93,6 +97,12 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
     maintenanceCleanupTelemetryEnabled: readBoolean(
       env.MAINTENANCE_CLEANUP_TELEMETRY_ENABLED,
       false,
+    ),
+    eventRetentionSeconds: readBoundedPositiveInt(
+      env.EVENT_RETENTION_SECONDS,
+      APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS,
+      APPLICATION_EVENT_MAX_RETENTION_SECONDS,
+      "EVENT_RETENTION_SECONDS",
     ),
     eventLimits: {
       globalMaxItems: readPositiveInt(
@@ -275,6 +285,19 @@ function readPositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) {
     throw new Error(`Expected positive integer, received ${value}`);
+  }
+  return parsed;
+}
+
+function readBoundedPositiveInt(
+  value: string | undefined,
+  fallback: number,
+  maximum: number,
+  name: string,
+): number {
+  const parsed = readPositiveInt(value, fallback);
+  if (parsed > maximum) {
+    throw new Error(`${name} must not exceed ${maximum}`);
   }
   return parsed;
 }

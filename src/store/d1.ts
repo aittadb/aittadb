@@ -2,6 +2,7 @@ import { sha256, uuid } from "../crypto";
 import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
+  APPLICATION_EVENT_CLEANUP_BATCH_SIZE,
   assertApplicationEvent,
   assertApplicationEventInput,
   assertApplicationEventLimits,
@@ -361,6 +362,7 @@ export class D1AuthStore implements AuthStore {
         deletedFences,
         "file-write-fences",
       ),
+      "application-events": null,
       "authorization-codes": null,
       "authorization-requests": null,
       "device-grants": null,
@@ -372,6 +374,12 @@ export class D1AuthStore implements AuthStore {
       "admin-submissions": null,
     };
     const deletions: Array<[CleanupCategory, string, ...unknown[]]> = [
+      [
+        "application-events",
+        "DELETE FROM application_events WHERE sequence IN (SELECT sequence FROM application_events WHERE expires_at <= ? ORDER BY expires_at ASC, sequence ASC LIMIT ?)",
+        now,
+        APPLICATION_EVENT_CLEANUP_BATCH_SIZE,
+      ],
       [
         "authorization-codes",
         "DELETE FROM authorization_codes WHERE rowid IN (SELECT rowid FROM authorization_codes WHERE expires_at <= ? ORDER BY expires_at ASC, rowid ASC LIMIT ?)",

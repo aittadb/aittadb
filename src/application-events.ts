@@ -7,6 +7,9 @@ import type {
 export const APPLICATION_EVENT_MAX_DATA_BYTES = 64 * 1024;
 export const APPLICATION_EVENT_MAX_TYPE_LENGTH = 128;
 export const APPLICATION_EVENT_MAX_PAGE_SIZE = 100;
+export const APPLICATION_EVENT_CLEANUP_BATCH_SIZE = 500;
+export const APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+export const APPLICATION_EVENT_MAX_RETENTION_SECONDS = 365 * 24 * 60 * 60;
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -52,6 +55,29 @@ export function assertApplicationEventInput(
   ) {
     throw new RangeError("application_event_time_invalid");
   }
+  if (
+    input.expiresAt - input.createdAt >
+    APPLICATION_EVENT_MAX_RETENTION_SECONDS
+  ) {
+    throw new RangeError("application_event_retention_invalid");
+  }
+}
+
+export function applicationEventExpiresAt(
+  createdAt: number,
+  retentionSeconds: number,
+): number {
+  if (
+    !Number.isSafeInteger(createdAt) ||
+    createdAt < 0 ||
+    !Number.isSafeInteger(retentionSeconds) ||
+    retentionSeconds < 1 ||
+    retentionSeconds > APPLICATION_EVENT_MAX_RETENTION_SECONDS ||
+    createdAt > Number.MAX_SAFE_INTEGER - retentionSeconds
+  ) {
+    throw new RangeError("application_event_retention_invalid");
+  }
+  return createdAt + retentionSeconds;
 }
 
 export function assertApplicationEventLimits(
