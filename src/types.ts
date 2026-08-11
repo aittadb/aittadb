@@ -275,6 +275,24 @@ export interface StorageUsage {
   byteCount: number;
 }
 
+export interface ApplicationEventInput {
+  id: string;
+  userId: string;
+  clientId: string;
+  type: string;
+  dataJson: string;
+  dataBytes: number;
+  idempotencyKeyHash: string | null;
+  requestHash: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface ApplicationEvent extends ApplicationEventInput {
+  /** Internal ordering value. Public representations expose it only through encrypted cursors. */
+  sequence: number;
+}
+
 export interface AccountFilePurgeStageResult {
   selected: number;
   staged: number;
