@@ -41,6 +41,7 @@ export interface RuntimeEnv {
   FEATURE_FILES_ENABLED?: string;
   FEATURE_STATISTICS_ENABLED?: string;
   FEATURE_OAUTH_APPS_ENABLED?: string;
+  FEATURE_EVENTS_ENABLED?: string;
   MAINTENANCE_CLEANUP_TELEMETRY_ENABLED?: string;
   STORAGE_WRITES_ENABLED?: string;
   STORAGE_GLOBAL_MAX_ITEMS?: string;
@@ -88,6 +89,7 @@ export interface FeatureAvailability {
   files: boolean;
   statistics: boolean;
   oauthApps: boolean;
+  events: boolean;
 }
 
 export interface AppConfig {

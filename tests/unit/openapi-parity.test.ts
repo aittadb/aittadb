@@ -401,6 +401,7 @@ test("OpenAPI distinguishes licensing posture from the current Sites dependency"
     "files",
     "statistics",
     "oauthApps",
+    "events",
   ]);
   const featureProperties = asObject(
     features.properties,
@@ -415,6 +416,12 @@ test("OpenAPI distinguishes licensing posture from the current Sites dependency"
   assert.equal(
     asObject(featureProperties.oauthApps, "oauthApps").default,
     false,
+  );
+  assert.equal(asObject(featureProperties.events, "events").default, false);
+  assert.equal(
+    Object.hasOwn(openApiSpec.paths, "/events"),
+    false,
+    "feature metadata must not advertise an unimplemented Events route",
   );
   assert.match(String(hostingPlatform.description), /depends on this platform/);
   assert.match(
