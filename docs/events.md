@@ -17,7 +17,7 @@ Persistent Events is being built as a small AittaDB server primitive. The curren
 
 The optional idempotency value is never stored in plaintext. A namespace can use one hash once; rows without an idempotency hash remain independently insertable. D1 foreign keys require existing principals and clients. A database trigger rejects inserts after account deletion begins, and another trigger rejects every update. Retention and account-deletion workers may delete rows through separately bounded primitives.
 
-The public UUID is not an authorization capability. Future reads must bind the caller's exact principal and client namespace in every query. Internal sequences must never be returned directly; resumable public traversal will use an authenticated opaque cursor.
+The public UUID is not an authorization capability. Future reads must bind the caller's exact principal and client namespace in every query. Internal sequences must never be returned directly; resumable traversal uses the authenticated opaque cursor described below.
 
 ## Validation and Failures
 
@@ -29,7 +29,17 @@ Malformed values fail before persistence. D1 constraints repeat the security-rel
 
 The internal page repository reads one exact principal/client namespace in increasing sequence order. Callers may start at the beginning or continue strictly after one validated sequence. Each call accepts a finite limit no larger than 100, asks D1 for only `limit + 1` rows, returns no more than the requested limit, and reports only whether another page exists. Empty namespaces return an empty final page.
 
-Repository consumers must not serialize the internal sequence. The public Events collection will translate it into a namespace-bound encrypted cursor in a separate primitive. Malformed page positions and limits fail before D1, and a repository row that violates the durable contract fails closed instead of being partially returned.
+Repository consumers must not serialize the internal sequence. A future public Events collection will translate it through the namespace-bound cursor primitive. Malformed page positions and limits fail before D1, and a repository row that violates the durable contract fails closed instead of being partially returned.
+
+## Opaque Resume Cursors
+
+`src/application-event-cursor.ts` seals one internal resume checkpoint with AES-256-GCM. The encrypted version-1 payload contains only the last event sequence and an expiry. Sequence zero is the explicit empty-stream checkpoint, so an empty read can still provide a safe position from which a later event is strictly newer. Random 96-bit IVs make two cursors for the same checkpoint different while decoding both to the same deterministic `afterSequence` value.
+
+The initial lifetime is exactly 15 minutes. Issuance accepts only a nonnegative safe-integer sequence and time. Opening requires an unexpired safe-integer expiry no later than 15 minutes from the opening time; expiry is exclusive, so a cursor is invalid at its expiry second. A client with an expired or otherwise invalid cursor must restart from the Events collection entry point. Cursor state is not stored in D1 or process memory.
+
+The key is domain-separated from storage cursors and derived from the configured private signing-key material. AES-GCM additional authenticated data binds the fixed Events resource, exact issuer, signing key ID, principal, and OAuth client without putting those values in the token. A cursor therefore cannot cross a resource, deployment boundary, principal, or client. Changing the signing key material or key ID immediately invalidates it.
+
+Opening accepts only bounded canonical unpadded base64url, strict UTF-8, the exact versioned canonical JSON shape, safe integers, and the bounded lifetime. Truncation, tampering, unsupported versions, reordered or extra fields, malformed context, and all binding failures return one internal `null` result. No decoder error contains plaintext cursor state, identity, client, or signing material. HTTP error mapping remains owned by the later Events collection task.
 
 ## Internal Point Lookup
 
