@@ -14,6 +14,22 @@ Before creating a private Sites deployment:
 8. Inspect `dist/.openai/drizzle/` and confirm it contains one generated SQL artifact for every reviewed file in `db/migrations/` plus a non-empty migration journal.
 9. Deploy privately only after explicit approval.
 
+## Acceptance-to-Production Promotion
+
+ChatGPT Sites assigns independent monotonically increasing version numbers to each Site. Acceptance and production therefore do not need the same Sites version number. They must use the same pushed Git commit and the same packaged artifact.
+
+For an AittaDB release:
+
+1. Start from a clean pushed `develop` commit that passed `npm run validate` and exact-head CI.
+2. Build and package that commit once. Do not rebuild or modify source between environments.
+3. Save and deploy it to `test.aittadb.com` without changing hosted values, secrets, bindings, custom domains, or access policy.
+4. Verify public metadata, health, protected-route denial, discovery, enabled feature behavior, migrations where applicable, and error-only private logs.
+5. If acceptance fails, stop and fix a new commit. Never promote the failed artifact.
+6. After acceptance succeeds, save and deploy the identical commit and artifact to `aittadb.com`, again preserving hosted configuration.
+7. Verify both custom domains serve equivalent public behavior and record each Site's local version number plus the shared source commit in private operational evidence.
+
+Production must never advance from an untested save, even when its runtime diff appears equivalent to the accepted commit. Documentation-only changes may not alter runtime behavior, but they still require this exact-source promotion path when a new Sites version is published.
+
 ## Public Sites Access
 
 AittaDB treats public Sites access as a supported operating posture, not as authorization. Public mode permits any ChatGPT user to reach the Sites sign-in boundary and create a separate local AittaDB identity. It must never make another subject's session or storage, administrator operations, internal tables, bindings, signing material, or hosted secrets public.
