@@ -2,6 +2,7 @@ import { sha256, uuid } from "../crypto";
 import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
+  APPLICATION_EVENT_CLEANUP_BATCH_SIZE,
   assertApplicationEvent,
   assertApplicationEventInput,
   assertApplicationEventLimits,
@@ -124,6 +125,14 @@ export class MemoryAuthStore implements AuthStore {
   }
 
   async cleanup(now: number): Promise<CleanupReport> {
+    const applicationEvents = deleteCleanupEntries(
+      this.applicationEvents,
+      (event) => event.expiresAt <= now,
+      (left, right) =>
+        left.expiresAt - right.expiresAt || left.sequence - right.sequence,
+      undefined,
+      APPLICATION_EVENT_CLEANUP_BATCH_SIZE,
+    );
     const authorizationCodes = deleteCleanupEntries(
       this.authCodes,
       (code) => code.expiresAt <= now,
@@ -217,6 +226,7 @@ export class MemoryAuthStore implements AuthStore {
       "file-write-fences": expiredFences.filter(
         (fence) => !this.storageFileWriteFences.has(fence.r2Key),
       ).length,
+      "application-events": applicationEvents,
       "authorization-codes": authorizationCodes,
       "authorization-requests": authorizationRequests,
       "device-grants": deviceGrants,
@@ -1438,6 +1448,7 @@ function deleteCleanupEntries<T>(
   eligible: (value: T) => boolean,
   compare: (left: T, right: T) => number,
   afterDelete?: (value: T) => void,
+  limit = CLEANUP_BATCH_SIZE,
 ): number {
   const selected = Array.from(values.entries())
     .filter(([, value]) => eligible(value))
@@ -1445,7 +1456,7 @@ function deleteCleanupEntries<T>(
       ([leftKey, left], [rightKey, right]) =>
         compare(left, right) || leftKey.localeCompare(rightKey),
     )
-    .slice(0, CLEANUP_BATCH_SIZE);
+    .slice(0, limit);
   for (const [key, value] of selected) {
     values.delete(key);
     afterDelete?.(value);

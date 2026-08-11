@@ -4,7 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import {
+  APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS,
   APPLICATION_EVENT_MAX_DATA_BYTES,
+  APPLICATION_EVENT_MAX_RETENTION_SECONDS,
+  applicationEventExpiresAt,
   assertApplicationEvent,
   assertApplicationEventInput,
 } from "../../src/application-events";
@@ -42,6 +45,13 @@ test("application event contract rejects malformed and unbounded values", () => 
     ["request_hash", { ...eventInput(), requestHash: "+".repeat(43) }],
     ["time", { ...eventInput(), createdAt: -1 }],
     ["time", { ...eventInput(), expiresAt: 100 }],
+    [
+      "retention",
+      {
+        ...eventInput(),
+        expiresAt: 100 + APPLICATION_EVENT_MAX_RETENTION_SECONDS + 1,
+      },
+    ],
   ];
 
   for (const [failure, input] of cases) {
@@ -55,6 +65,24 @@ test("application event contract rejects malformed and unbounded values", () => 
     /application_event_sequence_invalid/,
   );
   assert.equal(APPLICATION_EVENT_MAX_DATA_BYTES, 65_536);
+});
+
+test("application event expiry applies one finite configured retention", () => {
+  assert.equal(
+    applicationEventExpiresAt(100, APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS),
+    100 + APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS,
+  );
+  for (const [createdAt, retention] of [
+    [-1, 1],
+    [0, 0],
+    [0, APPLICATION_EVENT_MAX_RETENTION_SECONDS + 1],
+    [Number.MAX_SAFE_INTEGER, 1],
+  ] as const) {
+    assert.throws(
+      () => applicationEventExpiresAt(createdAt, retention),
+      /application_event_retention_invalid/,
+    );
+  }
 });
 
 test("application events migration has narrow immutable storage", async () => {
@@ -99,6 +127,7 @@ test("application events migration has narrow immutable storage", async () => {
     assert.deepEqual(triggers, [
       "trg_application_events_active_subject_insert",
       "trg_application_events_immutable",
+      "trg_application_events_retention_bound_insert",
     ]);
   } finally {
     sqlite.close();
@@ -147,6 +176,16 @@ test("application events schema enforces ownership, uniqueness, and immutable ro
           .prepare("UPDATE application_events SET event_type = ? WHERE id = ?")
           .run("changed", EVENT_ID),
       /application_event_immutable/,
+    );
+    assert.throws(
+      () =>
+        insertEvent(sqlite, {
+          ...eventInput(),
+          id: "00000000-0000-4000-8000-000000000009",
+          idempotencyKeyHash: null,
+          expiresAt: 100 + APPLICATION_EVENT_MAX_RETENTION_SECONDS + 1,
+        }),
+      /application_event_retention_invalid/,
     );
     assert.throws(
       () =>

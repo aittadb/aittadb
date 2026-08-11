@@ -1,3 +1,4 @@
+import { APPLICATION_EVENT_CLEANUP_BATCH_SIZE } from "../application-events";
 import { STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH } from "../storage-file-write-fence";
 
 export const CLEANUP_BATCH_SIZE = 500;
@@ -7,6 +8,7 @@ export const REFRESH_FAMILY_ORPHAN_GRACE_SECONDS = 60 * 60;
 
 export const CLEANUP_CATEGORIES = [
   "file-write-fences",
+  "application-events",
   "authorization-codes",
   "authorization-requests",
   "device-grants",
@@ -24,6 +26,7 @@ export const CLEANUP_CATEGORY_LIMITS: Readonly<
   Record<CleanupCategory, number>
 > = {
   "file-write-fences": STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH,
+  "application-events": APPLICATION_EVENT_CLEANUP_BATCH_SIZE,
   "authorization-codes": CLEANUP_BATCH_SIZE,
   "authorization-requests": CLEANUP_BATCH_SIZE,
   "device-grants": CLEANUP_BATCH_SIZE,

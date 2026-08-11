@@ -1,16 +1,16 @@
 # AittaDB Agent Instructions
 
-Authoritative for all contributors. Read before changes; keep below 32,000 bytes (`npm run agents:check`). Put rationale in `docs/`, without trimming mandatory boundaries.
+Authoritative for contributors; read before changes. Keep below 32,000 bytes (`npm run agents:check`). Put rationale in `docs/` without trimming mandatory boundaries.
 
 ## Purpose and Product Boundary
 
 AittaDB is a general-purpose hosted database server and application-backend service. It serves apps, services, and agents through small, independent, reusable primitives and stable HTTP protocols. On OpenAI-hosted ChatGPT Sites it maps trusted server-side sign-in to a local user, issues its own OAuth/OIDC/JWT credentials, and provides isolated data.
 
-Current capabilities: identity mapping, OAuth/OIDC/JWT, D1 JSON records, and R2 files with D1 metadata. Events/long polling are planned, not available.
+Current: identity mapping, OAuth/OIDC/JWT, D1 JSON records, and R2 files with D1 metadata. Events/long polling are unavailable.
 
 The server boundary includes identity/authentication; user/client/application/namespace isolation; records, objects, events/delivery; conditional writes, versions, cursors, idempotency, bounded atomic operations, quotas, expiry, retention, cleanup, hypermedia, OpenAPI, and protocol/operations docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols, not clients.
 
-Application workflows such as billing, membership, provisioning, messaging, or games belong outside AittaDB and compose its primitives. Examples may motivate a primitive, but cannot determine provider-specific routes, schemas, configuration, scopes, or business rules.
+Application workflows (billing, membership, provisioning, messaging, games) belong outside AittaDB and compose primitives. Examples cannot define provider-specific routes, schemas, configuration, scopes, or rules.
 
 AittaDB is source-available, not affiliated with or endorsed by OpenAI. The current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, sign-in, D1, R2, configuration, and secrets. Local users, credentials, grants, sessions, and data belong to that AittaDB deployment, not OpenAI or ChatGPT. Never call it "OpenAI Auth", "ChatGPT OAuth", or an official "Sign in with ChatGPT" OAuth service, or imply its credentials are OpenAI/ChatGPT credentials.
 
@@ -20,7 +20,7 @@ Current public releases use FSL-1.1-MIT and convert to MIT two years after publi
 
 ## Canonical Source and Origin
 
-`https://github.com/aittadb/aittadb` is the public canonical GitHub repository and contains no secrets. Create no other canonical tree; work here and preserve files, lockfile, package choices, instructions, user changes, and unrelated work. Commit no secrets or private deployment material; use inert placeholders and synthetic test fixtures. Never echo suspected exposure; escalate privately. Rotation, revocation, or history rewrite needs explicit approval.
+`https://github.com/aittadb/aittadb` is the public canonical repository and contains no secrets. Work only here; preserve files, lockfile, package choices, instructions, and user/unrelated changes. Commit no secrets or private deployment material; use inert placeholders and synthetic fixtures. Never echo suspected exposure; escalate privately. Rotation, revocation, or history rewrites need approval.
 
 The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
@@ -38,7 +38,7 @@ Runtime requirements:
 - Environment variables and Sites secrets for configuration.
 - No authoritative state in `localStorage`, `sessionStorage`, process memory, or browser cookies. Cookies may carry protected transaction state only.
 - Process memory may cache hints only; correctness cannot depend on it.
-- Root metadata, health, discovery, JWKS, OpenAPI, docs, and assets avoid D1. Vinext serves assets; cleanup/repair is bounded via `waitUntil`.
+- Root metadata, health, discovery, JWKS, OpenAPI, docs, and assets avoid D1; Vinext serves assets and `waitUntil` runs bounded cleanup/repair.
 - `.openai/hosting.json` is ignored checkout-local metadata and may contain the active project ID and logical bindings. Never commit a real reusable `project_id`. Keep `.openai/hosting.example.json` safe for forks.
 
 ## Upstream Identity Trust Boundary
@@ -172,6 +172,8 @@ Retain the reviewed `vendor/image-size-compat` override while Vinext's build-onl
 ## Database and Migrations
 
 D1 schema must explicitly cover users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs, audit events, admin submissions, rate limits, storage records/files, repair/fence state, and deletion jobs. Rate increments are single-statement atomic. Index expiration, cleanup joins, and pages; select bounded cleanup oldest-first with a `rowid` tie-breaker and retain new empty refresh families through the documented race-prevention grace window.
+
+Events retain 1-31,536,000 seconds (default 604,800); cleanup deletes at most 500 oldest expired rows and reports only category/count/limit.
 
 `db/migrations/` is canonical reviewed SQL. `db/schema.ts` is the required-table manifest. `build/sites-migrations.ts` deterministically emits Sites artifacts and journal under `dist/.openai/drizzle/`; Sites applies them. Runtime handlers never execute `CREATE`, `ALTER`, or `DROP`. This project intentionally uses handwritten migrations, not Drizzle ORM/Kit. Do not reintroduce ORM tooling without a complete architecture task.
 
