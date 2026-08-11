@@ -57,7 +57,7 @@ Never trust browser JavaScript for identity or accept arbitrary `oai-authenticat
 
 ## AittaDB Credentials and Scopes
 
-AittaDB alone issues downstream access tokens, refresh tokens, ID tokens, authorization codes, device codes, consents, and sessions. Supported scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, and `storage.delete`. The data model may permit future custom scopes, but do not invent more MVP scopes.
+AittaDB issues all downstream credentials. Scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, `storage.delete`, `events.publish`, `events.read`, and `events.subscribe`. Events scopes require `FEATURE_EVENTS_ENABLED=true`, authorize AittaDB only, and expose no route by themselves. Add no other scope without its owning task.
 
 Lead public descriptions with "source-available hosted application backend for third-party apps", then ChatGPT sign-in inside ChatGPT Sites, AittaDB sessions, JSON records, and files. State the Sites dependency without leading with defensive "third-party"/"non-official" labels; keep no-affiliation/no-endorsement secondary and never imply technical independence. Avoid unexplained "Sites identity" or "Token authority"; use "Session issuer". Keep `officialOpenAIProduct: false` in machine metadata, not browser copy.
 
@@ -124,7 +124,7 @@ Downstream OAuth Apps default off. Gate them before client auth, credential look
 
 OAuth rules when enabled:
 
-- Implement RFC 8628, Authorization Code with PKCE `S256`, and service-only Client Credentials; never implicit/password grants. Public clients have no secret; confidential/service clients authenticate. Service clients have no redirects/origins, accept only storage scopes, use one client-isolated non-human namespace, and receive no user claims, ID token, or refresh token.
+- Implement RFC 8628, Authorization Code with PKCE `S256`, and service-only Client Credentials; never implicit/password grants. Public clients have no secret; confidential/service clients authenticate. Service clients have no redirects/origins, accept only enabled storage/Events scopes, use one isolated non-human namespace, and receive no user claims, ID token, or refresh token.
 - Enforce exact redirects/scopes; authorization codes are high-entropy, short-lived, and one-time.
 - Preserve `state` and OIDC `nonce`.
 - Require explicit consent unless remembered consent exactly covers client and scopes.
@@ -185,7 +185,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events is metadata-only until routes exist; those routes gate before body/auth/rate/repository/maintenance work and omit controls when off. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
+`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes but no routes yet; disabled scope use fails even from persisted state. Future routes gate before body/auth/rate/repository/maintenance and omit controls when off. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
 
 Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 

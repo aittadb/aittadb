@@ -298,14 +298,14 @@ export function endpointActions(issuer: string): {
             secret: true,
             visible_when: { field: "grant_type", value: "refresh_token" },
           }),
-          field("scope", "Service storage scopes", "string", "body", {
+          field("scope", "Service AittaDB data scopes", "string", "body", {
             value: "storage.read storage.write storage.delete",
             visible_when: {
               field: "grant_type",
               value: "client_credentials",
             },
             description:
-              "Optional subset of the service client's registered storage scopes.",
+              "Optional subset of the service client's registered and currently enabled storage or Events scopes. Events scopes require FEATURE_EVENTS_ENABLED.",
           }),
         ],
       },

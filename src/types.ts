@@ -7,7 +7,10 @@ export type OAuthScope =
   | "offline_access"
   | "storage.read"
   | "storage.write"
-  | "storage.delete";
+  | "storage.delete"
+  | "events.publish"
+  | "events.read"
+  | "events.subscribe";
 
 export const SUPPORTED_SCOPES: readonly OAuthScope[] = [
   "openid",
@@ -17,6 +20,9 @@ export const SUPPORTED_SCOPES: readonly OAuthScope[] = [
   "storage.read",
   "storage.write",
   "storage.delete",
+  "events.publish",
+  "events.read",
+  "events.subscribe",
 ];
 
 export type ClientType = "public" | "confidential" | "service";
