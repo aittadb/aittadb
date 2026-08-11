@@ -4,6 +4,7 @@ import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
   assertApplicationEvent,
   assertApplicationEventInput,
+  assertApplicationEventLimits,
   assertApplicationEventLookupInput,
   assertApplicationEventPageInput,
   copyApplicationEvent,
@@ -50,6 +51,7 @@ import type {
   ApplicationEvent,
   ApplicationEventAppendResult,
   ApplicationEventInput,
+  ApplicationEventLimits,
   ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
@@ -1034,8 +1036,10 @@ export class MemoryAuthStore implements AuthStore {
 
   async appendApplicationEvent(
     input: ApplicationEventInput,
+    limits: ApplicationEventLimits,
   ): Promise<ApplicationEventAppendResult> {
     assertApplicationEventInput(input);
+    assertApplicationEventLimits(limits);
     const client = this.clients.get(input.clientId);
     if (
       (!this.users.has(input.userId) &&
@@ -1063,6 +1067,9 @@ export class MemoryAuthStore implements AuthStore {
     }
     if (this.applicationEvents.has(input.id)) {
       return { status: "unavailable" };
+    }
+    if (!fitsApplicationEventLimits(this, input, limits)) {
+      return { status: "quota_exceeded" };
     }
 
     const highestSequence = Array.from(this.applicationEvents.values()).reduce(
@@ -1561,6 +1568,37 @@ function fitsStorageLimits(
 
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
+}
+
+function fitsApplicationEventLimits(
+  store: MemoryAuthStore,
+  input: ApplicationEventInput,
+  limits: ApplicationEventLimits,
+): boolean {
+  let globalItems = 0;
+  let globalBytes = 0;
+  let userItems = 0;
+  let userBytes = 0;
+  let namespaceItems = 0;
+  let namespaceBytes = 0;
+  for (const event of store.applicationEvents.values()) {
+    globalItems += 1;
+    globalBytes += event.dataBytes;
+    if (event.userId !== input.userId) continue;
+    userItems += 1;
+    userBytes += event.dataBytes;
+    if (event.clientId !== input.clientId) continue;
+    namespaceItems += 1;
+    namespaceBytes += event.dataBytes;
+  }
+  return (
+    globalItems < limits.globalMaxItems &&
+    globalBytes + input.dataBytes <= limits.globalMaxBytes &&
+    userItems < limits.userMaxItems &&
+    userBytes + input.dataBytes <= limits.userMaxBytes &&
+    namespaceItems < limits.namespaceMaxItems &&
+    namespaceBytes + input.dataBytes <= limits.namespaceMaxBytes
+  );
 }
 
 function redactAuditData(

@@ -4,6 +4,7 @@ import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
   assertApplicationEvent,
   assertApplicationEventInput,
+  assertApplicationEventLimits,
   assertApplicationEventLookupInput,
   assertApplicationEventPageInput,
 } from "../application-events";
@@ -50,6 +51,7 @@ import type {
   ApplicationEvent,
   ApplicationEventAppendResult,
   ApplicationEventInput,
+  ApplicationEventLimits,
   ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
@@ -99,6 +101,12 @@ WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2)
   AND NOT EXISTS (
     SELECT 1 FROM account_deletion_jobs WHERE subject = ?2
   )
+  AND (SELECT COUNT(*) FROM application_events) < ?11
+  AND (SELECT COALESCE(SUM(data_bytes), 0) FROM application_events) + ?6 <= ?12
+  AND (SELECT COUNT(*) FROM application_events WHERE user_id = ?2) < ?13
+  AND (SELECT COALESCE(SUM(data_bytes), 0) FROM application_events WHERE user_id = ?2) + ?6 <= ?14
+  AND (SELECT COUNT(*) FROM application_events WHERE user_id = ?2 AND client_id = ?3) < ?15
+  AND (SELECT COALESCE(SUM(data_bytes), 0) FROM application_events WHERE user_id = ?2 AND client_id = ?3) + ?6 <= ?16
 ON CONFLICT DO NOTHING
 RETURNING *`;
 
@@ -116,6 +124,22 @@ WHERE event.user_id = ?1
     SELECT 1 FROM account_deletion_jobs WHERE subject = ?1
   )
 LIMIT 1`;
+
+const CLASSIFY_APPLICATION_EVENT_ADMISSION = `
+SELECT
+  CASE WHEN EXISTS (SELECT 1 FROM users WHERE id = ?1)
+    AND EXISTS (SELECT 1 FROM oauth_clients WHERE id = ?2 AND disabled_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM account_deletion_jobs WHERE subject = ?1)
+    THEN 1 ELSE 0 END AS active,
+  CASE WHEN EXISTS (SELECT 1 FROM application_events WHERE id = ?3)
+    THEN 1 ELSE 0 END AS id_exists,
+  CASE WHEN (SELECT COUNT(*) FROM application_events) >= ?5
+    OR (SELECT COALESCE(SUM(data_bytes), 0) FROM application_events) + ?4 > ?6
+    OR (SELECT COUNT(*) FROM application_events WHERE user_id = ?1) >= ?7
+    OR (SELECT COALESCE(SUM(data_bytes), 0) FROM application_events WHERE user_id = ?1) + ?4 > ?8
+    OR (SELECT COUNT(*) FROM application_events WHERE user_id = ?1 AND client_id = ?2) >= ?9
+    OR (SELECT COALESCE(SUM(data_bytes), 0) FROM application_events WHERE user_id = ?1 AND client_id = ?2) + ?4 > ?10
+    THEN 1 ELSE 0 END AS quota_exceeded`;
 
 const ACCOUNT_CREDENTIAL_PURGE_DELETIONS = [
   {
@@ -1370,8 +1394,10 @@ export class D1AuthStore implements AuthStore {
 
   async appendApplicationEvent(
     input: ApplicationEventInput,
+    limits: ApplicationEventLimits,
   ): Promise<ApplicationEventAppendResult> {
     assertApplicationEventInput(input);
+    assertApplicationEventLimits(limits);
     let inserted: Row | null;
     try {
       inserted = await this.db
@@ -1387,6 +1413,12 @@ export class D1AuthStore implements AuthStore {
           input.requestHash,
           input.createdAt,
           input.expiresAt,
+          limits.globalMaxItems,
+          limits.globalMaxBytes,
+          limits.userMaxItems,
+          limits.userMaxBytes,
+          limits.namespaceMaxItems,
+          limits.namespaceMaxBytes,
         )
         .first<Row>();
     } catch (error) {
@@ -1403,14 +1435,14 @@ export class D1AuthStore implements AuthStore {
       return { status: "created", event };
     }
     if (input.idempotencyKeyHash === null) {
-      return { status: "unavailable" };
+      return this.classifyApplicationEventAdmission(input, limits);
     }
 
     const existing = await this.db
       .prepare(SELECT_APPLICATION_EVENT_REPLAY)
       .bind(input.userId, input.clientId, input.idempotencyKeyHash)
       .first<Row>();
-    if (!existing) return { status: "unavailable" };
+    if (!existing) return this.classifyApplicationEventAdmission(input, limits);
     const event = rowToApplicationEvent(existing);
     if (
       event.userId !== input.userId ||
@@ -1422,6 +1454,38 @@ export class D1AuthStore implements AuthStore {
     return event.requestHash === input.requestHash
       ? { status: "replayed", event }
       : { status: "conflict" };
+  }
+
+  private async classifyApplicationEventAdmission(
+    input: ApplicationEventInput,
+    limits: ApplicationEventLimits,
+  ): Promise<ApplicationEventAppendResult> {
+    const row = await this.db
+      .prepare(CLASSIFY_APPLICATION_EVENT_ADMISSION)
+      .bind(
+        input.userId,
+        input.clientId,
+        input.id,
+        input.dataBytes,
+        limits.globalMaxItems,
+        limits.globalMaxBytes,
+        limits.userMaxItems,
+        limits.userMaxBytes,
+        limits.namespaceMaxItems,
+        limits.namespaceMaxBytes,
+      )
+      .first<Row>();
+    if (!row) throw new Error("application_event_admission_result_invalid");
+    const active = sqlBoolean(row.active);
+    const idExists = sqlBoolean(row.id_exists);
+    const quotaExceeded = sqlBoolean(row.quota_exceeded);
+    if (active === null || idExists === null || quotaExceeded === null) {
+      throw new Error("application_event_admission_result_invalid");
+    }
+    if (!active || idExists) return { status: "unavailable" };
+    return quotaExceeded
+      ? { status: "quota_exceeded" }
+      : { status: "unavailable" };
   }
 
   async listStorageRecords(
@@ -2069,6 +2133,12 @@ function rowToStorageFileOrphanRepair(row: Row): StorageFileOrphanRepair {
 
 function nullableNumber(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+
+function sqlBoolean(value: unknown): boolean | null {
+  if (value === 0) return false;
+  if (value === 1) return true;
+  return null;
 }
 
 function isInactiveApplicationEventInsert(error: unknown): boolean {
