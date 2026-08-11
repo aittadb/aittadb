@@ -29,10 +29,10 @@ curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
   --header 'Accept: application/json' \
   --header 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'grant_type=client_credentials' \
-  --data-urlencode 'scope=events.publish events.read'
+  --data-urlencode 'scope=events.publish events.read events.subscribe'
 ```
 
-`events.publish` authorizes immutable append, while `events.read` authorizes bounded collection and item reads. `events.subscribe` remains reserved until bounded delivery is released. If Events is disabled, registration and every grant path reject its scopes and the entire route family fails closed; existing storage and OIDC scopes are unchanged.
+`events.publish` authorizes immutable append, `events.read` authorizes bounded collection and item reads, and `events.subscribe` additionally authorizes bounded long polling from a valid resume cursor. If Events is disabled, registration and every grant path reject its scopes and the entire route family fails closed; existing storage and OIDC scopes are unchanged.
 
 ## Event Publication
 
@@ -63,6 +63,18 @@ curl -s "$ISSUER_URL/events?page_size=50&type=example.created" \
 
 The optional `type` is one exact case-sensitive event type. The opaque cursor is short-lived and bound to the token's principal, client, and filter. Browsers can open the same `/events` URI with `Accept: text/html` and use the current ChatGPT-signed-in AittaDB session without handling its internal token.
 
+Use the returned `resume_cursor` to wait for later matching events without constructing a position:
+
+```sh
+curl -sG "$ISSUER_URL/events" \
+  --header "Authorization: Bearer $ACCESS_TOKEN" \
+  --header 'Accept: application/vnd.aittadb+json; version=0.1' \
+  --data-urlencode "cursor=$EVENT_CURSOR" \
+  --data-urlencode 'wait=25'
+```
+
+The wait requires both `events.read` and `events.subscribe`, is admitted by a separate rate limit, and returns an empty page with `delivery.timed_out: true` when its finite interval ends.
+
 Follow an event's `self` link, or read an already-known identifier from the same exact namespace:
 
 ```sh
@@ -71,9 +83,9 @@ curl -s "$ISSUER_URL/events/$EVENT_ID" \
   --header "Authorization: Bearer $ACCESS_TOKEN"
 ```
 
-The response contains only the immutable public event fields plus self and collection links. A ChatGPT-signed-in user can open the same URL with `Accept: text/html`; AittaDB invokes the canonical read through its reserved current-session namespace without exposing the internal token. `events.subscribe` is reserved for bounded delivery and will also require `events.read` at the operation boundary.
+The response contains only the immutable public event fields plus self and collection links. A ChatGPT-signed-in user can open the same URL with `Accept: text/html`; AittaDB invokes the canonical read through its reserved current-session namespace without exposing the internal token.
 
-The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; publication and bounded collection/item reads are available only when Events is enabled, while long polling remains planned.
+The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; publication, bounded collection/item reads, and long polling are available only when Events is enabled.
 
 ## Hypermedia Traversal
 

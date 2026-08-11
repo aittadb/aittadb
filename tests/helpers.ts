@@ -1,4 +1,5 @@
 import { createAittaDBWithStore, type AittaDBApp } from "../src/handler";
+import type { EventWaitScheduler } from "../src/event-collection";
 import type { UpstreamIdentityProvider } from "../src/identity";
 import type { AuthStore, RuntimeEnv, UpstreamIdentity } from "../src/types";
 
@@ -90,6 +91,7 @@ export function createTestAittaDB(
   env: RuntimeEnv,
   store: AuthStore | null,
   identity: UpstreamIdentity | null = DEFAULT_TEST_IDENTITY,
+  eventWaitScheduler?: EventWaitScheduler,
 ): AittaDBApp {
   return createAittaDBWithStore(
     env,
@@ -97,6 +99,7 @@ export function createTestAittaDB(
     undefined,
     undefined,
     testIdentityProvider(identity),
+    eventWaitScheduler,
   );
 }
 

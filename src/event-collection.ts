@@ -42,6 +42,7 @@ import { parseScopes, verifyAccessToken } from "./oauth";
 import type {
   AppConfig,
   ApplicationEvent,
+  ApplicationEventPage,
   AuthStore,
   ClientView,
 } from "./types";
@@ -51,7 +52,8 @@ type EventReadAuthorization = "bearer" | "sites-session";
 interface EventPrincipal {
   principalId: string;
   client: ClientView;
-  scopes: string[];
+  scopes: readonly string[];
+  ownerHash: string;
 }
 
 interface EventPageRequest {
@@ -59,6 +61,12 @@ interface EventPageRequest {
   afterSequence: number;
   pageSize: number;
   typeFilter: string | null;
+  waitSeconds: number | null;
+}
+
+interface EventDeliveryData {
+  wait_seconds: number;
+  timed_out: boolean;
 }
 
 interface EventItemData {
@@ -69,7 +77,22 @@ interface EventItemData {
   expires_at: number;
 }
 
-const ALLOWED_EVENT_QUERY_PARAMETERS = new Set(["cursor", "page_size", "type"]);
+const ALLOWED_EVENT_QUERY_PARAMETERS = new Set([
+  "cursor",
+  "page_size",
+  "type",
+  "wait",
+]);
+
+export interface EventWaitScheduler {
+  nowMilliseconds(): number;
+  sleep(milliseconds: number, signal: AbortSignal): Promise<boolean>;
+}
+
+export const defaultEventWaitScheduler: EventWaitScheduler = {
+  nowMilliseconds: () => Date.now(),
+  sleep: (milliseconds, signal) => abortableSleep(milliseconds, signal),
+};
 
 export async function eventCollectionBrowserEndpoint(
   request: Request,
@@ -77,6 +100,7 @@ export async function eventCollectionBrowserEndpoint(
   store: AuthStore,
   config: AppConfig,
   identityProvider: UpstreamIdentityProvider,
+  scheduler: EventWaitScheduler = defaultEventWaitScheduler,
 ): Promise<Response | null> {
   if (
     url.pathname !== "/events" ||
@@ -121,7 +145,9 @@ export async function eventCollectionBrowserEndpoint(
     identityProvider,
     store,
     config,
-    ["events.read", "events.publish"],
+    url.searchParams.has("wait")
+      ? ["events.read", "events.publish", "events.subscribe"]
+      : ["events.read", "events.publish"],
   );
   if (token instanceof Response) return token;
   const headers = new Headers(request.headers);
@@ -132,6 +158,7 @@ export async function eventCollectionBrowserEndpoint(
     store,
     config,
     "sites-session",
+    scheduler,
     csrf,
   );
   response.headers.set("set-cookie", csrfCookie(csrf));
@@ -144,19 +171,51 @@ export async function eventCollectionEndpoint(
   store: AuthStore,
   config: AppConfig,
   authorization: EventReadAuthorization = "bearer",
+  scheduler: EventWaitScheduler = defaultEventWaitScheduler,
   csrfToken: string | null = null,
 ): Promise<Response> {
   const principal = await requireEventReadScope(request, store, config);
   if (principal instanceof Response) return noStore(principal);
   const page = await parseEventPage(url, principal, config);
   if (page instanceof Response) return noStore(page);
-  const events = await store.listApplicationEvents(
-    principal.principalId,
-    principal.client.id,
-    page.afterSequence,
-    page.pageSize,
-    page.typeFilter,
-  );
+  if (page.waitSeconds !== null) {
+    const rejection = await requireEventSubscribe(principal, store, config);
+    if (rejection) return noStore(rejection);
+  }
+  const waitStartedAt = scheduler.nowMilliseconds();
+  const waitDeadline =
+    page.waitSeconds === null
+      ? waitStartedAt
+      : waitStartedAt + page.waitSeconds * 1000;
+  let reads = 0;
+  let events: ApplicationEventPage;
+  while (true) {
+    if (request.signal.aborted) return noStore(cancelledWait(request, config));
+    events = await store.listApplicationEvents(
+      principal.principalId,
+      principal.client.id,
+      page.afterSequence,
+      page.pageSize,
+      page.typeFilter,
+    );
+    if (request.signal.aborted) return noStore(cancelledWait(request, config));
+    reads += 1;
+    if (events.items.length > 0 || page.waitSeconds === null) break;
+    const remaining = waitDeadline - scheduler.nowMilliseconds();
+    if (remaining <= 0 || reads >= config.eventMaxWaitReads) break;
+    const pollInterval = Math.ceil(
+      (config.eventMaxWaitSeconds * 1000) /
+        Math.max(1, config.eventMaxWaitReads - 1),
+    );
+    const elapsed = await scheduler.sleep(
+      Math.min(remaining, pollInterval),
+      request.signal,
+    );
+    if (!elapsed || request.signal.aborted) {
+      return noStore(cancelledWait(request, config));
+    }
+  }
+  const timedOut = page.waitSeconds !== null && events.items.length === 0;
   const checkpoint = events.items.at(-1)?.sequence ?? page.afterSequence;
   const resumeCursor = await encodeApplicationEventCursor(
     principal.principalId,
@@ -166,10 +225,13 @@ export async function eventCollectionEndpoint(
     config,
     page.typeFilter,
   );
-  const selfHref = eventPageHref(config, page, page.cursor);
-  const resumeHref = eventPageHref(config, page, resumeCursor);
+  const selfHref = eventPageHref(config, page, page.cursor, page.waitSeconds);
+  const resumeHref = eventPageHref(config, page, resumeCursor, null);
   const nextHref = events.hasMore ? resumeHref : null;
   const items = events.items.map((event) => eventItem(event, config));
+  const canSubscribe =
+    authorization === "sites-session" ||
+    principal.scopes.includes("events.subscribe");
   const document = resourceDocument({
     type: "application-event-collection",
     id: selfHref,
@@ -180,6 +242,14 @@ export async function eventCollectionEndpoint(
       type_filter: page.typeFilter,
       resume_cursor: resumeCursor,
       items,
+      ...(page.waitSeconds === null
+        ? {}
+        : {
+            delivery: {
+              wait_seconds: page.waitSeconds,
+              timed_out: timedOut,
+            } satisfies EventDeliveryData,
+          }),
     },
     links: [
       link("self", selfHref, { type: HYPERMEDIA_MEDIA_TYPE }),
@@ -223,6 +293,47 @@ export async function eventCollectionEndpoint(
           ],
         },
       ),
+      ...(canSubscribe
+        ? [
+            action(
+              "wait-for-events",
+              "Wait for later events",
+              "GET",
+              `${config.issuerUrl}/events`,
+              {
+                accept: HYPERMEDIA_MEDIA_TYPE,
+                authorization: {
+                  scheme: authorization,
+                  scopes: ["events.read", "events.subscribe"],
+                },
+                fields: [
+                  field("cursor", "Opaque resume cursor", "string", "query", {
+                    required: true,
+                    max_length: 342,
+                    value: resumeCursor,
+                  }),
+                  field("wait", "Wait seconds", "integer", "query", {
+                    required: true,
+                    min: 1,
+                    max: config.eventMaxWaitSeconds,
+                    value: config.eventMaxWaitSeconds,
+                  }),
+                  field("page_size", "Page size", "integer", "query", {
+                    required: false,
+                    min: 1,
+                    max: config.eventMaxPageSize,
+                    value: page.pageSize,
+                  }),
+                  field("type", "Exact event type", "string", "query", {
+                    required: false,
+                    max_length: 128,
+                    ...(page.typeFilter ? { value: page.typeFilter } : {}),
+                  }),
+                ],
+              },
+            ),
+          ]
+        : []),
       ...(principal.scopes.includes("events.publish")
         ? [
             eventPublicationAction(
@@ -249,6 +360,13 @@ export async function eventCollectionEndpoint(
             csrfToken
               ? eventPublicationForm(csrfToken)
               : null,
+          resumeCursor,
+          maxWaitSeconds: config.eventMaxWaitSeconds,
+          canSubscribe,
+          waitResult:
+            page.waitSeconds === null
+              ? null
+              : { seconds: page.waitSeconds, timedOut },
         }),
       )
     : hypermediaJson(request, document);
@@ -309,7 +427,7 @@ async function requireEventReadScope(
       response.headers.set("retry-after", "60");
       return response;
     }
-    return { principalId, client, scopes };
+    return { principalId, client, scopes, ownerHash };
   } catch {
     return oauthError("invalid_token", "Invalid token", 401);
   }
@@ -352,6 +470,23 @@ async function parseEventPage(
     }
   }
   const cursor = url.searchParams.get("cursor");
+  const rawWait = url.searchParams.get("wait");
+  const waitSeconds = rawWait === null ? null : Number.parseInt(rawWait, 10);
+  if (
+    waitSeconds !== null &&
+    (!Number.isSafeInteger(waitSeconds) ||
+      waitSeconds < 1 ||
+      waitSeconds > config.eventMaxWaitSeconds ||
+      String(waitSeconds) !== rawWait)
+  ) {
+    return oauthError(
+      "invalid_request",
+      `wait must be an integer from 1 to ${config.eventMaxWaitSeconds}`,
+    );
+  }
+  if (waitSeconds !== null && cursor === null) {
+    return oauthError("invalid_request", "wait requires a resume cursor");
+  }
   const checkpoint = cursor
     ? await decodeApplicationEventCursor(
         cursor,
@@ -370,6 +505,7 @@ async function parseEventPage(
     afterSequence: checkpoint.afterSequence,
     pageSize,
     typeFilter,
+    waitSeconds,
   };
 }
 
@@ -422,12 +558,78 @@ function eventPageHref(
   config: AppConfig,
   page: Pick<EventPageRequest, "pageSize" | "typeFilter">,
   cursor: string | null,
+  waitSeconds: number | null,
 ): string {
   const url = new URL(`${config.issuerUrl}/events`);
   url.searchParams.set("page_size", String(page.pageSize));
   if (page.typeFilter) url.searchParams.set("type", page.typeFilter);
   if (cursor) url.searchParams.set("cursor", cursor);
+  if (waitSeconds !== null) url.searchParams.set("wait", String(waitSeconds));
   return url.toString();
+}
+
+async function requireEventSubscribe(
+  principal: EventPrincipal,
+  store: AuthStore,
+  config: AppConfig,
+): Promise<Response | null> {
+  if (!principal.scopes.includes("events.subscribe")) {
+    return oauthError(
+      "insufficient_scope",
+      "Required scopes: events.read events.subscribe",
+      403,
+    );
+  }
+  if (
+    !(await store.rateLimit(
+      `events:subscribe:${principal.ownerHash}`,
+      config.eventSubscribeRateLimit,
+      60,
+      nowSeconds(),
+    ))
+  ) {
+    const response = oauthError("slow_down", "Rate limit exceeded", 429);
+    response.headers.set("retry-after", "60");
+    return response;
+  }
+  return null;
+}
+
+function cancelledWait(request: Request, config: AppConfig): Response {
+  return hypermediaError(
+    request,
+    "request_cancelled",
+    "Event wait cancelled",
+    499,
+    {
+      links: [
+        link("collection", `${config.issuerUrl}/events`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+      ],
+    },
+  );
+}
+
+function abortableSleep(
+  milliseconds: number,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (elapsed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      resolve(elapsed);
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(true), milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
 }
 
 function parseJwtAudience(token: string): string | null {

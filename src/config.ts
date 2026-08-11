@@ -19,6 +19,11 @@ const DEFAULT_EVENTS_NAMESPACE_MAX_BYTES = 16 * 1024 * 1024;
 const DEFAULT_EVENTS_PAGE_SIZE = 50;
 const DEFAULT_EVENTS_READ_RATE_LIMIT = 120;
 const DEFAULT_EVENTS_PUBLISH_RATE_LIMIT = 30;
+const DEFAULT_EVENTS_SUBSCRIBE_RATE_LIMIT = 30;
+const DEFAULT_EVENTS_MAX_WAIT_SECONDS = 25;
+const DEFAULT_EVENTS_MAX_WAIT_READS = 26;
+const MAX_EVENTS_WAIT_SECONDS = 30;
+const MAX_EVENTS_WAIT_READS = 31;
 const DEFAULT_STORAGE_GLOBAL_MAX_ITEMS = 10_000;
 const DEFAULT_STORAGE_GLOBAL_MAX_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_STORAGE_USER_MAX_ITEMS = 1_000;
@@ -79,6 +84,15 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
     throw new Error(
       "EVENTS_DEFAULT_PAGE_SIZE must not exceed EVENTS_MAX_PAGE_SIZE",
     );
+  }
+  const eventMaxWaitReads = readBoundedPositiveInt(
+    env.EVENTS_MAX_WAIT_READS,
+    DEFAULT_EVENTS_MAX_WAIT_READS,
+    MAX_EVENTS_WAIT_READS,
+    "EVENTS_MAX_WAIT_READS",
+  );
+  if (eventMaxWaitReads < 2) {
+    throw new Error("EVENTS_MAX_WAIT_READS must be at least 2");
   }
 
   return {
@@ -159,6 +173,17 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       env.EVENTS_PUBLISH_RATE_LIMIT,
       DEFAULT_EVENTS_PUBLISH_RATE_LIMIT,
     ),
+    eventSubscribeRateLimit: readPositiveInt(
+      env.EVENTS_SUBSCRIBE_RATE_LIMIT,
+      DEFAULT_EVENTS_SUBSCRIBE_RATE_LIMIT,
+    ),
+    eventMaxWaitSeconds: readBoundedPositiveInt(
+      env.EVENTS_MAX_WAIT_SECONDS,
+      DEFAULT_EVENTS_MAX_WAIT_SECONDS,
+      MAX_EVENTS_WAIT_SECONDS,
+      "EVENTS_MAX_WAIT_SECONDS",
+    ),
+    eventMaxWaitReads,
     storageLimits: {
       writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),
       globalMaxItems: readPositiveInt(

@@ -181,8 +181,10 @@ import {
   startSubjectAccountDeletion,
 } from "./subject-access";
 import {
+  defaultEventWaitScheduler,
   eventCollectionBrowserEndpoint,
   eventCollectionEndpoint,
+  type EventWaitScheduler,
 } from "./event-collection";
 
 export interface AittaDBApp {
@@ -208,6 +210,7 @@ export function createAittaDBWithStore(
   config = loadConfig(env, env.ISSUER_URL ?? "https://aittadb.local"),
   ctx?: { waitUntil(promise: Promise<unknown>): void },
   identityProvider: UpstreamIdentityProvider = sitesIdentityProvider,
+  eventWaitScheduler: EventWaitScheduler = defaultEventWaitScheduler,
 ): AittaDBApp {
   return {
     async fetch(request: Request): Promise<Response | null> {
@@ -429,6 +432,7 @@ export function createAittaDBWithStore(
           config,
           identityProvider,
           ctx,
+          eventWaitScheduler,
         );
         const finalized = await finalizeResponse(
           request,
@@ -586,6 +590,7 @@ async function route(
   config: ReturnType<typeof loadConfig>,
   identityProvider: UpstreamIdentityProvider,
   ctx: { waitUntil(promise: Promise<unknown>): void } | undefined,
+  eventWaitScheduler: EventWaitScheduler,
 ): Promise<Response> {
   if (url.pathname === "/" && request.method === "GET") {
     const identity = identityProvider.read(request);
@@ -631,13 +636,11 @@ async function route(
           : []),
         ...(config.features.events
           ? [
-              "Persistent immutable event publication and reads isolated by AittaDB user and client",
+              "Persistent immutable event publication, reads, and bounded delivery isolated by AittaDB user and client",
             ]
           : []),
       ],
-      plannedCapabilities: config.features.events
-        ? ["Bounded long-polling event delivery"]
-        : ["Persistent events and long-polling delivery"],
+      plannedCapabilities: [],
     };
     const endpoints = endpointActions(config.issuerUrl);
     const links = [
@@ -1362,9 +1365,17 @@ async function route(
         store,
         config,
         identityProvider,
+        eventWaitScheduler,
       );
       if (browserResponse) return browserResponse;
-      return eventCollectionEndpoint(request, url, store, config);
+      return eventCollectionEndpoint(
+        request,
+        url,
+        store,
+        config,
+        "bearer",
+        eventWaitScheduler,
+      );
     }
     if (request.method === "POST") {
       return eventPublicationEndpoint(request, store, config, identityProvider);

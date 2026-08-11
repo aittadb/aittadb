@@ -1,6 +1,6 @@
 # Persistent Events
 
-Persistent Events is built as small composable AittaDB server primitives. When `FEATURE_EVENTS_ENABLED=true`, the current release exposes immutable publication at `POST /events`, bounded collection reads at `GET /events`, and immutable item reads at `GET /events/{id}`. Long-poll delivery remains unavailable until its owning task lands.
+Persistent Events is built as small composable AittaDB server primitives. When `FEATURE_EVENTS_ENABLED=true`, the current release exposes immutable publication at `POST /events`, bounded collection reads and long polling at `GET /events`, and immutable item reads at `GET /events/{id}`.
 
 ## HTTP Publication
 
@@ -45,6 +45,18 @@ Every successful page contains only public event UUID, type, JSON-object data, c
 
 The cursor is bound to the exact principal, client, and type filter. It cannot be reused across filters or namespaces and expires after 15 minutes. Responses use `Cache-Control: no-store`. `EVENTS_READ_RATE_LIMIT` defaults to 120 reads per principal/client minute. Cross-origin bearer reads require an exact origin registered on that token's active client; wildcard credentialed CORS is unsupported. The outer Events feature gate runs before bearer, Sites identity, CORS client lookup, rate-limit, cursor, or event-repository work and removes collection controls when disabled.
 
+An explicit `wait=SECONDS` extends the same collection operation with bounded long polling. It requires both `events.read` and `events.subscribe`, and it requires a valid `cursor` from an earlier collection response so delivery starts at a server-issued position. `SECONDS` defaults to no wait when omitted, must be an integer, and cannot exceed `EVENTS_MAX_WAIT_SECONDS` (25 by default; hard maximum 30). A wait performs no more than `EVENTS_MAX_WAIT_READS` repository reads (26 by default; hard maximum 31) and is admitted by the separate `EVENTS_SUBSCRIBE_RATE_LIMIT` (30 per namespace minute by default) before its first read. The reads use the same exact principal, client, and optional type predicate as ordinary polling.
+
+A later matching event returns immediately as a normal collection page. If no event appears before the deadline, the response is an empty `200` page with `delivery.wait_seconds` and `delivery.timed_out: true`; ordinary polling omits `delivery` and is otherwise unchanged. Request cancellation stops the scheduler before another repository read and produces the documented cancellation response when a response can still be delivered. No in-memory notification, background worker, or process-local state is authoritative; separate Worker instances discover events through bounded D1 reads.
+
+```sh
+curl --get "https://aittadb.example/events" \
+  --header "Accept: application/vnd.aittadb+json; version=0.1" \
+  --header "Authorization: Bearer $AITTADB_ACCESS_TOKEN" \
+  --data-urlencode "cursor=$AITTADB_EVENT_CURSOR" \
+  --data-urlencode "wait=25"
+```
+
 ## Internal Ordered Pages
 
 The internal page repository reads one exact principal/client namespace in increasing sequence order. Callers may start at the beginning or continue strictly after one validated sequence. Each call accepts a finite limit no larger than 100, asks D1 for only `limit + 1` rows, returns no more than the requested limit, and reports only whether another page exists. Empty namespaces return an empty final page.
@@ -71,7 +83,7 @@ With `FEATURE_EVENTS_ENABLED=true`, `GET /events/{id}` returns one unexpired eve
 
 The identifier must be a canonical lowercase UUIDv4. Malformed, absent, expired, other-user, and other-client identifiers produce the same generic `404` representation. Successful JSON exposes only `id`, `type`, the event's JSON object, `created_at`, and `expires_at`; it omits sequence, ownership, request hashes, and idempotency state. HTML renders those same fields accessibly. Both representations link to the implemented collection URI and advertise no mutation. Exact client-origin CORS, request and rate bounds, `Cache-Control: no-store`, and the outer Events gate apply before repository disclosure.
 
-`GET /events` returns bounded deterministic pages and links every returned event to its exact immutable item resource. Event deletion, update, and long-poll delivery remain unavailable in this preview.
+`GET /events` returns bounded deterministic pages, links every returned event to its exact immutable item resource, and can wait from a valid resume cursor. Event deletion and update are not public operations.
 
 ## Internal Idempotent Append
 

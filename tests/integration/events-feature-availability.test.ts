@@ -42,11 +42,7 @@ for (const [configured, expected] of [
     const document =
       (await jsonResponse.json()) as HypermediaDocument<ServiceMetadata>;
     assert.equal(document.data.features.events, expected);
-    assert.deepEqual(document.data.plannedCapabilities, [
-      expected
-        ? "Bounded long-polling event delivery"
-        : "Persistent events and long-polling delivery",
-    ]);
+    assert.deepEqual(document.data.plannedCapabilities, []);
     assert.equal(
       document.data.capabilities.some((capability) =>
         /event/i.test(capability),
