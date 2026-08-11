@@ -293,6 +293,20 @@ export interface ApplicationEvent extends ApplicationEventInput {
   sequence: number;
 }
 
+export interface ApplicationEventPage {
+  items: ApplicationEvent[];
+  hasMore: boolean;
+}
+
+export interface ApplicationEventPageRepository {
+  listApplicationEvents(
+    userId: string,
+    clientId: string,
+    afterSequence: number | null,
+    limit: number,
+  ): Promise<ApplicationEventPage>;
+}
+
 export interface AccountFilePurgeStageResult {
   selected: number;
   staged: number;
@@ -362,7 +376,8 @@ export interface AuthStore
   extends
     AccountCredentialPurgeRepository,
     AccountRecordPurgeRepository,
-    AccountDeletionFinalizationRepository {
+    AccountDeletionFinalizationRepository,
+    ApplicationEventPageRepository {
   cleanup(now: number): Promise<CleanupReport>;
   rateLimit(
     key: string,
