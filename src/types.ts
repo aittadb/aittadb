@@ -48,6 +48,12 @@ export interface RuntimeEnv {
   FEATURE_STATISTICS_ENABLED?: string;
   FEATURE_OAUTH_APPS_ENABLED?: string;
   FEATURE_EVENTS_ENABLED?: string;
+  EVENTS_GLOBAL_MAX_ITEMS?: string;
+  EVENTS_GLOBAL_MAX_BYTES?: string;
+  EVENTS_USER_MAX_ITEMS?: string;
+  EVENTS_USER_MAX_BYTES?: string;
+  EVENTS_NAMESPACE_MAX_ITEMS?: string;
+  EVENTS_NAMESPACE_MAX_BYTES?: string;
   MAINTENANCE_CLEANUP_TELEMETRY_ENABLED?: string;
   STORAGE_WRITES_ENABLED?: string;
   STORAGE_GLOBAL_MAX_ITEMS?: string;
@@ -90,6 +96,15 @@ export interface StorageLimits {
   namespaceMaxBytes: number;
 }
 
+export interface ApplicationEventLimits {
+  globalMaxItems: number;
+  globalMaxBytes: number;
+  userMaxItems: number;
+  userMaxBytes: number;
+  namespaceMaxItems: number;
+  namespaceMaxBytes: number;
+}
+
 export interface FeatureAvailability {
   records: boolean;
   files: boolean;
@@ -110,6 +125,7 @@ export interface AppConfig {
   allowedCorsOrigins: readonly string[];
   features: FeatureAvailability;
   maintenanceCleanupTelemetryEnabled: boolean;
+  eventLimits: ApplicationEventLimits;
   storageLimits: StorageLimits;
   storageDefaultPageSize: number;
   storageMaxPageSize: number;
@@ -325,11 +341,12 @@ export interface ApplicationEventLookupRepository {
 
 export type ApplicationEventAppendResult =
   | { status: "created" | "replayed"; event: ApplicationEvent }
-  | { status: "conflict" | "unavailable" };
+  | { status: "conflict" | "quota_exceeded" | "unavailable" };
 
 export interface ApplicationEventAppendRepository {
   appendApplicationEvent(
     input: ApplicationEventInput,
+    limits: ApplicationEventLimits,
   ): Promise<ApplicationEventAppendResult>;
 }
 

@@ -5,6 +5,12 @@ const DEFAULT_AUTH_CODE_TTL = 300;
 const DEFAULT_DEVICE_CODE_TTL = 900;
 const DEFAULT_DEVICE_POLL_INTERVAL = 5;
 const DEFAULT_REFRESH_TOKEN_TTL = 60 * 60 * 24 * 30;
+const DEFAULT_EVENTS_GLOBAL_MAX_ITEMS = 10_000;
+const DEFAULT_EVENTS_GLOBAL_MAX_BYTES = 256 * 1024 * 1024;
+const DEFAULT_EVENTS_USER_MAX_ITEMS = 1_000;
+const DEFAULT_EVENTS_USER_MAX_BYTES = 32 * 1024 * 1024;
+const DEFAULT_EVENTS_NAMESPACE_MAX_ITEMS = 500;
+const DEFAULT_EVENTS_NAMESPACE_MAX_BYTES = 16 * 1024 * 1024;
 const DEFAULT_STORAGE_GLOBAL_MAX_ITEMS = 10_000;
 const DEFAULT_STORAGE_GLOBAL_MAX_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_STORAGE_USER_MAX_ITEMS = 1_000;
@@ -88,6 +94,32 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       env.MAINTENANCE_CLEANUP_TELEMETRY_ENABLED,
       false,
     ),
+    eventLimits: {
+      globalMaxItems: readPositiveInt(
+        env.EVENTS_GLOBAL_MAX_ITEMS,
+        DEFAULT_EVENTS_GLOBAL_MAX_ITEMS,
+      ),
+      globalMaxBytes: readPositiveInt(
+        env.EVENTS_GLOBAL_MAX_BYTES,
+        DEFAULT_EVENTS_GLOBAL_MAX_BYTES,
+      ),
+      userMaxItems: readPositiveInt(
+        env.EVENTS_USER_MAX_ITEMS,
+        DEFAULT_EVENTS_USER_MAX_ITEMS,
+      ),
+      userMaxBytes: readPositiveInt(
+        env.EVENTS_USER_MAX_BYTES,
+        DEFAULT_EVENTS_USER_MAX_BYTES,
+      ),
+      namespaceMaxItems: readPositiveInt(
+        env.EVENTS_NAMESPACE_MAX_ITEMS,
+        DEFAULT_EVENTS_NAMESPACE_MAX_ITEMS,
+      ),
+      namespaceMaxBytes: readPositiveInt(
+        env.EVENTS_NAMESPACE_MAX_BYTES,
+        DEFAULT_EVENTS_NAMESPACE_MAX_BYTES,
+      ),
+    },
     storageLimits: {
       writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),
       globalMaxItems: readPositiveInt(
