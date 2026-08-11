@@ -1,4 +1,8 @@
-import type { ApplicationEvent, ApplicationEventInput } from "./types";
+import type {
+  ApplicationEvent,
+  ApplicationEventInput,
+  ApplicationEventLimits,
+} from "./types";
 
 export const APPLICATION_EVENT_MAX_DATA_BYTES = 64 * 1024;
 export const APPLICATION_EVENT_MAX_TYPE_LENGTH = 128;
@@ -47,6 +51,23 @@ export function assertApplicationEventInput(
     input.expiresAt <= input.createdAt
   ) {
     throw new RangeError("application_event_time_invalid");
+  }
+}
+
+export function assertApplicationEventLimits(
+  limits: ApplicationEventLimits,
+): void {
+  for (const value of [
+    limits.globalMaxItems,
+    limits.globalMaxBytes,
+    limits.userMaxItems,
+    limits.userMaxBytes,
+    limits.namespaceMaxItems,
+    limits.namespaceMaxBytes,
+  ]) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new RangeError("application_event_limits_invalid");
+    }
   }
 }
 

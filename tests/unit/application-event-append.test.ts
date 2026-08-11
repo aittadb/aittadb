@@ -3,30 +3,68 @@ import { readdir, readFile } from "node:fs/promises";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 
+import { loadConfig } from "../../src/config";
 import { D1AuthStore } from "../../src/store/d1";
 import { MemoryAuthStore } from "../../src/store/memory";
 import type {
+  ApplicationEventAppendResult,
+  ApplicationEventLimits,
   ApplicationEventInput,
   AuthStore,
   ClientView,
   LocalUser,
 } from "../../src/types";
+import { testEnv } from "../helpers";
 
 const USER_ID = "event-user";
 const CLIENT_ID = "event-client";
 const FIRST_ID = "00000000-0000-4000-8000-000000000001";
 const IDEMPOTENCY_HASH = "i".repeat(43);
 const REQUEST_HASH = "r".repeat(43);
+const WIDE_LIMITS: ApplicationEventLimits = {
+  globalMaxItems: 1_000,
+  globalMaxBytes: 10_000_000,
+  userMaxItems: 1_000,
+  userMaxBytes: 10_000_000,
+  namespaceMaxItems: 1_000,
+  namespaceMaxBytes: 10_000_000,
+};
+
+test("event admission configuration has finite strict defaults", async () => {
+  const env = await testEnv();
+  const defaults = loadConfig(env, env.ISSUER_URL!);
+  assert.deepEqual(defaults.eventLimits, {
+    globalMaxItems: 10_000,
+    globalMaxBytes: 256 * 1024 * 1024,
+    userMaxItems: 1_000,
+    userMaxBytes: 32 * 1024 * 1024,
+    namespaceMaxItems: 500,
+    namespaceMaxBytes: 16 * 1024 * 1024,
+  });
+  assert.equal(
+    loadConfig({ ...env, EVENTS_NAMESPACE_MAX_ITEMS: "7" }, env.ISSUER_URL!)
+      .eventLimits.namespaceMaxItems,
+    7,
+  );
+  for (const value of ["0", "-1", "1.5", "unlimited"]) {
+    assert.throws(
+      () =>
+        loadConfig({ ...env, EVENTS_GLOBAL_MAX_BYTES: value }, env.ISSUER_URL!),
+      /Expected positive integer/,
+      value,
+    );
+  }
+});
 
 test("D1 and memory append once, replay exactly, and reject conflicting reuse", async () => {
   const harnesses = await eventStores();
   try {
     for (const harness of harnesses) {
-      const created = await harness.store.appendApplicationEvent(eventInput());
+      const created = await append(harness.store);
       assert.equal(created.status, "created");
       assert.equal(created.status === "created" && created.event.id, FIRST_ID);
 
-      const replayed = await harness.store.appendApplicationEvent({
+      const replayed = await append(harness.store, {
         ...eventInput(),
         id: "00000000-0000-4000-8000-000000000002",
       });
@@ -36,7 +74,7 @@ test("D1 and memory append once, replay exactly, and reject conflicting reuse", 
         FIRST_ID,
       );
 
-      const conflict = await harness.store.appendApplicationEvent({
+      const conflict = await append(harness.store, {
         ...eventInput(),
         id: "00000000-0000-4000-8000-000000000003",
         requestHash: "c".repeat(43),
@@ -64,7 +102,7 @@ test("append without an idempotency hash creates independent events", async () =
         "00000000-0000-4000-8000-000000000011",
         "00000000-0000-4000-8000-000000000012",
       ]) {
-        const result = await harness.store.appendApplicationEvent({
+        const result = await append(harness.store, {
           ...eventInput(),
           id,
           idempotencyKeyHash: null,
@@ -93,8 +131,8 @@ test("concurrent equal appends have one created result and one replay", async ()
   try {
     for (const harness of harnesses) {
       const results = await Promise.all([
-        harness.store.appendApplicationEvent(eventInput()),
-        harness.store.appendApplicationEvent({
+        append(harness.store),
+        append(harness.store, {
           ...eventInput(),
           id: "00000000-0000-4000-8000-000000000022",
         }),
@@ -116,19 +154,174 @@ test("concurrent equal appends have one created result and one replay", async ()
   }
 });
 
+test("D1 and memory enforce each event item ceiling without crossing namespaces", async () => {
+  for (const dimension of ["namespace", "user", "global"] as const) {
+    const harnesses = await eventStores();
+    try {
+      for (const harness of harnesses) {
+        await harness.seedNamespace(USER_ID, "event-client-2");
+        await harness.seedNamespace("event-user-2", "event-client-3");
+        const limits = eventLimits(
+          dimension === "namespace"
+            ? { namespaceMaxItems: 1 }
+            : dimension === "user"
+              ? { userMaxItems: 1 }
+              : { globalMaxItems: 1 },
+        );
+        assert.equal(
+          (await append(harness.store, numberedEvent(101), limits)).status,
+          "created",
+        );
+        const second =
+          dimension === "namespace"
+            ? numberedEvent(102)
+            : dimension === "user"
+              ? numberedEvent(102, USER_ID, "event-client-2")
+              : numberedEvent(102, "event-user-2", "event-client-3");
+        assert.deepEqual(await append(harness.store, second, limits), {
+          status: "quota_exceeded",
+        });
+
+        const independent =
+          dimension === "namespace"
+            ? numberedEvent(103, USER_ID, "event-client-2")
+            : dimension === "user"
+              ? numberedEvent(103, "event-user-2", "event-client-3")
+              : null;
+        if (independent) {
+          assert.equal(
+            (await append(harness.store, independent, limits)).status,
+            "created",
+          );
+        }
+      }
+    } finally {
+      closeHarnesses(harnesses);
+    }
+  }
+});
+
+test("D1 and memory account exact UTF-8 bytes at every event ceiling", async () => {
+  const payload = JSON.stringify({ message: "Hyvää" });
+  const bytes = new TextEncoder().encode(payload).byteLength;
+  assert.ok(bytes > payload.length);
+  for (const dimension of ["namespace", "user", "global"] as const) {
+    const harnesses = await eventStores();
+    try {
+      for (const harness of harnesses) {
+        const limits = eventLimits(
+          dimension === "namespace"
+            ? { namespaceMaxBytes: bytes }
+            : dimension === "user"
+              ? { userMaxBytes: bytes }
+              : { globalMaxBytes: bytes },
+        );
+        const first = {
+          ...numberedEvent(111),
+          dataJson: payload,
+          dataBytes: bytes,
+        };
+        assert.equal(
+          (await append(harness.store, first, limits)).status,
+          "created",
+        );
+        assert.deepEqual(
+          await append(
+            harness.store,
+            { ...first, id: eventId(112), idempotencyKeyHash: null },
+            limits,
+          ),
+          { status: "quota_exceeded" },
+        );
+      }
+    } finally {
+      closeHarnesses(harnesses);
+    }
+  }
+});
+
+test("idempotent retry and conflict remain exact after quota is full", async () => {
+  const harnesses = await eventStores();
+  try {
+    for (const harness of harnesses) {
+      const limits = eventLimits({ namespaceMaxItems: 1 });
+      assert.equal(
+        (await append(harness.store, eventInput(), limits)).status,
+        "created",
+      );
+      assert.equal(
+        (
+          await append(
+            harness.store,
+            { ...eventInput(), id: eventId(121) },
+            limits,
+          )
+        ).status,
+        "replayed",
+      );
+      assert.deepEqual(
+        await append(
+          harness.store,
+          {
+            ...eventInput(),
+            id: eventId(122),
+            requestHash: "x".repeat(43),
+          },
+          limits,
+        ),
+        { status: "conflict" },
+      );
+      assert.equal(await harness.count(), 1);
+      assert.equal(
+        (
+          await harness.store.listApplicationEvents(
+            USER_ID,
+            CLIENT_ID,
+            null,
+            10,
+          )
+        ).items.length,
+        1,
+      );
+    }
+  } finally {
+    closeHarnesses(harnesses);
+  }
+});
+
+test("concurrent boundary attempts have one event admission winner", async () => {
+  const harnesses = await eventStores();
+  try {
+    for (const harness of harnesses) {
+      const limits = eventLimits({ namespaceMaxItems: 1 });
+      const statuses = await Promise.all([
+        append(harness.store, numberedEvent(131), limits),
+        append(harness.store, numberedEvent(132), limits),
+      ]);
+      assert.deepEqual(statuses.map((result) => result.status).sort(), [
+        "created",
+        "quota_exceeded",
+      ]);
+      assert.equal(await harness.count(), 1);
+    }
+  } finally {
+    closeHarnesses(harnesses);
+  }
+});
+
 test("missing, disabled, and deleting ownership returns unavailable", async () => {
   const harnesses = await eventStores();
   try {
     for (const harness of harnesses) {
       assert.deepEqual(
-        await harness.store.appendApplicationEvent({
+        await append(harness.store, {
           ...eventInput(),
           userId: "missing-user",
         }),
         { status: "unavailable" },
       );
       assert.deepEqual(
-        await harness.store.appendApplicationEvent({
+        await append(harness.store, {
           ...eventInput(),
           clientId: "missing-client",
         }),
@@ -136,16 +329,10 @@ test("missing, disabled, and deleting ownership returns unavailable", async () =
       );
 
       await harness.disableClient();
-      assert.deepEqual(
-        await harness.store.appendApplicationEvent(eventInput()),
-        { status: "unavailable" },
-      );
+      assert.deepEqual(await append(harness.store), { status: "unavailable" });
       await harness.enableClient();
       await harness.startDeletion();
-      assert.deepEqual(
-        await harness.store.appendApplicationEvent(eventInput()),
-        { status: "unavailable" },
-      );
+      assert.deepEqual(await append(harness.store), { status: "unavailable" });
       assert.equal(await harness.count(), 0);
     }
   } finally {
@@ -157,13 +344,10 @@ test("a disabled client cannot replay an event created while active", async () =
   const harnesses = await eventStores();
   try {
     for (const harness of harnesses) {
-      assert.equal(
-        (await harness.store.appendApplicationEvent(eventInput())).status,
-        "created",
-      );
+      assert.equal((await append(harness.store)).status, "created");
       await harness.disableClient();
       assert.deepEqual(
-        await harness.store.appendApplicationEvent({
+        await append(harness.store, {
           ...eventInput(),
           id: "00000000-0000-4000-8000-000000000032",
         }),
@@ -187,21 +371,66 @@ test("malformed append input fails before repository access", async () => {
   const memory = new MemoryAuthStore();
   for (const store of [d1, memory]) {
     await assert.rejects(
-      store.appendApplicationEvent({ ...eventInput(), id: "not-an-id" }),
+      store.appendApplicationEvent(
+        { ...eventInput(), id: "not-an-id" },
+        WIDE_LIMITS,
+      ),
       /application_event_id_invalid/,
+    );
+    await assert.rejects(
+      store.appendApplicationEvent(eventInput(), {
+        ...WIDE_LIMITS,
+        namespaceMaxItems: 0,
+      }),
+      /application_event_limits_invalid/,
     );
   }
   assert.equal(prepares, 0);
   assert.equal(memory.applicationEvents.size, 0);
 });
 
+test("D1 preserves admission-classifier failures", async () => {
+  let prepares = 0;
+  const d1 = new D1AuthStore({
+    prepare(): D1PreparedStatement {
+      prepares += 1;
+      const statement: D1PreparedStatement = {
+        bind(): D1PreparedStatement {
+          return statement;
+        },
+        async first<T>(): Promise<T | null> {
+          if (prepares === 1) return null;
+          throw new Error("classifier_down");
+        },
+        async all<T>(): Promise<D1Result<T>> {
+          return { success: true, results: [] };
+        },
+        async run<T>(): Promise<D1Result<T>> {
+          return { success: true };
+        },
+      };
+      return statement;
+    },
+  });
+  await assert.rejects(
+    d1.appendApplicationEvent(
+      { ...eventInput(), idempotencyKeyHash: null },
+      WIDE_LIMITS,
+    ),
+    /classifier_down/,
+  );
+  assert.equal(prepares, 2);
+});
+
 test("D1 append starts with one conditional insert and preserves failures", async () => {
   const queries: string[] = [];
+  const bindings: unknown[][] = [];
   const d1 = new D1AuthStore({
     prepare(query: string): D1PreparedStatement {
       queries.push(query);
       const statement: D1PreparedStatement = {
-        bind(): D1PreparedStatement {
+        bind(...values: unknown[]): D1PreparedStatement {
+          bindings.push(values);
           return statement;
         },
         async first<T>(): Promise<T | null> {
@@ -218,7 +447,7 @@ test("D1 append starts with one conditional insert and preserves failures", asyn
     },
   });
   await assert.rejects(
-    d1.appendApplicationEvent(eventInput()),
+    d1.appendApplicationEvent(eventInput(), WIDE_LIMITS),
     /database_down/,
   );
   assert.equal(queries.length, 1);
@@ -226,6 +455,8 @@ test("D1 append starts with one conditional insert and preserves failures", asyn
   assert.match(queries[0]!, /ON CONFLICT DO NOTHING\s+RETURNING \*/);
   assert.match(queries[0]!, /disabled_at IS NULL/);
   assert.match(queries[0]!, /NOT EXISTS[\s\S]+account_deletion_jobs/);
+  assert.match(queries[0]!, /COUNT\(\*\)[\s\S]+SUM\(data_bytes\)/);
+  assert.equal(bindings[0]?.length, 16);
 });
 
 test("D1 append rejects a valid but mismatched returned row", async () => {
@@ -263,7 +494,7 @@ test("D1 append rejects a valid but mismatched returned row", async () => {
     },
   });
   await assert.rejects(
-    d1.appendApplicationEvent(input),
+    d1.appendApplicationEvent(input, WIDE_LIMITS),
     /application_event_append_result_invalid/,
   );
 });
@@ -271,6 +502,7 @@ test("D1 append rejects a valid but mismatched returned row", async () => {
 interface StoreHarness {
   store: AuthStore;
   count(): Promise<number>;
+  seedNamespace(userId: string, clientId: string): Promise<void>;
   disableClient(): Promise<void>;
   enableClient(): Promise<void>;
   startDeletion(): Promise<void>;
@@ -315,6 +547,18 @@ async function eventStores(): Promise<StoreHarness[]> {
             .get()?.count ?? 0,
         );
       },
+      async seedNamespace(userId: string, clientId: string): Promise<void> {
+        sqlite
+          .prepare(
+            "INSERT OR IGNORE INTO users (id, email, display_name, created_at, updated_at) VALUES (?, ?, ?, 1, 1)",
+          )
+          .run(userId, `${userId}@example.test`, userId);
+        sqlite
+          .prepare(
+            "INSERT OR IGNORE INTO oauth_clients (id, type, name, secret_hash, disabled_at, created_at) VALUES (?, 'public', ?, NULL, NULL, 1)",
+          )
+          .run(clientId, clientId);
+      },
       async disableClient(): Promise<void> {
         sqlite
           .prepare("UPDATE oauth_clients SET disabled_at = 10 WHERE id = ?")
@@ -340,6 +584,32 @@ async function eventStores(): Promise<StoreHarness[]> {
       store: memory,
       async count(): Promise<number> {
         return memory.applicationEvents.size;
+      },
+      async seedNamespace(userId: string, clientId: string): Promise<void> {
+        if (!memory.users.has(userId)) {
+          const nextUser: LocalUser = {
+            id: userId,
+            email: `${userId}@example.test`,
+            displayName: userId,
+            createdAt: 1,
+            updatedAt: 1,
+          };
+          memory.users.set(userId, nextUser);
+          memory.usersByEmail.set(nextUser.email, userId);
+        }
+        if (!memory.clients.has(clientId)) {
+          memory.clients.set(clientId, {
+            id: clientId,
+            type: "public",
+            name: clientId,
+            disabledAt: null,
+            redirectUris: [],
+            scopes: [],
+            origins: [],
+            createdAt: 1,
+            secretHash: null,
+          });
+        }
       },
       async disableClient(): Promise<void> {
         memory.clients.get(CLIENT_ID)!.disabledAt = 10;
@@ -372,6 +642,38 @@ function eventInput(): ApplicationEventInput {
     requestHash: REQUEST_HASH,
     createdAt: 100,
     expiresAt: 200,
+  };
+}
+
+function append(
+  store: AuthStore,
+  input: ApplicationEventInput = eventInput(),
+  limits: ApplicationEventLimits = WIDE_LIMITS,
+): Promise<ApplicationEventAppendResult> {
+  return store.appendApplicationEvent(input, limits);
+}
+
+function eventLimits(
+  overrides: Partial<ApplicationEventLimits>,
+): ApplicationEventLimits {
+  return { ...WIDE_LIMITS, ...overrides };
+}
+
+function eventId(value: number): string {
+  return `00000000-0000-4000-8000-${value.toString(16).padStart(12, "0")}`;
+}
+
+function numberedEvent(
+  value: number,
+  userId = USER_ID,
+  clientId = CLIENT_ID,
+): ApplicationEventInput {
+  return {
+    ...eventInput(),
+    id: eventId(value),
+    userId,
+    clientId,
+    idempotencyKeyHash: null,
   };
 }
 
