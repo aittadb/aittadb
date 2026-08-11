@@ -390,6 +390,11 @@ export interface AccountRecordPurgeBatch {
   done: boolean;
 }
 
+export interface AccountEventPurgeBatch {
+  deletedCount: number;
+  done: boolean;
+}
+
 export interface AccountCredentialPurgeRepository {
   purgeAccountCredentialsAndGrants(
     subject: string,
@@ -402,6 +407,15 @@ export interface AccountRecordPurgeRepository {
     subject: string,
     limit: number,
   ): Promise<AccountRecordPurgeBatch>;
+}
+
+export interface AccountEventPurgeRepository {
+  purgeAccountEvents(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountEventPurgeBatch>;
 }
 
 export interface AccountDeletionFinalizationRepository {
@@ -421,6 +435,7 @@ export interface AuthStore
   extends
     AccountCredentialPurgeRepository,
     AccountRecordPurgeRepository,
+    AccountEventPurgeRepository,
     AccountDeletionFinalizationRepository,
     ApplicationEventPageRepository,
     ApplicationEventLookupRepository,

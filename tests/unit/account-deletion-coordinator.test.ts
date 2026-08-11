@@ -19,11 +19,15 @@ import {
   AccountCredentialPurgeFailure,
   type AccountCredentialPurgeFailurePhase,
 } from "../../src/store/account-credential-purge";
+import { ACCOUNT_EVENT_PURGE_MAX_BATCH } from "../../src/store/account-event-purge";
 import { D1AuthStore } from "../../src/store/d1";
 import { MemoryAuthStore } from "../../src/store/memory";
 import type {
   AccountCredentialPurgeBatchResult,
+  AccountEventPurgeBatch,
   AccountRecordPurgeBatch,
+  ApplicationEventInput,
+  ApplicationEventLimits,
   AuthStore,
   ClientView,
   LocalUser,
@@ -35,6 +39,15 @@ import { MemoryR2Bucket } from "../helpers";
 
 const LIMITS: StorageLimits = {
   writesEnabled: true,
+  globalMaxItems: 10_000,
+  globalMaxBytes: 100_000_000,
+  userMaxItems: 10_000,
+  userMaxBytes: 100_000_000,
+  namespaceMaxItems: 10_000,
+  namespaceMaxBytes: 100_000_000,
+};
+
+const EVENT_LIMITS: ApplicationEventLimits = {
   globalMaxItems: 10_000,
   globalMaxBytes: 100_000_000,
   userMaxItems: 10_000,
@@ -96,6 +109,17 @@ class InterruptingMemoryStore extends MemoryAuthStore {
     return result;
   }
 
+  override async purgeAccountEvents(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountEventPurgeBatch> {
+    const result = await super.purgeAccountEvents(subject, attempt, now, limit);
+    this.interrupt("events");
+    return result;
+  }
+
   override async hasStorageFileOrphanRepairsForSubject(
     subject: string,
   ): Promise<boolean> {
@@ -147,6 +171,20 @@ class DeferringMemoryStore extends MemoryAuthStore {
   ): Promise<AccountRecordPurgeBatch> {
     const result = await super.purgeAccountRecords(subject, limit);
     if (!this.deferred && this.phase === "records") {
+      this.deferred = true;
+      return { ...result, done: false };
+    }
+    return result;
+  }
+
+  override async purgeAccountEvents(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountEventPurgeBatch> {
+    const result = await super.purgeAccountEvents(subject, attempt, now, limit);
+    if (!this.deferred && this.phase === "events") {
       this.deferred = true;
       return { ...result, done: false };
     }
@@ -327,6 +365,7 @@ test("coordinator resumes after interruption following every phase", async (t) =
     "fences",
     "credentials",
     "records",
+    "events",
     "files",
     "finalization",
   ] as const) {
@@ -387,6 +426,7 @@ test("coordinator failure telemetry has one fixed redacted shape", () => {
     "fences",
     "credentials",
     "records",
+    "events",
     "files",
     "finalization",
   ] as const) {
@@ -406,6 +446,7 @@ test("coordinator deferred telemetry has one fixed redacted shape", () => {
   for (const phase of [
     "credentials",
     "records",
+    "events",
     "files",
     "finalization",
   ] as const) {
@@ -455,6 +496,7 @@ test("coordinator reports the first incomplete phase without changing progress",
   for (const phase of [
     "credentials",
     "records",
+    "events",
     "files",
     "finalization",
   ] as const) {
@@ -968,6 +1010,13 @@ test("late subject ownership writes fail at the repository and D1 boundaries", a
         for (const write of rejectedWrites) {
           await assert.rejects(write, /account_deletion_subject_inactive/);
         }
+        assert.deepEqual(
+          await fixture.store.appendApplicationEvent(
+            applicationEvent(target.id, client.id, 3_001),
+            EVENT_LIMITS,
+          ),
+          { status: "unavailable" },
+        );
         assert.equal(
           await fixture.store.reserveStorageFileWriteFence(
             storageFileWriteFence(
@@ -1242,6 +1291,18 @@ async function seedLargeOwnedState(
     );
   }
 
+  for (let index = 0; index < ACCOUNT_EVENT_PURGE_MAX_BATCH * 2; index += 1) {
+    assert.equal(
+      (
+        await store.appendApplicationEvent(
+          applicationEvent(user.id, client.id, index + 1),
+          EVENT_LIMITS,
+        )
+      ).status,
+      "created",
+    );
+  }
+
   const objectKeys: string[] = [];
   for (let index = 0; index < 50; index += 1) {
     const r2Key = `objects/target-object-${index}`;
@@ -1285,6 +1346,15 @@ async function seedControlState(
     true,
   );
   assert.equal(
+    (
+      await store.appendApplicationEvent(
+        applicationEvent(user.id, client.id, 1_001),
+        EVENT_LIMITS,
+      )
+    ).status,
+    "created",
+  );
+  assert.equal(
     await store.upsertStorageFileMetadata(
       file(user.id, client.id, "control-file", "objects/control-object", 20),
       null,
@@ -1316,6 +1386,15 @@ async function seedSmallOwnedState(
       LIMITS,
     ),
     true,
+  );
+  assert.equal(
+    (
+      await store.appendApplicationEvent(
+        applicationEvent(user.id, client.id, 2_001),
+        EVENT_LIMITS,
+      )
+    ).status,
+    "created",
   );
   assert.equal(
     await store.upsertStorageFileMetadata(
@@ -1398,6 +1477,26 @@ function record(
     valueJson: JSON.stringify({ key }),
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+function applicationEvent(
+  userId: string,
+  clientId: string,
+  index: number,
+): ApplicationEventInput {
+  const dataJson = JSON.stringify({ index });
+  return {
+    id: `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`,
+    userId,
+    clientId,
+    type: "account.test",
+    dataJson,
+    dataBytes: Buffer.byteLength(dataJson),
+    idempotencyKeyHash: null,
+    requestHash: "e".repeat(43),
+    createdAt: index + 1,
+    expiresAt: index + 10_000,
   };
 }
 
@@ -1495,6 +1594,9 @@ async function ownedStateCount(
       Array.from(store.adminOperationSubmissions.values()).filter(
         (value) => value.userId === subject,
       ).length,
+      Array.from(store.applicationEvents.values()).filter(
+        (value) => value.userId === subject,
+      ).length,
     ].reduce((total, count) => total + count, 0);
   }
 
@@ -1518,6 +1620,7 @@ async function ownedStateCount(
       "storage_file_write_fences",
       "storage_file_orphan_repairs",
       "admin_operation_submissions",
+      "application_events",
     ].reduce(
       (total, table) => total + sqliteSubjectCount(sqlite, table, subject),
       0,

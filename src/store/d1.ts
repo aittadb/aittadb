@@ -35,6 +35,11 @@ import {
   assertAccountCredentialPurgeLimit,
 } from "./account-credential-purge";
 import {
+  accountEventPurgeBatch,
+  accountEventPurgeUnavailable,
+  assertAccountEventPurgeInput,
+} from "./account-event-purge";
+import {
   accountRecordPurgeBatch,
   accountRecordPurgeUnavailable,
   assertAccountRecordPurgeInput,
@@ -47,6 +52,7 @@ import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
   AccountCredentialPurgeBatchResult,
+  AccountEventPurgeBatch,
   AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
   ApplicationEvent,
@@ -221,6 +227,7 @@ WHERE id = ?1
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM admin_operation_submissions WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM application_events WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM audit_events WHERE actor_subject_hash = ?4)`;
 
 const COMPLETE_FINALIZED_ACCOUNT_JOB = `
@@ -240,6 +247,7 @@ WHERE subject = ?1 AND state = 'running' AND attempt = ?2 AND available_at > ?3
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM admin_operation_submissions WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM application_events WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM audit_events WHERE actor_subject_hash = ?4)`;
 
 const SELECT_CLEAN_COMPLETED_ACCOUNT_JOB = `
@@ -258,6 +266,7 @@ WHERE subject = ?1 AND state = 'completed' AND attempt = ?2
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM admin_operation_submissions WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM application_events WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM audit_events WHERE actor_subject_hash = ?4)`;
 
 const UPSERT_STORAGE_RECORD_WITH_LIMITS = `
@@ -736,6 +745,46 @@ export class D1AuthStore implements AuthStore {
       requiredMutationChanges(result, "account_record_purge_failed"),
       limit,
     );
+  }
+
+  async purgeAccountEvents(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountEventPurgeBatch> {
+    assertAccountEventPurgeInput(subject, attempt, now, limit);
+    let deletedCount: number;
+    try {
+      const result = await this.db
+        .prepare(
+          "DELETE FROM application_events WHERE sequence IN (SELECT event.sequence FROM application_events event WHERE event.user_id = ?1 AND EXISTS (SELECT 1 FROM account_deletion_jobs job JOIN users owner ON owner.id = job.subject AND owner.principal_type = 'user' WHERE job.subject = ?1 AND job.state = 'running' AND job.attempt = ?2 AND job.available_at > ?3) ORDER BY event.client_id ASC, event.sequence ASC LIMIT ?4)",
+        )
+        .bind(subject, attempt, now, limit)
+        .run();
+      deletedCount = requiredMutationChanges(
+        result,
+        "account_event_purge_failed",
+      );
+    } catch {
+      throw new Error("account_event_purge_failed");
+    }
+
+    if (deletedCount === 0) {
+      let active: Row | null;
+      try {
+        active = await this.db
+          .prepare(
+            "SELECT 1 AS active FROM account_deletion_jobs job JOIN users owner ON owner.id = job.subject AND owner.principal_type = 'user' WHERE job.subject = ?1 AND job.state = 'running' AND job.attempt = ?2 AND job.available_at > ?3 LIMIT 1",
+          )
+          .bind(subject, attempt, now)
+          .first<Row>();
+      } catch {
+        throw new Error("account_event_purge_failed");
+      }
+      if (!active) throw accountEventPurgeUnavailable();
+    }
+    return accountEventPurgeBatch(deletedCount, limit);
   }
 
   async stageAccountFilePurgeBatch(

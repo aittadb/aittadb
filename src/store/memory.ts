@@ -34,6 +34,11 @@ import {
   assertAccountCredentialPurgeLimit,
 } from "./account-credential-purge";
 import {
+  accountEventPurgeBatch,
+  accountEventPurgeUnavailable,
+  assertAccountEventPurgeInput,
+} from "./account-event-purge";
+import {
   accountRecordPurgeBatch,
   accountRecordPurgeUnavailable,
   assertAccountRecordPurgeInput,
@@ -47,6 +52,7 @@ import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
   AccountCredentialPurgeBatchResult,
+  AccountEventPurgeBatch,
   AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
   ApplicationEvent,
@@ -592,6 +598,38 @@ export class MemoryAuthStore implements AuthStore {
       .map(([key]) => key);
     for (const key of keys) this.storageRecords.delete(key);
     return accountRecordPurgeBatch(keys.length, limit);
+  }
+
+  async purgeAccountEvents(
+    subject: string,
+    attempt: number,
+    now: number,
+    limit: number,
+  ): Promise<AccountEventPurgeBatch> {
+    assertAccountEventPurgeInput(subject, attempt, now, limit);
+    const job = this.accountDeletionJobs.get(subject);
+    if (
+      !this.users.has(subject) ||
+      this.servicePrincipals.has(subject) ||
+      !job ||
+      job.state !== "running" ||
+      job.attempt !== attempt ||
+      job.availableAt === null ||
+      job.availableAt <= now
+    ) {
+      throw accountEventPurgeUnavailable();
+    }
+
+    const selected = Array.from(this.applicationEvents.values())
+      .filter((event) => event.userId === subject)
+      .sort(
+        (left, right) =>
+          left.clientId.localeCompare(right.clientId) ||
+          left.sequence - right.sequence,
+      )
+      .slice(0, limit);
+    for (const event of selected) this.applicationEvents.delete(event.id);
+    return accountEventPurgeBatch(selected.length, limit);
   }
 
   async stageAccountFilePurgeBatch(
@@ -1438,6 +1476,9 @@ export class MemoryAuthStore implements AuthStore {
       ) ||
       Array.from(this.storageFileOrphanRepairs.values()).some(
         (repair) => repair.userId === subject,
+      ) ||
+      Array.from(this.applicationEvents.values()).some(
+        (event) => event.userId === subject,
       )
     );
   }
