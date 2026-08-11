@@ -211,6 +211,10 @@ export function cors(
   request: Request,
   allowedOrigins: readonly string[],
   canonicalOrigin?: string,
+  options: {
+    allowedHeaders?: readonly string[];
+    exposedHeaders?: readonly string[];
+  } = {},
 ): Headers | Response {
   const origin = request.headers.get("origin");
   const headers = new Headers();
@@ -221,8 +225,14 @@ export function cors(
   headers.set("access-control-allow-origin", origin);
   headers.set("vary", "Origin");
   headers.set("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
-  headers.set("access-control-allow-headers", "authorization,content-type");
-  headers.set("access-control-expose-headers", "x-aittadb-storage-key");
+  headers.set(
+    "access-control-allow-headers",
+    (options.allowedHeaders ?? ["authorization", "content-type"]).join(","),
+  );
+  headers.set(
+    "access-control-expose-headers",
+    (options.exposedHeaders ?? ["x-aittadb-storage-key"]).join(","),
+  );
   return headers;
 }
 

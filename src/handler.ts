@@ -58,6 +58,11 @@ import {
 import { oidcConfiguration, openApiSpec } from "./openapi";
 import { MAX_RECORD_BYTES, storageEndpoint } from "./storage";
 import {
+  APPLICATION_EVENT_FORM_MAX_BYTES,
+  APPLICATION_EVENT_JSON_MAX_BYTES,
+  eventPublicationEndpoint,
+} from "./event-publication";
+import {
   MAX_STORAGE_FORM_BYTES,
   storageBrowserEndpoint,
 } from "./storage-browser";
@@ -514,6 +519,26 @@ function acceptedRequestBodyPolicy(
   const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
   if (
     request.method === "POST" &&
+    url.pathname === "/events" &&
+    contentType.includes("application/x-www-form-urlencoded")
+  ) {
+    return {
+      maxBytes: APPLICATION_EVENT_FORM_MAX_BYTES,
+      tooLargeDescription: "Event publication request is too large",
+    };
+  }
+  if (
+    request.method === "POST" &&
+    url.pathname === "/events" &&
+    isJsonMediaType(contentType)
+  ) {
+    return {
+      maxBytes: APPLICATION_EVENT_JSON_MAX_BYTES,
+      tooLargeDescription: "Event publication request is too large",
+    };
+  }
+  if (
+    request.method === "POST" &&
     url.pathname === "/account/deletion" &&
     (contentType.includes("application/x-www-form-urlencoded") ||
       isJsonMediaType(contentType))
@@ -606,12 +631,12 @@ async function route(
           : []),
         ...(config.features.events
           ? [
-              "Persistent immutable event collection reads isolated by AittaDB user and client",
+              "Persistent immutable event publication and reads isolated by AittaDB user and client",
             ]
           : []),
       ],
       plannedCapabilities: config.features.events
-        ? ["Event publication and bounded long-polling delivery"]
+        ? ["Bounded long-polling event delivery"]
         : ["Persistent events and long-polling delivery"],
     };
     const endpoints = endpointActions(config.issuerUrl);
@@ -1329,16 +1354,22 @@ async function route(
         )
       : response;
   }
-  if (url.pathname === "/events" && request.method === "GET") {
-    const browserResponse = await eventCollectionBrowserEndpoint(
-      request,
-      url,
-      store,
-      config,
-      identityProvider,
-    );
-    if (browserResponse) return browserResponse;
-    return eventCollectionEndpoint(request, url, store, config);
+  if (url.pathname === "/events") {
+    if (request.method === "GET") {
+      const browserResponse = await eventCollectionBrowserEndpoint(
+        request,
+        url,
+        store,
+        config,
+        identityProvider,
+      );
+      if (browserResponse) return browserResponse;
+      return eventCollectionEndpoint(request, url, store, config);
+    }
+    if (request.method === "POST") {
+      return eventPublicationEndpoint(request, store, config, identityProvider);
+    }
+    return methodNotAllowed("GET, POST");
   }
   if (url.pathname.startsWith("/events/")) {
     if (request.method !== "GET") return methodNotAllowed("GET");
@@ -1609,8 +1640,8 @@ async function localSessionEndpoint(
       ...(config.features.events
         ? [
             action(
-              "read-session-events",
-              "Read application events",
+              "manage-session-events",
+              "Manage application events",
               "GET",
               `${config.issuerUrl}/events`,
               { authorization: { scheme: "sites-session" }, fields: [] },
@@ -3627,7 +3658,7 @@ function isPreBodyBrowserMutation(request: Request, url: URL): boolean {
     return acceptsHtml(request);
   }
   if (!isRecordsRoute(url.pathname) && !isFilesRoute(url.pathname)) {
-    return false;
+    if (!isEventsRoute(url.pathname)) return false;
   }
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
   return (
@@ -3774,18 +3805,25 @@ async function corsHeadersForRequest(
   store: AuthStore | null,
 ): Promise<Headers | Response> {
   const origin = request.headers.get("origin");
+  const options = isEventsRoute(url.pathname)
+    ? {
+        allowedHeaders: ["authorization", "content-type", "idempotency-key"],
+        exposedHeaders: ["idempotency-replayed", "location"],
+      }
+    : undefined;
   if (url.pathname === "/oauth/token") {
     if (!origin || request.method !== "OPTIONS") return new Headers();
     const allowed = Boolean(
       store && (await store.hasActiveClientOrigin(origin)),
     );
-    return cors(request, allowed ? [origin] : [], config.issuerUrl);
+    return cors(request, allowed ? [origin] : [], config.issuerUrl, options);
   }
   if (!origin || !isClientCorsRoute(url.pathname)) {
     return cors(
       request,
       origin ? config.allowedCorsOrigins : [],
       config.issuerUrl,
+      options,
     );
   }
 
@@ -3800,7 +3838,7 @@ async function corsHeadersForRequest(
       client && !client.disabledAt && client.origins.includes(origin),
     );
   }
-  return cors(request, allowed ? [origin] : [], config.issuerUrl);
+  return cors(request, allowed ? [origin] : [], config.issuerUrl, options);
 }
 
 function isClientCorsRoute(pathname: string): boolean {

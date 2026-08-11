@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DEFAULT_FORM_MAX_BYTES } from "../../src/http";
+import {
+  APPLICATION_EVENT_FORM_MAX_BYTES,
+  APPLICATION_EVENT_JSON_MAX_BYTES,
+} from "../../src/event-publication";
 import { openApiSpec } from "../../src/openapi";
 import { MAX_RECORD_BYTES } from "../../src/storage";
 import { MemoryAuthStore } from "../../src/store/memory";
@@ -41,10 +45,29 @@ const TARGETS: readonly BodyTarget[] = [
     maxBytes: MAX_RECORD_BYTES,
     description: "Storage record is too large",
   },
+  {
+    name: "event publication JSON",
+    url: "https://aittadb.example.test/events",
+    method: "POST",
+    contentType: "application/json",
+    maxBytes: APPLICATION_EVENT_JSON_MAX_BYTES,
+    description: "Event publication request is too large",
+  },
+  {
+    name: "event publication form",
+    url: "https://aittadb.example.test/events",
+    method: "POST",
+    contentType: "application/x-www-form-urlencoded",
+    maxBytes: APPLICATION_EVENT_FORM_MAX_BYTES,
+    description: "Event publication request is too large",
+  },
 ];
 
 test("accepted URL-encoded and JSON bodies reject every oversized length variant before repository access", async () => {
-  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
+  const env = await testEnv({
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+    FEATURE_EVENTS_ENABLED: "true",
+  });
   const observed = observedStore();
   const app = createTestAittaDB(env, observed.store, null);
 
@@ -109,7 +132,10 @@ test("accepted URL-encoded and JSON bodies reject every oversized length variant
 });
 
 test("malformed accepted request streams fail before parsing or repository access", async () => {
-  const env = await testEnv({ FEATURE_OAUTH_APPS_ENABLED: "true" });
+  const env = await testEnv({
+    FEATURE_OAUTH_APPS_ENABLED: "true",
+    FEATURE_EVENTS_ENABLED: "true",
+  });
   const observed = observedStore();
   const app = createTestAittaDB(env, observed.store, null);
 
@@ -142,6 +168,7 @@ test("OpenAPI documents bounded-body rejection on every accepted URL-encoded and
     ["/oauth/revoke", "post"],
     ["/oauth/introspect", "post"],
     ["/userinfo", "post"],
+    ["/events", "post"],
     ["/storage/records", "post"],
     ["/storage/records/{key}", "post"],
     ["/storage/records/{key}", "put"],
@@ -231,6 +258,12 @@ function streamRequest(
     accept: "application/json",
     "content-type": target.contentType,
   });
+  if (
+    new URL(target.url).pathname === "/events" &&
+    target.contentType === "application/x-www-form-urlencoded"
+  ) {
+    headers.set("origin", "https://aittadb.example.test");
+  }
   if (contentLength !== undefined) headers.set("content-length", contentLength);
   return new Request(target.url, {
     method: target.method,

@@ -17,6 +17,7 @@ export interface ApplicationEventCollectionPage {
   typeFilter: string | null;
   nextHref: string | null;
   signedIn: boolean;
+  publicationForm: string | null;
 }
 
 export function applicationEventCollectionPage(
@@ -38,18 +39,21 @@ export function applicationEventCollectionPage(
   const clearFilter = page.typeFilter
     ? `<a class="button secondary" href="/events?page_size=${page.pageSize}">Clear filter</a>`
     : "";
+  const publication = page.publicationForm
+    ? `<section class="resource-workbench" aria-labelledby="event-publish-heading"><h2 id="event-publish-heading">Publish an event</h2><p>Append one typed JSON object to this signed-in AittaDB namespace.</p>${page.publicationForm}</section>`
+    : "";
 
   return pageDocument({
     title: "Application events",
     eyebrow: "Persistent event stream",
     heading: "Application events",
     summary:
-      "Read immutable events from this AittaDB identity and client namespace in deterministic order.",
+      "Publish and read immutable events in this AittaDB identity and client namespace.",
     visualEyebrow: "Bounded delivery",
     visualHeading: "A durable stream with an opaque position.",
     visualSummary:
       "Every page stays inside one authenticated AittaDB namespace; internal ordering and credentials never enter the representation.",
-    body: `<section class="storage-state" aria-labelledby="event-list-heading"><div class="storage-state-heading"><div><h2 id="event-list-heading">Available events</h2><p>${page.items.length} ${page.items.length === 1 ? "event" : "events"} on this page${page.typeFilter ? ` for <code>${escapeHtml(page.typeFilter)}</code>` : ""}.</p></div></div>${state}${pagination}</section><section class="resource-workbench" aria-labelledby="event-filter-heading"><h2 id="event-filter-heading">Filter the collection</h2><form method="get" action="/events" class="stacked-form"><label for="event-type">Exact event type</label><input id="event-type" name="type" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,127}" value="${escapeHtml(page.typeFilter ?? "")}" autocomplete="off"><label for="event-page-size">Page size</label><input id="event-page-size" name="page_size" type="number" min="1" max="${page.maxPageSize}" value="${page.pageSize}" required><div class="actions"><button type="submit">Apply filter</button>${clearFilter}</div></form></section><p class="note">The browser uses only the current ChatGPT-signed-in AittaDB session. API clients use an AittaDB bearer token with <code>events.read</code>. Event data is immutable and isolated from every other user and client namespace.</p>`,
+    body: `${publication}<section class="storage-state" aria-labelledby="event-list-heading"><div class="storage-state-heading"><div><h2 id="event-list-heading">Available events</h2><p>${page.items.length} ${page.items.length === 1 ? "event" : "events"} on this page${page.typeFilter ? ` for <code>${escapeHtml(page.typeFilter)}</code>` : ""}.</p></div></div>${state}${pagination}</section><section class="resource-workbench" aria-labelledby="event-filter-heading"><h2 id="event-filter-heading">Filter the collection</h2><form method="get" action="/events" class="stacked-form"><label for="event-type">Exact event type</label><input id="event-type" name="type" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,127}" value="${escapeHtml(page.typeFilter ?? "")}" autocomplete="off"><label for="event-page-size">Page size</label><input id="event-page-size" name="page_size" type="number" min="1" max="${page.maxPageSize}" value="${page.pageSize}" required><div class="actions"><button type="submit">Apply filter</button>${clearFilter}</div></form></section><p class="note">The browser uses only the current ChatGPT-signed-in AittaDB session. API clients use AittaDB bearer tokens with <code>events.read</code> and, for publication, <code>events.publish</code>. Event data is immutable and isolated from every other user and client namespace.</p>`,
     actions: [
       {
         href: "/session",

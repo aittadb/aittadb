@@ -18,6 +18,7 @@ const DEFAULT_EVENTS_NAMESPACE_MAX_ITEMS = 500;
 const DEFAULT_EVENTS_NAMESPACE_MAX_BYTES = 16 * 1024 * 1024;
 const DEFAULT_EVENTS_PAGE_SIZE = 50;
 const DEFAULT_EVENTS_READ_RATE_LIMIT = 120;
+const DEFAULT_EVENTS_PUBLISH_RATE_LIMIT = 30;
 const DEFAULT_STORAGE_GLOBAL_MAX_ITEMS = 10_000;
 const DEFAULT_STORAGE_GLOBAL_MAX_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_STORAGE_USER_MAX_ITEMS = 1_000;
@@ -153,6 +154,10 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
     eventReadRateLimit: readPositiveInt(
       env.EVENTS_READ_RATE_LIMIT,
       DEFAULT_EVENTS_READ_RATE_LIMIT,
+    ),
+    eventPublishRateLimit: readPositiveInt(
+      env.EVENTS_PUBLISH_RATE_LIMIT,
+      DEFAULT_EVENTS_PUBLISH_RATE_LIMIT,
     ),
     storageLimits: {
       writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),

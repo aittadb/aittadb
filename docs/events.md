@@ -1,6 +1,16 @@
 # Persistent Events
 
-Persistent Events is being built as small composable AittaDB server primitives. When `FEATURE_EVENTS_ENABLED=true`, the current release exposes bounded collection reads at `GET /events` and immutable item reads at `GET /events/{id}`; publication and long-poll delivery remain unavailable until their owning tasks land.
+Persistent Events is built as small composable AittaDB server primitives. When `FEATURE_EVENTS_ENABLED=true`, the current release exposes immutable publication at `POST /events`, bounded collection reads at `GET /events`, and immutable item reads at `GET /events/{id}`. Long-poll delivery remains unavailable until its owning task lands.
+
+## HTTP Publication
+
+With `FEATURE_EVENTS_ENABLED=true`, a bearer client sends an AittaDB access-token JWT with `events.publish` and a JSON body containing exactly `type` and `data`. `type` is 1-128 ASCII alphanumeric, dot, underscore, colon, or hyphen characters and starts alphanumeric. `data` is a JSON object whose serialized UTF-8 form is at most 64 KiB. A JSON wrapper is bounded to 66,560 bytes before CORS client lookup, rate limiting, authentication, or event persistence.
+
+A signed-in browser can open `GET /events` and submit the same operation as a URL-encoded form. The form requires an exact same-origin signal and the host-only CSRF cookie/body pair. Its wrapper has a finite 200,704-byte limit so percent encoding does not reduce the shared 64 KiB decoded data limit. A minimal internal access token binds the event to the reserved browser-client namespace but is never returned to HTML, JSON, URLs, browser storage, or logs. Unsupported, duplicate, or unexpected form fields fail before identity, rate-limit, or event repository work.
+
+Callers may send an optional `Idempotency-Key` header, or `idempotency_key` form field, containing 1-200 visible ASCII characters. Only its SHA-256 hash is stored. The first atomic append returns `201` and an absolute `Location`; an exact type/data replay returns the original event and location with `200` and `Idempotency-Replayed: true`; reuse with different content returns deterministic `409`. Idempotency is scoped to the verified subject and client, so the same key in another namespace is independent.
+
+The access token is the only source of subject and client ownership. Human tokens require an active local user and active audience client; service tokens require their active service principal and use the client UUID as both principal and client namespace. ID tokens, missing scope, revoked credentials, disabled clients, and subjects with an account-deletion job fail generically. Exact client-origin CORS applies to browser bearer calls. IP/global and hashed subject/client rate counters, plus atomic deployment/user/namespace item and byte quotas, bound admission. Publication performs no fan-out, callback, or process-memory write, and responses expose no internal sequence, owner/client identifier, stored hashes, credential, or deployment value.
 
 ## Durable Event Contract
 
@@ -23,7 +33,7 @@ The public UUID is not an authorization capability. Every read binds the caller'
 
 The deployed contract accepts only canonical lowercase UUIDv4 identifiers, nonempty bounded namespace components, event types beginning with an ASCII alphanumeric character and containing only ASCII alphanumeric, dot, underscore, colon, or hyphen characters, JSON objects no larger than 64 KiB, canonical 43-character SHA-256 base64url hashes, and finite ordered timestamps.
 
-Malformed values fail before persistence. D1 constraints repeat the security-relevant bounds so direct repository defects fail closed. Duplicate public IDs, duplicate namespace-bound idempotency hashes, foreign owners, inactive subjects, and attempted updates fail without replacing an existing event. Public status codes and replay/conflict semantics belong to later repository and HTTP tasks.
+Malformed values fail before persistence. D1 constraints repeat the security-relevant bounds so direct repository defects fail closed. Duplicate public IDs, duplicate namespace-bound idempotency hashes, foreign owners, inactive subjects, and attempted updates fail without replacing an existing event. The HTTP adapter maps exact replay, conflict, quota, authentication, scope, body, media-type, and rate outcomes without disclosing another namespace or aggregate usage.
 
 ## Public Collection Read
 
@@ -61,7 +71,7 @@ With `FEATURE_EVENTS_ENABLED=true`, `GET /events/{id}` returns one unexpired eve
 
 The identifier must be a canonical lowercase UUIDv4. Malformed, absent, expired, other-user, and other-client identifiers produce the same generic `404` representation. Successful JSON exposes only `id`, `type`, the event's JSON object, `created_at`, and `expires_at`; it omits sequence, ownership, request hashes, and idempotency state. HTML renders those same fields accessibly. Both representations link to the implemented collection URI and advertise no mutation. Exact client-origin CORS, request and rate bounds, `Cache-Control: no-store`, and the outer Events gate apply before repository disclosure.
 
-`GET /events` returns bounded deterministic pages and links every returned event to its exact immutable item resource. Event publication, deletion, update, and long-poll delivery remain unavailable in this preview.
+`GET /events` returns bounded deterministic pages and links every returned event to its exact immutable item resource. Event deletion, update, and long-poll delivery remain unavailable in this preview.
 
 ## Internal Idempotent Append
 

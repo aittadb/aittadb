@@ -113,6 +113,7 @@ test("enabled Events scopes work for interactive, service, and reserved-browser 
   assert.equal(collectionDocument.type, "application-event-collection");
   assert.equal(collectionDocument.data.count, 0);
   assert.deepEqual(collectionDocument.data.items, []);
+  assert.match(JSON.stringify(collectionDocument), /publish-event/);
 });
 
 test("disabling Events rejects scope escalation and stale registered scope use", async () => {

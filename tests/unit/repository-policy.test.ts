@@ -260,9 +260,12 @@ test("public copy distinguishes licensing from the current Sites dependency", as
 
   assert.match(
     readme,
-    /Feature-gated bounded collection and item reads of persistent immutable application events/,
+    /Immutable typed event publication and bounded collection\/item reads behind a default-off feature flag/,
   );
-  assert.match(readme, /collection and item reads/);
+  assert.match(
+    readme,
+    /publication and collection\/item reads are implemented/,
+  );
 });
 
 test("ROADMAP.md is one stable flat list of unchecked future items", async () => {

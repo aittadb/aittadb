@@ -9,12 +9,18 @@ import {
 } from "./browser-session";
 import { nowSeconds, sha256 } from "./crypto";
 import {
+  eventPublicationAction,
+  eventPublicationForm,
+} from "./event-publication";
+import {
   applicationEventCollectionPage,
   type ApplicationEventPageItem,
 } from "./event-pages";
 import {
   acceptsHtml,
   bearerToken,
+  csrfCookie,
+  csrfTokenForRequest,
   html,
   hypermediaError,
   hypermediaJson,
@@ -45,6 +51,7 @@ type EventReadAuthorization = "bearer" | "sites-session";
 interface EventPrincipal {
   principalId: string;
   client: ClientView;
+  scopes: string[];
 }
 
 interface EventPageRequest {
@@ -108,23 +115,27 @@ export async function eventCollectionBrowserEndpoint(
       },
     );
   }
+  const csrf = csrfTokenForRequest(request);
   const token = await issueBrowserSessionAccessToken(
     request,
     identityProvider,
     store,
     config,
-    ["events.read"],
+    ["events.read", "events.publish"],
   );
   if (token instanceof Response) return token;
   const headers = new Headers(request.headers);
   headers.set("authorization", `Bearer ${token}`);
-  return eventCollectionEndpoint(
+  const response = await eventCollectionEndpoint(
     new Request(url, { method: "GET", headers }),
     url,
     store,
     config,
     "sites-session",
+    csrf,
   );
+  response.headers.set("set-cookie", csrfCookie(csrf));
+  return response;
 }
 
 export async function eventCollectionEndpoint(
@@ -133,6 +144,7 @@ export async function eventCollectionEndpoint(
   store: AuthStore,
   config: AppConfig,
   authorization: EventReadAuthorization = "bearer",
+  csrfToken: string | null = null,
 ): Promise<Response> {
   const principal = await requireEventReadScope(request, store, config);
   if (principal instanceof Response) return noStore(principal);
@@ -211,6 +223,15 @@ export async function eventCollectionEndpoint(
           ],
         },
       ),
+      ...(principal.scopes.includes("events.publish")
+        ? [
+            eventPublicationAction(
+              config,
+              authorization,
+              authorization === "sites-session" ? (csrfToken ?? "") : undefined,
+            ),
+          ]
+        : []),
     ],
   });
   const response = acceptsHtml(request)
@@ -222,6 +243,12 @@ export async function eventCollectionEndpoint(
           typeFilter: page.typeFilter,
           nextHref,
           signedIn: authorization === "sites-session",
+          publicationForm:
+            authorization === "sites-session" &&
+            principal.scopes.includes("events.publish") &&
+            csrfToken
+              ? eventPublicationForm(csrfToken)
+              : null,
         }),
       )
     : hypermediaJson(request, document);
@@ -282,7 +309,7 @@ async function requireEventReadScope(
       response.headers.set("retry-after", "60");
       return response;
     }
-    return { principalId, client };
+    return { principalId, client, scopes };
   } catch {
     return oauthError("invalid_token", "Invalid token", 401);
   }

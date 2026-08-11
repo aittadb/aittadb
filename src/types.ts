@@ -58,6 +58,7 @@ export interface RuntimeEnv {
   EVENTS_DEFAULT_PAGE_SIZE?: string;
   EVENTS_MAX_PAGE_SIZE?: string;
   EVENTS_READ_RATE_LIMIT?: string;
+  EVENTS_PUBLISH_RATE_LIMIT?: string;
   MAINTENANCE_CLEANUP_TELEMETRY_ENABLED?: string;
   STORAGE_WRITES_ENABLED?: string;
   STORAGE_GLOBAL_MAX_ITEMS?: string;
@@ -134,6 +135,7 @@ export interface AppConfig {
   eventDefaultPageSize: number;
   eventMaxPageSize: number;
   eventReadRateLimit: number;
+  eventPublishRateLimit: number;
   storageLimits: StorageLimits;
   storageDefaultPageSize: number;
   storageMaxPageSize: number;
