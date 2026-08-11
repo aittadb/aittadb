@@ -34,3 +34,11 @@ Repository consumers must not serialize the internal sequence. The public Events
 ## Internal Point Lookup
 
 Point lookup requires the exact principal, client, and canonical public UUID in one prepared query. A matching row is returned as a validated defensive value. An absent UUID and an event owned by another principal or client all return the same `null` result, so the repository does not reveal whether another namespace contains that identifier. Malformed namespace values or identifiers fail before D1 access, and malformed persisted rows fail closed.
+
+## Internal Idempotent Append
+
+Append validates the complete persistence input, then attempts one conditional D1 `INSERT ... RETURNING` without a preliminary read. Admission requires an existing principal, an existing enabled client, and no account-deletion job. A successful insert returns `created` with the immutable row selected by that same statement.
+
+When that insert does not win and an idempotency hash was supplied, one namespace- and active-owner-bound read compares the stored request fingerprint. An exact fingerprint returns `replayed` with the original event; another fingerprint returns `conflict`. No idempotency value, a colliding public UUID, missing ownership, a disabled client, or an inactive subject returns the same `unavailable` result. Unexpected repository failures are not reclassified as an ownership or conflict outcome.
+
+The memory repository executes the equivalent transition without yielding between its ownership check, idempotency decision, sequence assignment, and insertion. Both adapters return defensive event values and retain only the supplied SHA-256 base64url idempotency hash, never the original key.
