@@ -1933,7 +1933,7 @@ export const openApiSpec = {
             type: "object",
             description:
               "Effective deployment feature availability. These booleans are server-controlled and never reveal configuration values or secrets.",
-            required: ["records", "files", "statistics", "oauthApps"],
+            required: ["records", "files", "statistics", "oauthApps", "events"],
             properties: {
               records: {
                 type: "boolean",
@@ -1954,6 +1954,12 @@ export const openApiSpec = {
                   "When false, service discovery omits statistics controls and GET /statistics returns feature_unavailable before querying D1.",
               },
               oauthApps: { type: "boolean", default: false },
+              events: {
+                type: "boolean",
+                default: false,
+                description:
+                  "Effective deployment policy for the planned Events feature. This metadata flag does not advertise an Events route or operation before that resource is implemented.",
+              },
             },
             additionalProperties: false,
           },

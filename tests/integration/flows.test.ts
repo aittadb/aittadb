@@ -47,6 +47,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
         files: boolean;
         statistics: boolean;
         oauthApps: boolean;
+        events: boolean;
       };
       capabilities: string[];
       plannedCapabilities: string[];
@@ -98,6 +99,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     files: true,
     statistics: true,
     oauthApps: false,
+    events: false,
   });
   assert.deepEqual(apiRootJson.data.capabilities, [
     "ChatGPT sign-in inside ChatGPT Sites mapped to a separate AittaDB user",
@@ -238,7 +240,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
   assert.match(browserRootHtml, /Feature availability/);
   assert.match(
     browserRootHtml,
-    /Records on · Files on · Statistics on · OAuth Apps off/,
+    /Records on · Files on · Statistics on · OAuth Apps off · Events off/,
   );
   assert.doesNotMatch(browserRootHtml, /Official OpenAI product/);
   assert.match(browserRootHtml, />Licensing and platform details<\/a>/);

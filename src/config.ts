@@ -82,6 +82,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       files: readBoolean(env.FEATURE_FILES_ENABLED, true),
       statistics: readBoolean(env.FEATURE_STATISTICS_ENABLED, true),
       oauthApps: readBoolean(env.FEATURE_OAUTH_APPS_ENABLED, false),
+      events: readBoolean(env.FEATURE_EVENTS_ENABLED, false),
     },
     maintenanceCleanupTelemetryEnabled: readBoolean(
       env.MAINTENANCE_CLEANUP_TELEMETRY_ENABLED,
@@ -191,7 +192,7 @@ function isContactEmail(value: string): boolean {
 }
 
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
-  if (!value) return fallback;
+  if (value === undefined) return fallback;
   if (value === "true" || value === "1") return true;
   if (value === "false" || value === "0") return false;
   throw new Error(`Expected boolean, received ${value}`);
