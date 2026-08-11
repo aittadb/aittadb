@@ -3,6 +3,7 @@ import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
   assertApplicationEvent,
+  assertApplicationEventLookupInput,
   assertApplicationEventPageInput,
 } from "../application-events";
 import {
@@ -1316,6 +1317,21 @@ export class D1AuthStore implements AuthStore {
       items: selected.slice(0, limit),
       hasMore: selected.length > limit,
     };
+  }
+
+  async getApplicationEvent(
+    userId: string,
+    clientId: string,
+    id: string,
+  ): Promise<ApplicationEvent | null> {
+    assertApplicationEventLookupInput(userId, clientId, id);
+    const row = await this.db
+      .prepare(
+        "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? AND id = ? LIMIT 1",
+      )
+      .bind(userId, clientId, id)
+      .first<Row>();
+    return row ? rowToApplicationEvent(row) : null;
   }
 
   async listStorageRecords(
