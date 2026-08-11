@@ -1,6 +1,6 @@
 # Persistent Events
 
-Persistent Events is being built as a small AittaDB server primitive. The current internal persistence contract does not expose an HTTP route and does not make Events available to applications yet.
+Persistent Events is being built as small composable AittaDB server primitives. When `FEATURE_EVENTS_ENABLED=true`, the current release exposes bounded immutable collection reads at `GET /events`; publication, item retrieval, and long-poll delivery remain unavailable until their owning tasks land.
 
 ## Durable Event Contract
 
@@ -25,11 +25,21 @@ The deployed contract accepts only canonical lowercase UUIDv4 identifiers, nonem
 
 Malformed values fail before persistence. D1 constraints repeat the security-relevant bounds so direct repository defects fail closed. Duplicate public IDs, duplicate namespace-bound idempotency hashes, foreign owners, inactive subjects, and attempted updates fail without replacing an existing event. Public status codes and replay/conflict semantics belong to later repository and HTTP tasks.
 
+## Public Collection Read
+
+`GET /events` represents one immutable event collection as versioned hypermedia JSON or accessible HTML according to `Accept`. A bearer request requires `events.read`, a valid access-token purpose and audience, an active client, and an active human or service principal. A request without a bearer token may use only the trusted ChatGPT-signed-in Sites session and AittaDB's reserved browser-client namespace; the short-lived internal adapter token is never returned, rendered, logged, or stored by the browser.
+
+The collection is oldest-first and finite. `EVENTS_DEFAULT_PAGE_SIZE` defaults to 50, `EVENTS_MAX_PAGE_SIZE` defaults to and cannot exceed 100, and each repository read fetches only one extra row to determine `has_more`. One optional `type` parameter performs an exact case-sensitive match inside the prepared D1 query. Unsupported, repeated, malformed, or oversized query values fail rather than being ignored.
+
+Every successful page contains only public event UUID, type, JSON-object data, creation and expiry time, page metadata, and an opaque `resume_cursor`. A `next` link appears only when another current row exists; a `resume` link is always present, including for an empty stream, so later delivery can continue after the returned checkpoint. Internal sequence, principal/client identifiers, request fingerprints, idempotency hashes, aggregate usage, and credentials are never represented. HTML summarizes payload shape rather than dumping event JSON and provides the same filter and page navigation.
+
+The cursor is bound to the exact principal, client, and type filter. It cannot be reused across filters or namespaces and expires after 15 minutes. Responses use `Cache-Control: no-store`. `EVENTS_READ_RATE_LIMIT` defaults to 120 reads per principal/client minute. Cross-origin bearer reads require an exact origin registered on that token's active client; wildcard credentialed CORS is unsupported. The outer Events feature gate runs before bearer, Sites identity, CORS client lookup, rate-limit, cursor, or event-repository work and removes collection controls when disabled.
+
 ## Internal Ordered Pages
 
 The internal page repository reads one exact principal/client namespace in increasing sequence order. Callers may start at the beginning or continue strictly after one validated sequence. Each call accepts a finite limit no larger than 100, asks D1 for only `limit + 1` rows, returns no more than the requested limit, and reports only whether another page exists. Empty namespaces return an empty final page.
 
-Repository consumers must not serialize the internal sequence. A future public Events collection will translate it through the namespace-bound cursor primitive. Malformed page positions and limits fail before D1, and a repository row that violates the durable contract fails closed instead of being partially returned.
+Repository consumers must not serialize the internal sequence. The public collection translates it through the namespace-bound cursor primitive. Exact type filtering happens in the bounded prepared query and uses `idx_application_events_owner_type_sequence`; it is never an in-memory post-filter. Malformed page positions, types, and limits fail before D1, and a repository row that violates the durable contract fails closed instead of being partially returned.
 
 ## Opaque Resume Cursors
 
@@ -37,9 +47,9 @@ Repository consumers must not serialize the internal sequence. A future public E
 
 The initial lifetime is exactly 15 minutes. Issuance accepts only a nonnegative safe-integer sequence and time. Opening requires an unexpired safe-integer expiry no later than 15 minutes from the opening time; expiry is exclusive, so a cursor is invalid at its expiry second. A client with an expired or otherwise invalid cursor must restart from the Events collection entry point. Cursor state is not stored in D1 or process memory.
 
-The key is domain-separated from storage cursors and derived from the configured private signing-key material. AES-GCM additional authenticated data binds the fixed Events resource, exact issuer, signing key ID, principal, and OAuth client without putting those values in the token. A cursor therefore cannot cross a resource, deployment boundary, principal, or client. Changing the signing key material or key ID immediately invalidates it.
+The key is domain-separated from storage cursors and derived from the configured private signing-key material. AES-GCM additional authenticated data binds the fixed Events resource, exact issuer, signing key ID, principal, OAuth client, and exact event-type filter without putting those values in the token. A cursor therefore cannot cross a resource, deployment boundary, principal, client, or filtered collection. Changing the signing key material or key ID immediately invalidates it.
 
-Opening accepts only bounded canonical unpadded base64url, strict UTF-8, the exact versioned canonical JSON shape, safe integers, and the bounded lifetime. Truncation, tampering, unsupported versions, reordered or extra fields, malformed context, and all binding failures return one internal `null` result. No decoder error contains plaintext cursor state, identity, client, or signing material. HTTP error mapping remains owned by the later Events collection task.
+Opening accepts only bounded canonical unpadded base64url, strict UTF-8, the exact versioned canonical JSON shape, safe integers, and the bounded lifetime. Truncation, tampering, unsupported versions, reordered or extra fields, malformed context, and all binding failures return one internal `null` result. The HTTP collection maps every rejected cursor to one non-disclosing `invalid_request`; no error contains plaintext cursor state, identity, client, filter, or signing material.
 
 ## Internal Point Lookup
 

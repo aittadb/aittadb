@@ -78,6 +78,75 @@ test("D1 and memory event pages are bounded, ordered, and resumable", async () =
   }
 });
 
+test("D1 and memory event pages apply one exact type before bounding the page", async () => {
+  const sqlite = await migratedDatabase();
+  try {
+    seedNamespaces(sqlite);
+    const calls: Array<{ query: string; values: unknown[] }> = [];
+    const stores = [
+      new D1AuthStore(sqliteD1(sqlite, calls)),
+      new MemoryAuthStore(),
+    ];
+    const events = [
+      applicationEvent(1, "event-user", "event-client", "invoice.created"),
+      applicationEvent(2, "event-user", "event-client", "invoice.paid"),
+      applicationEvent(3, "event-user", "event-client", "invoice.created"),
+      applicationEvent(4, "event-user", "event-client", "invoice.created"),
+    ];
+    for (const event of events) {
+      insertEvent(sqlite, event);
+      (stores[1] as MemoryAuthStore).applicationEvents.set(event.id, {
+        ...event,
+      });
+    }
+
+    for (const store of stores) {
+      const first = await store.listApplicationEvents(
+        "event-user",
+        "event-client",
+        null,
+        2,
+        "invoice.created",
+      );
+      assert.deepEqual(
+        first.items.map((event) => event.sequence),
+        [1, 3],
+      );
+      assert.equal(first.hasMore, true);
+      const second = await store.listApplicationEvents(
+        "event-user",
+        "event-client",
+        3,
+        2,
+        "invoice.created",
+      );
+      assert.deepEqual(
+        second.items.map((event) => event.sequence),
+        [4],
+      );
+      assert.equal(second.hasMore, false);
+    }
+
+    assert.equal(
+      calls.some(
+        (call) =>
+          /event_type = \?/.test(call.query) &&
+          call.values.includes("invoice.created"),
+      ),
+      true,
+    );
+    const indexColumns = sqlite
+      .prepare("PRAGMA index_info(idx_application_events_owner_type_sequence)")
+      .all() as Array<{ name: string }>;
+    assert.deepEqual(
+      indexColumns.map((column) => column.name),
+      ["user_id", "client_id", "event_type", "sequence"],
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("event pages never cross principal or client namespaces", async () => {
   const sqlite = await migratedDatabase();
   try {
@@ -156,6 +225,12 @@ test("event page inputs fail before either repository reads state", async () => 
           /application_event_(principal|client|page)_invalid/,
         );
       }
+      for (const type of ["", "bad type", "a".repeat(129)]) {
+        await assert.rejects(
+          store.listApplicationEvents("user", "client", null, 1, type),
+          /application_event_type_invalid/,
+        );
+      }
     }
     assert.deepEqual(calls, []);
   } finally {
@@ -204,6 +279,7 @@ function applicationEvent(
   sequence: number,
   userId = "event-user",
   clientId = "event-client",
+  type = "example.created",
 ): ApplicationEvent {
   const dataJson = JSON.stringify({ sequence });
   return {
@@ -211,7 +287,7 @@ function applicationEvent(
     id: `00000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`,
     userId,
     clientId,
-    type: "example.created",
+    type,
     dataJson,
     dataBytes: new TextEncoder().encode(dataJson).byteLength,
     idempotencyKeyHash: null,

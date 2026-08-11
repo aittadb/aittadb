@@ -420,14 +420,34 @@ test("OpenAPI distinguishes licensing posture from the current Sites dependency"
   assert.equal(asObject(featureProperties.events, "events").default, false);
   assert.equal(
     Object.hasOwn(openApiSpec.paths, "/events"),
-    false,
-    "feature metadata must not advertise an unimplemented Events route",
+    true,
+    "feature metadata must document the implemented gated Events collection",
   );
   assert.match(String(hostingPlatform.description), /depends on this platform/);
   assert.match(
     String(officialOpenAIProduct.description),
     /does not imply technical independence/,
   );
+});
+
+test("OpenAPI documents bounded event collection reads", () => {
+  const operation = openApiOperation("/events", "get");
+  assert.match(String(operation.description), /events\.read/);
+  assert.match(String(operation.description), /oldest-first/);
+  assert.match(String(operation.description), /exact type/);
+  assert.deepEqual(operation.security, [{ bearer: [] }]);
+  const parameters = operation.parameters as Array<Record<string, unknown>>;
+  assert.deepEqual(
+    parameters.map((parameter) => parameter.name),
+    ["page_size", "cursor", "type"],
+  );
+  const responses = asObject(operation.responses, "Events responses");
+  assert.ok(responses["200"]);
+  assert.ok(responses["400"]);
+  assert.ok(responses["401"]);
+  assert.ok(responses["403"]);
+  assert.ok(responses["429"]);
+  assert.ok(responses["503"]);
 });
 
 test("OpenAPI documents implemented security controls", () => {

@@ -268,6 +268,58 @@ test("event cursor authentication binds resource, principal, client, issuer, and
   );
 });
 
+test("event cursors are bound to the exact collection type filter", async () => {
+  const config = await testConfig();
+  const filtered = await encodeApplicationEventCursor(
+    "user-a",
+    "client-a",
+    12,
+    NOW,
+    config,
+    "invoice.created",
+  );
+  assertCursorOmits(
+    filtered,
+    base64UrlDecode(filtered),
+    "invoice.created",
+    "event type filter",
+  );
+
+  assert.deepEqual(
+    await decodeApplicationEventCursor(
+      filtered,
+      "user-a",
+      "client-a",
+      NOW,
+      config,
+      "invoice.created",
+    ),
+    { afterSequence: 12 },
+  );
+  assert.equal(
+    await decodeApplicationEventCursor(
+      filtered,
+      "user-a",
+      "client-a",
+      NOW,
+      config,
+      null,
+    ),
+    null,
+  );
+  assert.equal(
+    await decodeApplicationEventCursor(
+      filtered,
+      "user-a",
+      "client-a",
+      NOW,
+      config,
+      "invoice.paid",
+    ),
+    null,
+  );
+});
+
 test("event cursors expire at their exact bound and reject excessive lifetimes", async () => {
   const config = await testConfig();
   const cursor = await encodeApplicationEventCursor(
@@ -467,6 +519,7 @@ async function encryptPayload(
   clientId: string,
   config: AppConfig,
   resource = "events",
+  eventType: string | null = null,
 ): Promise<string> {
   const scalar = config.jwtPrivateJwk.d;
   assert.ok(scalar);
@@ -490,6 +543,7 @@ async function encryptPayload(
       config.jwtKeyId,
       principalId,
       clientId,
+      eventType,
     ]),
   );
   const ciphertext = await crypto.subtle.encrypt(

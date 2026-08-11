@@ -6,7 +6,7 @@
 
 **A source-available application backend that developers can deploy entirely on OpenAI-hosted ChatGPT Sites.**
 
-AittaDB currently provides identity, authentication, persistent JSON data, and object storage through a self-contained ChatGPT Sites deployment. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Developers can deploy their own separate AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure.
+AittaDB currently provides identity, authentication, persistent JSON data, object storage, and feature-gated immutable event reads through a self-contained ChatGPT Sites deployment. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Developers can deploy their own separate AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure.
 
 > **Experimental:** AittaDB is under active development. Its interfaces and operational requirements may change before a stable release.
 
@@ -59,17 +59,17 @@ AittaDB separately enforces finite application-level ceilings for the deployment
 - Persistent structured application data.
 - Object and file storage.
 - HTTP APIs for applications, services, and AI agents.
-- Persistent events and long-polling delivery as a planned capability, not part of the current MVP.
+- Feature-gated bounded reads of persistent immutable application events; publication and long-polling delivery remain planned.
 
 The goal is to let developers build persistent, authenticated applications without first deploying and maintaining a conventional backend stack.
 
-The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, and files are available in the MVP; Events remains an explicitly planned capability. [PLAN.md](PLAN.md) contains accepted unfinished work, while completed task history moves to [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
+The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, files, and feature-gated event collection reads are implemented; event publication and long polling remain planned. [PLAN.md](PLAN.md) contains accepted unfinished work, while completed task history moves to [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
 
 ## Why AittaDB?
 
 In Finnish, an _aitta_ is a traditional detached storehouse on a farmstead. It was built to keep grain, food, tools, and other valuable supplies safe and available.
 
-AittaDB follows the same idea for software: a dependable place for an application's identity, data, and files today, with persistent events planned.
+AittaDB follows the same idea for software: a dependable place for an application's identity, data, files, and immutable event stream.
 
 ## MVP Capabilities
 
@@ -81,6 +81,7 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 - Opaque hashed refresh tokens with rotation and reuse detection.
 - D1-backed durable state with checked-in migrations.
 - Per-user, per-client application storage: JSON records in D1 and file bytes in R2.
+- Feature-gated bounded immutable event collection reads with exact type filtering and opaque resume cursors.
 - Finite storage ceilings, bounded cursor pagination, atomic rate counters, and a deployment storage-write kill switch.
 - ChatGPT-sign-in-protected browser operations for current-session UserInfo, personal record/file storage, device approval, consent, and client administration.
 - Administrator access limited to signed-in local UUID subjects configured in `ADMIN_SUBJECTS`.

@@ -102,10 +102,17 @@ test("enabled Events scopes work for interactive, service, and reserved-browser 
   assert.equal(browserClaims.claims.scope, EVENT_SCOPES);
   assert.equal(browserClaims.claims.subject_type, undefined);
 
-  const noRoute = await app.fetch(
+  const collection = await app.fetch(
     new Request(`${ISSUER}/events`, { headers: { accept: HYPERMEDIA } }),
   );
-  assert.equal(noRoute?.status, 404);
+  assert.equal(collection?.status, 200);
+  const collectionDocument = (await collection!.json()) as {
+    type: string;
+    data: { count: number; items: unknown[] };
+  };
+  assert.equal(collectionDocument.type, "application-event-collection");
+  assert.equal(collectionDocument.data.count, 0);
+  assert.deepEqual(collectionDocument.data.items, []);
 });
 
 test("disabling Events rejects scope escalation and stale registered scope use", async () => {

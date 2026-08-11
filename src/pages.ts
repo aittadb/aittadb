@@ -86,6 +86,9 @@ export function serviceHomePage(
   const fileOperation = metadata.features.files
     ? `<a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a>`
     : "";
+  const eventOperation = metadata.features.events
+    ? `<a href="/events"><strong>Application events</strong><span>Read immutable persistent events in your isolated AittaDB namespace.</span></a>`
+    : "";
   const featureStatus = [
     ["Records", metadata.features.records],
     ["Files", metadata.features.files],
@@ -141,7 +144,7 @@ export function serviceHomePage(
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> ChatGPT provides browser sign-in inside ChatGPT Sites; AittaDB creates a separate local identity, issues its own credentials, and never receives or forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a>${recordOperation}${fileOperation}${statisticsOperation}<a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> ChatGPT provides browser sign-in inside ChatGPT Sites; AittaDB creates a separate local identity, issues its own credentials, and never receives or forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a>${recordOperation}${fileOperation}${eventOperation}${statisticsOperation}<a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
     actions: [
       options.signedIn
         ? {
@@ -166,6 +169,7 @@ export function sessionPage(
   recordsEnabled = true,
   filesEnabled = true,
   userInfoEnabled = true,
+  eventsEnabled = false,
   accountDeletion?: {
     csrf: string;
     confirmationToken: string;
@@ -180,6 +184,9 @@ export function sessionPage(
     : "";
   const userInfoOperation = userInfoEnabled
     ? `<a href="/userinfo"><strong>My identity claims</strong><span>Read this session's claims, or inspect an explicit client access token.</span></a>`
+    : "";
+  const eventOperation = eventsEnabled
+    ? `<a href="/events"><strong>My application events</strong><span>Read immutable persistent events in this identity's browser-session namespace.</span></a>`
     : "";
   const accountDeletionOperation = accountDeletion
     ? `<section aria-labelledby="account-deletion-heading"><h2 id="account-deletion-heading">Delete account</h2><p class="note">This permanently starts removal of this local AittaDB account, its credentials, records, and files. Access is blocked as soon as deletion starts.</p><form method="post" action="/account/deletion" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(accountDeletion.csrf)}"><input type="hidden" name="confirmation_token" value="${escapeHtml(accountDeletion.confirmationToken)}"><label for="account-deletion-confirmation">Type <code>${escapeHtml(accountDeletion.confirmationPhrase)}</code> to confirm</label><input id="account-deletion-confirmation" name="confirmation" autocomplete="off" minlength="${accountDeletion.confirmationPhrase.length}" maxlength="${accountDeletion.confirmationPhrase.length}" pattern="${escapeHtml(accountDeletion.confirmationPhrase)}" required><div class="actions"><button class="danger" type="submit">Delete my account</button></div></form></section>`
@@ -202,13 +209,16 @@ export function sessionPage(
             : "Your AittaDB identity and sessions.",
     visualSummary:
       "ChatGPT establishes the upstream sign-in. AittaDB uses its own immutable user ID for sessions and persistent storage.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace${userInfoEnabled ? " and identity claims" : ""}.${userInfoEnabled ? " Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes." : ""}</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}${fileOperation}${userInfoOperation}${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>${accountDeletionOperation}`,
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace${userInfoEnabled ? " and identity claims" : ""}.${userInfoEnabled ? " Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes." : ""}</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}${fileOperation}${eventOperation}${userInfoOperation}${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>${accountDeletionOperation}`,
     actions: [
       ...(recordsEnabled
         ? [{ href: "/storage/records", label: "Open my records" }]
         : []),
       ...(filesEnabled
         ? [{ href: "/storage/files", label: "Open my files", secondary: true }]
+        : []),
+      ...(eventsEnabled
+        ? [{ href: "/events", label: "Open my events", secondary: true }]
         : []),
       {
         href: "/signout-with-chatgpt?return_to=%2F",

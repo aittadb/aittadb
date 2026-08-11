@@ -173,6 +173,10 @@ import {
   requireActiveSubject,
   startSubjectAccountDeletion,
 } from "./subject-access";
+import {
+  eventCollectionBrowserEndpoint,
+  eventCollectionEndpoint,
+} from "./event-collection";
 
 export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
@@ -292,6 +296,16 @@ export function createAittaDBWithStore(
           negotiationError
             ? hypermediaError(request, "not_acceptable", negotiationError, 406)
             : featureUnavailableResponse(request, config, "File Storage"),
+          config,
+        );
+      }
+      if (!config.features.events && isEventsRoute(url.pathname)) {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(request, config, "Events"),
           config,
         );
       }
@@ -588,8 +602,15 @@ async function route(
               "R2-backed files with D1 metadata isolated by AittaDB user and client",
             ]
           : []),
+        ...(config.features.events
+          ? [
+              "Persistent immutable event collection reads isolated by AittaDB user and client",
+            ]
+          : []),
       ],
-      plannedCapabilities: ["Persistent events and long-polling delivery"],
+      plannedCapabilities: config.features.events
+        ? ["Event publication and bounded long-polling delivery"]
+        : ["Persistent events and long-polling delivery"],
     };
     const endpoints = endpointActions(config.issuerUrl);
     const links = [
@@ -620,6 +641,13 @@ async function route(
       ...(config.features.files
         ? [
             link("storage-files", `${config.issuerUrl}/storage/files`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
+      ...(config.features.events
+        ? [
+            link("events", `${config.issuerUrl}/events`, {
               type: HYPERMEDIA_MEDIA_TYPE,
             }),
           ]
@@ -709,6 +737,17 @@ async function route(
               "Open file storage",
               "GET",
               `${config.issuerUrl}/storage/files`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+      ...(signedIn && config.features.events
+        ? [
+            action(
+              "open-events",
+              "Open application events",
+              "GET",
+              `${config.issuerUrl}/events`,
               { authorization: { scheme: "sites-session" }, fields: [] },
             ),
           ]
@@ -1288,6 +1327,17 @@ async function route(
         )
       : response;
   }
+  if (url.pathname === "/events" && request.method === "GET") {
+    const browserResponse = await eventCollectionBrowserEndpoint(
+      request,
+      url,
+      store,
+      config,
+      identityProvider,
+    );
+    if (browserResponse) return browserResponse;
+    return eventCollectionEndpoint(request, url, store, config);
+  }
   if (url.pathname.startsWith("/storage/")) {
     const limited = await endpointRateLimit(
       store,
@@ -1458,6 +1508,13 @@ async function localSessionEndpoint(
             }),
           ]
         : []),
+      ...(config.features.events
+        ? [
+            link("events", `${config.issuerUrl}/events`, {
+              type: HYPERMEDIA_MEDIA_TYPE,
+            }),
+          ]
+        : []),
       ...(showAdmin
         ? [
             link("client-administration", `${config.issuerUrl}/admin/clients`, {
@@ -1525,6 +1582,17 @@ async function localSessionEndpoint(
               "Manage files",
               "GET",
               `${config.issuerUrl}/storage/files`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
+      ...(config.features.events
+        ? [
+            action(
+              "read-session-events",
+              "Read application events",
+              "GET",
+              `${config.issuerUrl}/events`,
               { authorization: { scheme: "sites-session" }, fields: [] },
             ),
           ]
@@ -1604,6 +1672,7 @@ async function localSessionEndpoint(
           config.features.records,
           config.features.files,
           config.features.oauthApps,
+          config.features.events,
           accountDeletionConfirmation
             ? {
                 csrf,
@@ -3401,6 +3470,7 @@ export function isAittaDBRoute(pathname: string): boolean {
     pathname === "/authorize" ||
     pathname.startsWith("/oauth/") ||
     pathname === "/userinfo" ||
+    isEventsRoute(pathname) ||
     pathname.startsWith("/storage/") ||
     pathname === "/openapi.json" ||
     pathname === "/docs" ||
@@ -3421,6 +3491,10 @@ function isFilesRoute(pathname: string): boolean {
   return (
     pathname === "/storage/files" || pathname.startsWith("/storage/files/")
   );
+}
+
+function isEventsRoute(pathname: string): boolean {
+  return pathname === "/events" || pathname.startsWith("/events/");
 }
 
 const BROWSER_ONLY_MUTATION_ROUTES = new Set([
@@ -3540,6 +3614,7 @@ function usesApplicationNegotiation(request: Request, url: URL): boolean {
     return true;
   }
   if (pathname === "/userinfo") return !bearerToken(request);
+  if (isEventsRoute(pathname)) return true;
   if (!pathname.startsWith("/storage/")) return false;
   if (
     request.method === "GET" &&
@@ -3565,6 +3640,7 @@ function usesApplicationErrorNegotiation(request: Request): boolean {
     pathname === "/device/decision" ||
     pathname === "/consent" ||
     pathname.startsWith("/admin/") ||
+    isEventsRoute(pathname) ||
     pathname.startsWith("/storage/")
   );
 }
@@ -3595,6 +3671,7 @@ function isCorsControlledRoute(pathname: string): boolean {
     pathname === "/statistics" ||
     pathname.startsWith("/oauth/") ||
     pathname === "/userinfo" ||
+    isEventsRoute(pathname) ||
     pathname.startsWith("/storage/") ||
     pathname === "/openapi.json" ||
     pathname === "/.well-known/openid-configuration" ||
@@ -3639,7 +3716,11 @@ async function corsHeadersForRequest(
 }
 
 function isClientCorsRoute(pathname: string): boolean {
-  return pathname === "/userinfo" || pathname.startsWith("/storage/");
+  return (
+    pathname === "/userinfo" ||
+    isEventsRoute(pathname) ||
+    pathname.startsWith("/storage/")
+  );
 }
 
 function needsStore(pathname: string): boolean {

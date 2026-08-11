@@ -113,6 +113,38 @@ const storageCursorParameter = {
     "Opaque encrypted continuation cursor from the preceding collection response's next link. For a collection that is not mutated during traversal, following only returned next links visits every authorized item exactly once in bounded pages. Authenticated encryption binds the cursor to the resource kind, local user, and OAuth client; it exposes no logical key, timestamp, local-user identifier, OAuth-client identifier, or signing secret and must not be constructed or reused across namespaces. Rotating the private signing-key material immediately invalidates outstanding cursors.",
 } as const;
 
+const eventPageSizeParameter = {
+  name: "page_size",
+  in: "query",
+  required: false,
+  schema: { type: "integer", minimum: 1, maximum: 100 },
+  description:
+    "Maximum number of events returned on this page, bounded further by deployment configuration.",
+} as const;
+
+const eventCursorParameter = {
+  name: "cursor",
+  in: "query",
+  required: false,
+  schema: { type: "string", minLength: 1, maxLength: 342 },
+  description:
+    "Opaque encrypted resume cursor returned by this collection. It is bound to the issuer, key, exact principal, OAuth client, and event-type filter and exposes no internal sequence or namespace identifier.",
+} as const;
+
+const eventTypeParameter = {
+  name: "type",
+  in: "query",
+  required: false,
+  schema: {
+    type: "string",
+    minLength: 1,
+    maxLength: 128,
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+  },
+  description:
+    "One exact case-sensitive event type; wildcards are unsupported.",
+} as const;
+
 const tokenBoundCorsDescription =
   "For a cross-origin bearer request, Origin must exactly match an allowed origin registered on the active OAuth client identified by the token audience. A preflight is admitted only for an origin registered to at least one active client; the eventual request is still checked against its token's client. Wildcards are not accepted.";
 
@@ -149,6 +181,12 @@ const recordsUnavailableResponse = {
 const filesUnavailableResponse = {
   description:
     "The File Storage feature is disabled by deployment configuration. The request is rejected before client lookup, authentication, rate limiting, request-body parsing, D1 file-metadata work, R2 access, or cleanup scheduling. On enabled deployments, this status can also report the documented storage-write switch or R2 unavailability.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
+const eventsUnavailableResponse = {
+  description:
+    "Events is disabled by deployment configuration. The request is rejected before bearer parsing, Sites identity lookup, CORS client authorization, rate limiting, cursor opening, or event repository access.",
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
@@ -245,7 +283,7 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1 and files in R2. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Persistent events and long-polling delivery are planned and are not part of the current MVP. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
+      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1, files in R2, and feature-gated immutable event collection reads. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Event publication and bounded long-polling delivery remain planned. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
   },
   "x-aittadb-oauth-scopes": oauthScopeMetadata,
   paths: {
@@ -889,6 +927,50 @@ export const openApiSpec = {
           "400": { description: "Malformed request body" },
           "413": boundedFormTooLargeResponse,
           "503": oauthAppsOidcUnavailableResponse,
+        },
+      },
+    },
+    "/events": {
+      get: {
+        summary: "List immutable events in one authenticated namespace",
+        description: `Available only when FEATURE_EVENTS_ENABLED is true. A bearer request requires events.read and is bound to the token's active local principal and OAuth client. A request without a bearer token uses only the current ChatGPT-signed-in AittaDB browser session and the reserved browser-client namespace; its short-lived internal token is never returned. Results are oldest-first, bounded, optionally filtered by one exact type, and resumable through an encrypted cursor. Internal sequence, owner/client identifiers, credential state, and idempotency hashes are never represented. Immediate polling is the only behavior in this operation; bounded waiting is not yet available. ${tokenBoundCorsDescription}`,
+        parameters: [
+          eventPageSizeParameter,
+          eventCursorParameter,
+          eventTypeParameter,
+        ],
+        security: [{ bearer: [] }],
+        responses: {
+          "200": {
+            description:
+              "A no-store bounded event page as hypermedia JSON or accessible HTML",
+            headers: {
+              "Cache-Control": {
+                schema: { type: "string", const: "no-store" },
+              },
+            },
+            content: hypermediaContent(
+              "#/components/schemas/ApplicationEventCollectionDocument",
+            ),
+          },
+          "400": {
+            description:
+              "Invalid, repeated, or unsupported query field, page size, event type, or cursor",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description:
+              "Missing or invalid bearer token, inactive subject, or signed-out browser session",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description:
+              "The valid AittaDB access token lacks events.read or its exact registered browser origin is not allowed",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "406": notAcceptableResponse,
+          "429": rateLimitedResponse(true),
+          "503": eventsUnavailableResponse,
         },
       },
     },
@@ -2002,7 +2084,7 @@ export const openApiSpec = {
                 type: "boolean",
                 default: false,
                 description:
-                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes; this metadata flag still does not advertise an Events route or operation before that resource is implemented.",
+                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, and implemented Events operations such as bounded collection reads may be advertised.",
               },
             },
             additionalProperties: false,
@@ -2399,6 +2481,89 @@ export const openApiSpec = {
                   title: { type: "string" },
                   protocol_response: { type: "string" },
                 },
+              },
+            },
+          },
+        ],
+      },
+      ApplicationEventData: {
+        type: "object",
+        required: ["id", "type", "data", "created_at", "expires_at"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          type: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          },
+          data: { type: "object", additionalProperties: true },
+          created_at: { type: "integer", minimum: 0 },
+          expires_at: { type: "integer", minimum: 1 },
+        },
+        additionalProperties: false,
+      },
+      ApplicationEventDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "application-event" },
+              data: { $ref: "#/components/schemas/ApplicationEventData" },
+            },
+          },
+        ],
+      },
+      ApplicationEventCollectionData: {
+        type: "object",
+        required: [
+          "count",
+          "page_size",
+          "has_more",
+          "type_filter",
+          "resume_cursor",
+          "items",
+        ],
+        properties: {
+          count: {
+            type: "integer",
+            minimum: 0,
+            description: "Number of events in this page, not a total count.",
+          },
+          page_size: { type: "integer", minimum: 1, maximum: 100 },
+          has_more: { type: "boolean" },
+          type_filter: {
+            oneOf: [
+              { type: "string", minLength: 1, maxLength: 128 },
+              { type: "null" },
+            ],
+          },
+          resume_cursor: {
+            type: "string",
+            minLength: 1,
+            maxLength: 342,
+            description:
+              "Encrypted checkpoint after the last returned event, or the current empty-stream position.",
+          },
+          items: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/ApplicationEventDocument",
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      ApplicationEventCollectionDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "application-event-collection" },
+              data: {
+                $ref: "#/components/schemas/ApplicationEventCollectionData",
               },
             },
           },
