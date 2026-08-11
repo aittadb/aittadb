@@ -50,7 +50,7 @@ test("cleanup telemetry configuration is strict and defaults off", async () => {
 });
 
 test("D1 cleanup reports only valid bounded mutation metadata", async () => {
-  const counts = [2, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+  const counts = [2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
   const results: D1Result[] = [
     { success: true },
     ...counts.map((changes) => ({ success: true, meta: { changes } })),
@@ -81,6 +81,7 @@ test("D1 cleanup marks missing and malformed mutation counts unverifiable", asyn
     { success: true, meta: { changes: Number.NaN } },
     { success: true, meta: { changes: Number.POSITIVE_INFINITY } },
     { success: true, meta: { changes: Number.MAX_SAFE_INTEGER + 1 } },
+    { success: true, meta: { changes: -0.5 } },
   ];
   const report = await new D1AuthStore(cleanupDatabase(malformed)).cleanup(100);
 
@@ -163,6 +164,12 @@ test("cleanup scheduling catches failures and emits bounded private telemetry", 
     secret: "private-key-material",
     identity: "user@example.test",
     sql: "SELECT * FROM users",
+    eventId: "private-event-id",
+    eventType: "private.event",
+    payload: "private-event-payload",
+    owner: "private-owner",
+    client: "private-client",
+    cursor: "private-cursor",
   });
   const successful = new FixedCleanupStore(() =>
     Promise.resolve(taintedReport),
@@ -200,6 +207,12 @@ test("cleanup scheduling catches failures and emits bounded private telemetry", 
   assert.equal(rawPayload.includes("private-key-material"), false);
   assert.equal(rawPayload.includes("user@example.test"), false);
   assert.equal(rawPayload.includes("SELECT"), false);
+  assert.equal(rawPayload.includes("private-event"), false);
+  assert.equal(rawPayload.includes("private.event"), false);
+  assert.equal(rawPayload.includes("private-event-payload"), false);
+  assert.equal(rawPayload.includes("private-owner"), false);
+  assert.equal(rawPayload.includes("private-client"), false);
+  assert.equal(rawPayload.includes("private-cursor"), false);
 });
 
 class FixedCleanupStore extends MemoryAuthStore {

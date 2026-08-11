@@ -48,6 +48,7 @@ export interface RuntimeEnv {
   FEATURE_STATISTICS_ENABLED?: string;
   FEATURE_OAUTH_APPS_ENABLED?: string;
   FEATURE_EVENTS_ENABLED?: string;
+  EVENT_RETENTION_SECONDS?: string;
   EVENTS_GLOBAL_MAX_ITEMS?: string;
   EVENTS_GLOBAL_MAX_BYTES?: string;
   EVENTS_USER_MAX_ITEMS?: string;
@@ -124,6 +125,7 @@ export interface AppConfig {
   refreshTokenTtlSeconds: number;
   allowedCorsOrigins: readonly string[];
   features: FeatureAvailability;
+  eventRetentionSeconds: number;
   maintenanceCleanupTelemetryEnabled: boolean;
   eventLimits: ApplicationEventLimits;
   storageLimits: StorageLimits;
