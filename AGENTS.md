@@ -225,13 +225,13 @@ Keep commands synchronized with `package.json`, CI, README, and contributor docs
 
 ## PLAN.md Workflow
 
-Before repository-affecting work, first add or amend an unchecked root `PLAN.md` task; questions need none. PLAN is one flat unfinished `TASK-NNN` queue with stable PLAN/CHANGELOG IDs. Each item MUST own exactly one server primitive or one narrowly bounded operational proof, fit one commit, and state an objective pass/fail DoD. Never combine independent resources, methods, controls, migrations, or live matrices in one task. Broad requests first create a decomposition task; add dependency-ordered replacements, then retire the umbrella unchanged with its CHANGELOG mapping without claiming delivery. Describe the primitive, not its motivating application.
+Before repository-affecting work, first add or amend an unchecked root `PLAN.md` task. PLAN is one flat unfinished `TASK-NNN` queue with stable PLAN/CHANGELOG IDs.
 
-Implementation tasks deliver contract, code, negative tests, docs, failures, applicable configuration/migration/OpenAPI/AGENTS changes, and evidence together. A Sites-only acceptance task proves one named behavior against one exact deployment and invents no source work. Process dependencies in order; parallelize independent items. Add missing work first. After DoD, remove the task from PLAN and append its unchanged description to CHANGELOG. Never archive partial work or keep completed PLAN checkboxes.
+Each item MUST own exactly one server primitive or one narrowly bounded operational proof; it fits one commit with objective DoD. Never combine independent resources, methods, controls, migrations, or live matrices in one task. Broad requests first create a decomposition task; dependency-order replacements, then retire the umbrella unchanged to CHANGELOG without claiming delivery. Describe the primitive, not its motivating application.
 
-Implementation subagents MUST edit only isolated Git worktrees. The primary worktree integrates only reviewed, complete, validated agent commits; never import partial work. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly there.
+A Sites-only acceptance task proves one named behavior against one exact deployment and adds no source. Add missing work first. After DoD, remove the task from PLAN and append its unchanged description to CHANGELOG. Never archive partial/completed items.
 
-Prefer the smallest coherent risk-reducing implementation. For feature/task/deployment/release readiness, report evidence-based readiness confidence from `0/100` to `100/100`, decisive evidence, and residual uncertainty; rarely use `100/100`. It never replaces security gates or the definition of done. Capture every material residual finding in `PLAN.md`, `ROADMAP.md`, or `BACKLOG.md` before handoff.
+Report evidence-based readiness confidence from `0/100` to `100/100`, decisive evidence, and uncertainty; rarely use `100/100`. It never replaces security gates or the definition of done. Capture every material residual finding in `PLAN.md`, `ROADMAP.md`, or `BACKLOG.md` before handoff.
 
 `ROADMAP.md` is a flat stable `ROADMAP-NNN` future-direction list; `BACKLOG.md` is a flat stable `BACKLOG-NNN` unscheduled-idea list. Neither implies availability or authority to implement. Move work into PLAN first; update the source only after completion or documented retirement.
 
@@ -239,23 +239,26 @@ Backup/restore/sync stays inside the authorized user/client namespace and exclud
 
 ## Definition of Done
 
-Every implementation task completes all six in the same task:
-
-1. The unit's public interface or contract.
-2. Implementation.
-3. Automated tests, including relevant negative paths.
-4. User and developer documentation.
-5. Successful formatting, linting, type checking, relevant tests, and build validation.
-6. Necessary `AGENTS.md`, OpenAPI, schema, migration, architecture, configuration, and operational updates.
-
-Never split one unit's implementation, tests, or documentation into separate tasks. Scale coverage to security risk and blast radius.
+Implementation DoD: contract/code/negative tests/user+developer docs/passing format+lint+types+tests+build/necessary AGENTS+OpenAPI+schema+migration+architecture+config+ops updates. Scale tests by risk.
 
 ## Git, Review, and Deployment
 
-Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; destructive reset/checkout requires approval. Run `npm run validate` before handoff. Feature PRs target `develop`. Keep at most one `main` PR, normally from `develop`; never merge without approval, and close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits. Reviews prioritize security, regressions, protocol drift, and missing tests.
+Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; reset/checkout needs approval. Run `npm run validate` before handoff. Feature PRs target `develop`; at most one `main` PR, normally `develop`; no merge without approval; close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits.
 
 Outside the preapproved test Site, deployment requires approval. Publish exact validated committed source, apply checked-in migrations through Sites, preserve bindings/secrets, and verify status. Claim Sites sign-in E2E only after real hosted testing; record remaining hosted uncertainty and the next manual step.
 
 ## Maintaining This File
 
-Update `AGENTS.md` in the same task when architecture, interfaces, commands, constraints, security policy, structure, deployment procedure, operational knowledge, or workflow changes. Keep it below 32,000 bytes. Keep compact rules here and rationale in docs; remove stale statements instead of appending contradictions.
+Update `AGENTS.md` when architecture/interfaces/commands/constraints/security/structure/deployment/operations/workflow change. Keep below 32,000 bytes. Rationale in docs; replace stale text.
+
+## Multi-agent execution
+
+GPT-5.6 Sol Ultra is primary architect/orchestrator/integrator/final decision-maker; owns requirements analysis/architecture, task decomposition/dependency ordering, conflict resolution, final review/validation.
+
+- Use GPT-5.6 Luna Max only for small fully specified tasks with clear scope/acceptance criteria/file ownership/tests and no unresolved architecture. Never delegate ambiguous product/protocol/authorization/data-integrity/concurrency/cross-cutting decisions to Luna.
+- Use GPT-5.6 Terra High for read-only exploration/dependency mapping/investigation while boundaries are unclear.
+- Use GPT-5.6 Sol High or Max for independent architecture/security/correctness/integration review.
+- Parallelize only independent work; Implementation subagents MUST edit only isolated Git worktrees. Never overlap files/shared behavior/tightly coupled components.
+- Each delegation is one implementation/relevant-tests/docs task; subagents report changed files/validation/assumptions/unresolved risks.
+- Primary inspects/integrates all returned work, resolves findings, runs full relevant validation suite, reviews final combined diff, and accepts only reviewed, complete, validated agent commits. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly.
+- Prefer routing if selectable; otherwise intended.
