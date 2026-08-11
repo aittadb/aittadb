@@ -70,6 +70,7 @@ test("disabled statistics omit discovery and never query identities", async () =
         files: boolean;
         statistics: boolean;
         oauthApps: boolean;
+        events: boolean;
       };
     };
     links: Array<{ rel: string[]; href: string }>;
@@ -81,6 +82,7 @@ test("disabled statistics omit discovery and never query identities", async () =
     files: true,
     statistics: false,
     oauthApps: false,
+    events: false,
   });
   assert.equal(
     rootJson.links.some((item) => item.rel.includes("statistics")),

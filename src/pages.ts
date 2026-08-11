@@ -62,6 +62,7 @@ export function serviceHomePage(
       files: boolean;
       statistics: boolean;
       oauthApps: boolean;
+      events: boolean;
     };
     capabilities: readonly string[];
     plannedCapabilities: readonly string[];
@@ -90,6 +91,7 @@ export function serviceHomePage(
     ["Files", metadata.features.files],
     ["Statistics", metadata.features.statistics],
     ["OAuth Apps", metadata.features.oauthApps],
+    ["Events", metadata.features.events],
   ]
     .map(([name, enabled]) => `${name} ${enabled ? "on" : "off"}`)
     .join(" · ");
