@@ -2,6 +2,7 @@ import { sha256, uuid } from "../crypto";
 import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
+  assertApplicationEventLookupInput,
   assertApplicationEventPageInput,
   copyApplicationEvent,
 } from "../application-events";
@@ -1013,6 +1014,18 @@ export class MemoryAuthStore implements AuthStore {
       items: selected.slice(0, limit),
       hasMore: selected.length > limit,
     };
+  }
+
+  async getApplicationEvent(
+    userId: string,
+    clientId: string,
+    id: string,
+  ): Promise<ApplicationEvent | null> {
+    assertApplicationEventLookupInput(userId, clientId, id);
+    const event = this.applicationEvents.get(id);
+    return event?.userId === userId && event.clientId === clientId
+      ? copyApplicationEvent(event)
+      : null;
   }
 
   private hasAccountCredentialsAndGrants(subject: string): boolean {
