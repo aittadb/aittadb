@@ -6,7 +6,7 @@ Use [PLAN.md](PLAN.md) for accepted, dependency-ordered unfinished implementatio
 
 When declaring work ready, include a `0/100` evidence-based readiness confidence, the decisive validation evidence, and material residual uncertainty. The score does not waive security controls or the definition of done. Record remaining findings in PLAN, ROADMAP, or BACKLOG before handoff, and prefer a small verified risk reduction to speculative complexity.
 
-Use feature branches. Do not push directly to `main`, merge without review, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
+Use `develop` as the primary workspace and feature base. Rebase only complete, validated, main-ready feature branches onto it; unfinished work remains separate. Do not push directly to `main`, merge without review and approval, deploy, publish, save a production checkpoint, or change Sites access settings without explicit approval.
 
 Run `npm run validate` before requesting review. It includes the tracked-tree `npm run secrets:check` guard and `npm run agents:check`; keep the authoritative root `AGENTS.md` below 32,000 bytes so Codex loads the complete instruction set by default. For secret-safety acceptance in a complete clone, also run `npm run secrets:audit-history`; report findings only by category, path, and commit. Prefer concise rules and move explanatory background to linked files in `docs/`.
 

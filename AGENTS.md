@@ -24,7 +24,7 @@ Current public releases use FSL-1.1-MIT and convert to MIT two years after publi
 
 The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
-Use feature branches. Approval is required to push/merge `main` or change `aittadb.com` deployment, versions, secrets, or access. `test.aittadb.com` is preapproved for bounded development testing, including reversible configuration, test-key, fixture, and deployment changes; restore normal settings, remove fixtures, and retain no identity or secret.
+`develop` is the primary workspace and tracks `main`. Rebase only validated, main-ready features onto it; unfinished work stays separate. Never push or merge `main`, or change `aittadb.com` deployment, versions, secrets, or access, without approval. `test.aittadb.com` is preapproved for bounded testing and reversible configuration, key, fixture, and deployment changes; restore settings, remove fixtures, and retain no identity or secret.
 
 ## Runtime Contract
 
@@ -249,7 +249,7 @@ Never split one unit's implementation, tests, or documentation into separate tas
 
 ## Git, Review, and Deployment
 
-Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning-only commits may be direct. Preserve unrelated work; never destructively reset/checkout without approval. Run `npm run validate` before handoff. Keep exactly one open draft PR to `main`; integrate and verify valid work there, then close superseded PRs without merging. Never leave intended changes loose at handoff. Without push access, retain/report commits. Reviews prioritize security, regressions, protocol drift, and missing tests.
+Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning-only commits may be direct. Preserve unrelated work; no destructive reset/checkout without approval. Run `npm run validate` before handoff. Feature PRs target `develop`; only complete DoD work enters it. Keep at most one `main` PR, normally from `develop`; never merge without approval. Close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits. Reviews prioritize security, regressions, protocol drift, and missing tests.
 
 Outside the preapproved test Site, deployment requires approval. Publish exact validated committed source, apply checked-in migrations through Sites, preserve bindings/secrets, and verify status. Claim Sites sign-in E2E only after real hosted testing; record remaining hosted uncertainty and the next manual step.
 
