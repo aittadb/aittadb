@@ -8,7 +8,7 @@ Credential-bearing browser forms send values in a same-origin request body and d
 
 ## Service Client Credentials
 
-An administrator first registers a `service` client with only the required storage scopes and saves the displayed secret once in the caller's server-side secret configuration. The server can then obtain a renewable short-lived token without a browser:
+An administrator first registers a `service` client with only the required AittaDB data scopes and saves the displayed secret once in the caller's server-side secret configuration. The server can then obtain a renewable short-lived token without a browser:
 
 ```sh
 curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
@@ -20,6 +20,19 @@ curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
 ```
 
 The response contains `access_token`, `token_type`, `expires_in`, and `scope`; it contains no ID token, refresh token, email, or display name. Request another token before expiry. The token authorizes only the service client's stable isolated namespace, and must stay in server-side memory or secret handling rather than URLs, logs, or browser storage.
+
+When `FEATURE_EVENTS_ENABLED=true`, public, confidential, service, and the private current-session client may use `events.publish`, `events.read`, and `events.subscribe`. These are AittaDB permissions only; they grant no access to ChatGPT or OpenAI data. For example, a service client intended to publish and later read its own namespace may request:
+
+```sh
+curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
+  --request POST https://aittadb.com/oauth/token \
+  --header 'Accept: application/json' \
+  --header 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'scope=events.publish events.read'
+```
+
+The scopes can be registered and issued before the Events HTTP resources are released, but they do not create an endpoint or persistence capability by themselves. `events.subscribe` is reserved for bounded delivery and will also require `events.read` at the operation boundary. If Events is disabled, registration and every grant path reject its scopes; existing storage and OIDC scopes are unchanged.
 
 The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; Events is planned and is not an available API in the MVP.
 

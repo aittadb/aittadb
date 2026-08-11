@@ -4,7 +4,8 @@ import {
   type UpstreamIdentityProvider,
 } from "./identity";
 import { oauthError } from "./http";
-import { issueTokens } from "./oauth";
+import { issueTokens, validateScopes } from "./oauth";
+import { validateAvailableScopes } from "./oauth-scopes";
 import { BROWSER_SESSION_CLIENT_ID } from "./system-client";
 import { isSubjectAuthorizationDenied } from "./subject-access";
 import type { AppConfig, AuthStore } from "./types";
@@ -15,7 +16,10 @@ export type BrowserSessionScope =
   | "profile"
   | "storage.read"
   | "storage.write"
-  | "storage.delete";
+  | "storage.delete"
+  | "events.publish"
+  | "events.read"
+  | "events.subscribe";
 
 export function hasBrowserSession(
   request: Request,
@@ -31,6 +35,13 @@ export async function issueBrowserSessionAccessToken(
   config: AppConfig,
   scopes: readonly BrowserSessionScope[],
 ): Promise<string | Response> {
+  const availabilityError = validateAvailableScopes(
+    scopes,
+    config.features.events,
+  );
+  if (availabilityError)
+    return oauthError("invalid_scope", availabilityError, 400);
+
   const identity = identityProvider.read(request);
   if (!identity)
     return requireSitesIdentity(request, identityProvider) as Response;
@@ -43,6 +54,8 @@ export async function issueBrowserSessionAccessToken(
       503,
     );
   }
+  const scopeError = validateScopes(scopes, client, config.features.events);
+  if (scopeError) return oauthError("invalid_scope", scopeError, 400);
 
   const now = nowSeconds();
   const user = await store.findOrCreateUser(identity, now);
