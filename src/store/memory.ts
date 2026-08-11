@@ -2,6 +2,8 @@ import { sha256, uuid } from "../crypto";
 import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
+  assertApplicationEvent,
+  assertApplicationEventInput,
   assertApplicationEventLookupInput,
   assertApplicationEventPageInput,
   copyApplicationEvent,
@@ -46,6 +48,8 @@ import type {
   AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
   ApplicationEvent,
+  ApplicationEventAppendResult,
+  ApplicationEventInput,
   ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
@@ -1026,6 +1030,52 @@ export class MemoryAuthStore implements AuthStore {
     return event?.userId === userId && event.clientId === clientId
       ? copyApplicationEvent(event)
       : null;
+  }
+
+  async appendApplicationEvent(
+    input: ApplicationEventInput,
+  ): Promise<ApplicationEventAppendResult> {
+    assertApplicationEventInput(input);
+    const client = this.clients.get(input.clientId);
+    if (
+      (!this.users.has(input.userId) &&
+        !this.servicePrincipals.has(input.userId)) ||
+      !client ||
+      client.disabledAt !== null ||
+      this.accountDeletionJobs.has(input.userId)
+    ) {
+      return { status: "unavailable" };
+    }
+
+    if (input.idempotencyKeyHash !== null) {
+      const existing = Array.from(this.applicationEvents.values()).find(
+        (event) =>
+          event.userId === input.userId &&
+          event.clientId === input.clientId &&
+          event.idempotencyKeyHash === input.idempotencyKeyHash,
+      );
+      if (existing) {
+        assertApplicationEvent(existing);
+        return existing.requestHash === input.requestHash
+          ? { status: "replayed", event: copyApplicationEvent(existing) }
+          : { status: "conflict" };
+      }
+    }
+    if (this.applicationEvents.has(input.id)) {
+      return { status: "unavailable" };
+    }
+
+    const highestSequence = Array.from(this.applicationEvents.values()).reduce(
+      (highest, event) => Math.max(highest, event.sequence),
+      0,
+    );
+    const event: ApplicationEvent = {
+      ...input,
+      sequence: highestSequence + 1,
+    };
+    assertApplicationEvent(event);
+    this.applicationEvents.set(event.id, event);
+    return { status: "created", event: copyApplicationEvent(event) };
   }
 
   private hasAccountCredentialsAndGrants(subject: string): boolean {

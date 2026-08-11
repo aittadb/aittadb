@@ -317,6 +317,16 @@ export interface ApplicationEventLookupRepository {
   ): Promise<ApplicationEvent | null>;
 }
 
+export type ApplicationEventAppendResult =
+  | { status: "created" | "replayed"; event: ApplicationEvent }
+  | { status: "conflict" | "unavailable" };
+
+export interface ApplicationEventAppendRepository {
+  appendApplicationEvent(
+    input: ApplicationEventInput,
+  ): Promise<ApplicationEventAppendResult>;
+}
+
 export interface AccountFilePurgeStageResult {
   selected: number;
   staged: number;
@@ -388,7 +398,8 @@ export interface AuthStore
     AccountRecordPurgeRepository,
     AccountDeletionFinalizationRepository,
     ApplicationEventPageRepository,
-    ApplicationEventLookupRepository {
+    ApplicationEventLookupRepository,
+    ApplicationEventAppendRepository {
   cleanup(now: number): Promise<CleanupReport>;
   rateLimit(
     key: string,
