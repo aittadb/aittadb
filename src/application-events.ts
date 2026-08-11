@@ -2,6 +2,7 @@ import type { ApplicationEvent, ApplicationEventInput } from "./types";
 
 export const APPLICATION_EVENT_MAX_DATA_BYTES = 64 * 1024;
 export const APPLICATION_EVENT_MAX_TYPE_LENGTH = 128;
+export const APPLICATION_EVENT_MAX_PAGE_SIZE = 100;
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -54,6 +55,39 @@ export function assertApplicationEvent(event: ApplicationEvent): void {
   if (!Number.isSafeInteger(event.sequence) || event.sequence < 1) {
     throw new RangeError("application_event_sequence_invalid");
   }
+}
+
+export function assertApplicationEventNamespace(
+  userId: string,
+  clientId: string,
+): void {
+  assertNamespacePart(userId, "principal");
+  assertNamespacePart(clientId, "client");
+}
+
+export function assertApplicationEventPageInput(
+  userId: string,
+  clientId: string,
+  afterSequence: number | null,
+  limit: number,
+): void {
+  assertApplicationEventNamespace(userId, clientId);
+  if (
+    (afterSequence !== null &&
+      (!Number.isSafeInteger(afterSequence) || afterSequence < 0)) ||
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > APPLICATION_EVENT_MAX_PAGE_SIZE
+  ) {
+    throw new RangeError("application_event_page_invalid");
+  }
+}
+
+export function copyApplicationEvent(
+  event: ApplicationEvent,
+): ApplicationEvent {
+  assertApplicationEvent(event);
+  return { ...event };
 }
 
 function assertNamespacePart(value: string, name: string): void {

@@ -2,6 +2,10 @@ import { sha256, uuid } from "../crypto";
 import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
+  assertApplicationEvent,
+  assertApplicationEventPageInput,
+} from "../application-events";
+import {
   AUDIT_RETENTION_SECONDS,
   CLEANUP_BATCH_SIZE,
   CLEANUP_CATEGORY_LIMITS,
@@ -41,6 +45,8 @@ import type {
   AccountCredentialPurgeBatchResult,
   AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
+  ApplicationEvent,
+  ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
   AuthorizationCode,
@@ -1286,6 +1292,32 @@ export class D1AuthStore implements AuthStore {
     return Boolean(row);
   }
 
+  async listApplicationEvents(
+    userId: string,
+    clientId: string,
+    afterSequence: number | null,
+    limit: number,
+  ): Promise<ApplicationEventPage> {
+    assertApplicationEventPageInput(userId, clientId, afterSequence, limit);
+    const rows = await this.db
+      .prepare(
+        afterSequence === null
+          ? "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? ORDER BY sequence ASC LIMIT ?"
+          : "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?",
+      )
+      .bind(
+        ...(afterSequence === null
+          ? [userId, clientId, limit + 1]
+          : [userId, clientId, afterSequence, limit + 1]),
+      )
+      .all<Row>();
+    const selected = (rows.results ?? []).map(rowToApplicationEvent);
+    return {
+      items: selected.slice(0, limit),
+      hasMore: selected.length > limit,
+    };
+  }
+
   async listStorageRecords(
     userId: string,
     clientId: string,
@@ -1865,6 +1897,44 @@ function rowToStorageRecord(row: Row): StorageRecord {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+function rowToApplicationEvent(row: Row): ApplicationEvent {
+  if (
+    typeof row.sequence !== "number" ||
+    typeof row.id !== "string" ||
+    typeof row.user_id !== "string" ||
+    typeof row.client_id !== "string" ||
+    typeof row.event_type !== "string" ||
+    typeof row.data_json !== "string" ||
+    typeof row.data_bytes !== "number" ||
+    (row.idempotency_key_hash !== null &&
+      typeof row.idempotency_key_hash !== "string") ||
+    typeof row.request_hash !== "string" ||
+    typeof row.created_at !== "number" ||
+    typeof row.expires_at !== "number"
+  ) {
+    throw new Error("application_event_row_invalid");
+  }
+  const event: ApplicationEvent = {
+    sequence: row.sequence,
+    id: row.id,
+    userId: row.user_id,
+    clientId: row.client_id,
+    type: row.event_type,
+    dataJson: row.data_json,
+    dataBytes: row.data_bytes,
+    idempotencyKeyHash: row.idempotency_key_hash,
+    requestHash: row.request_hash,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+  try {
+    assertApplicationEvent(event);
+  } catch {
+    throw new Error("application_event_row_invalid");
+  }
+  return event;
 }
 
 function rowToStorageFile(row: Row): StorageFileMetadata {

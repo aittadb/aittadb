@@ -2,6 +2,10 @@ import { sha256, uuid } from "../crypto";
 import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
+  assertApplicationEventPageInput,
+  copyApplicationEvent,
+} from "../application-events";
+import {
   AUDIT_RETENTION_SECONDS,
   CLEANUP_BATCH_SIZE,
   createCleanupReport,
@@ -40,6 +44,8 @@ import type {
   AccountCredentialPurgeBatchResult,
   AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
+  ApplicationEvent,
+  ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
   AuthorizationCode,
@@ -79,6 +85,7 @@ export class MemoryAuthStore implements AuthStore {
     { subject: string; expiresAt: number; revokedAt: number }
   >();
   accountDeletionJobs = new Map<string, AccountDeletionJob>();
+  applicationEvents = new Map<string, ApplicationEvent>();
   storageRecords = new Map<string, StorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
   storageFileWriteFences = new Map<string, StorageFileWriteFence>();
@@ -983,6 +990,29 @@ export class MemoryAuthStore implements AuthStore {
 
   async isAccessTokenJtiRevoked(jti: string): Promise<boolean> {
     return this.revokedJtis.has(jti);
+  }
+
+  async listApplicationEvents(
+    userId: string,
+    clientId: string,
+    afterSequence: number | null,
+    limit: number,
+  ): Promise<ApplicationEventPage> {
+    assertApplicationEventPageInput(userId, clientId, afterSequence, limit);
+    const selected = Array.from(this.applicationEvents.values())
+      .filter(
+        (event) =>
+          event.userId === userId &&
+          event.clientId === clientId &&
+          (afterSequence === null || event.sequence > afterSequence),
+      )
+      .sort((left, right) => left.sequence - right.sequence)
+      .slice(0, limit + 1)
+      .map(copyApplicationEvent);
+    return {
+      items: selected.slice(0, limit),
+      hasMore: selected.length > limit,
+    };
   }
 
   private hasAccountCredentialsAndGrants(subject: string): boolean {
