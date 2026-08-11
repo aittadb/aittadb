@@ -16,6 +16,7 @@ import {
 import { SubjectAuthorizationDenied } from "../../src/subject-access";
 import { MemoryAuthStore } from "../../src/store/memory";
 import type {
+  ApplicationEventLimits,
   RefreshTokenRecord,
   StorageListPage,
   StorageListPosition,
@@ -23,6 +24,15 @@ import type {
   UpstreamIdentity,
 } from "../../src/types";
 import { createTestAittaDB, form, MemoryR2Bucket, testEnv } from "../helpers";
+
+const EVENT_LIMITS: ApplicationEventLimits = {
+  globalMaxItems: 100,
+  globalMaxBytes: 1_000_000,
+  userMaxItems: 100,
+  userMaxBytes: 1_000_000,
+  namespaceMaxItems: 100,
+  namespaceMaxBytes: 1_000_000,
+};
 
 const identity: UpstreamIdentity = {
   email: "deletion-gate@example.test",
@@ -411,6 +421,27 @@ test("completed deletion re-registers the same email into one isolated new subje
     "old-file",
   );
   assert.ok(oldFile);
+  const oldEventData = JSON.stringify({ owner: "old" });
+  assert.equal(
+    (
+      await store.appendApplicationEvent(
+        {
+          id: "00000000-0000-4000-8000-000000000001",
+          userId: oldUser.id,
+          clientId: registration.client.id,
+          type: "account.old",
+          dataJson: oldEventData,
+          dataBytes: Buffer.byteLength(oldEventData),
+          idempotencyKeyHash: null,
+          requestHash: "e".repeat(43),
+          createdAt: issuedAt,
+          expiresAt: issuedAt + 10_000,
+        },
+        EVENT_LIMITS,
+      )
+    ).status,
+    "created",
+  );
   await store.revokeAccessTokenJti(
     "old-owned-revocation",
     oldUser.id,
@@ -489,6 +520,12 @@ test("completed deletion re-registers the same email into one isolated new subje
   assert.equal(
     Array.from(store.storageFiles.values()).some(
       (file) => file.userId === oldUser.id,
+    ),
+    false,
+  );
+  assert.equal(
+    Array.from(store.applicationEvents.values()).some(
+      (event) => event.userId === oldUser.id,
     ),
     false,
   );
@@ -613,6 +650,15 @@ test("completed deletion re-registers the same email into one isolated new subje
   assert.equal(
     await store.hasConsent(newSubject, registration.client.id, scope),
     false,
+  );
+  assert.deepEqual(
+    await store.listApplicationEvents(
+      newSubject,
+      registration.client.id,
+      null,
+      100,
+    ),
+    { items: [], hasMore: false },
   );
   const newTokens = await issueTokens({
     config,

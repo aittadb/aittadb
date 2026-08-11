@@ -60,8 +60,9 @@ test("explicit privacy configuration needs no user lookup and renders escaped ac
   assert.match(html, /account-deletion job state/);
   assert.match(html, /eligible signed-in user can start this state/);
   assert.match(html, /short-lived account-bound confirmation checks/);
-  assert.match(html, /no completion-status operation/);
-  assert.match(html, /terminal idempotency tombstone/);
+  assert.match(html, /application events/);
+  assert.match(html, /protected status resource exposes only pending/);
+  assert.match(html, /terminal pseudonymous idempotency tombstone/);
 });
 
 test("privacy policy omits optional controller and contact values that are unset", async () => {

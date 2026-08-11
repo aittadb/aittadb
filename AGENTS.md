@@ -75,7 +75,7 @@ Lead public descriptions with "source-available hosted application backend for t
 - `src/`: deployed domain, protocols, repositories, crypto, config, HTTP, identity, storage, and HTML.
 - `tests/`: unit/integration tests with test-only adapters/fakes.
 
-Update this section in the same task if ownership moves.
+Update this section when ownership moves.
 
 ## Unit Interfaces
 
@@ -89,8 +89,9 @@ Each unit is a reusable vendor-neutral primitive with bounded execution, isolati
 - OIDC owns discovery, JWKS, ID claims, nonce, UserInfo, issuer metadata, and verification.
 - Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own narrow records. Audit actor attribution is a nullable canonical SHA-256 base64url field, never generic JSON.
-- Storage repository owns records and file metadata keyed by local UUID plus OAuth client ID. R2 bytes use generated physical keys.
-- Account deletion follows `docs/account-deletion-jobs.md`. POST requires trusted identity, exact-email lookup, pre-body origin, a 1 KiB bound, CSRF, phrase, and bound encryption; admins and replay fail. GET validates the encrypted handle before D1 and never resolves current identity. Jobs block access and use bounded resumable phases plus R2 fences; finalization removes audit attribution before the user UUID. Expose only coarse status/recovery. Later same-email sign-in creates a new UUID and empty namespace. Old JWTs may verify until `exp` but never authorize AittaDB or identify the replacement.
+- Storage owns UUID/client-keyed records and file metadata; R2 uses generated keys.
+- Events are immutable, quota-bounded principal/client rows; deletion purges only the exact leased human subject in finite batches.
+- Account deletion follows `docs/account-deletion-jobs.md`. POST requires trusted identity, exact-email lookup, origin, a 1 KiB bound, CSRF, phrase, and bound encryption; admins/replay fail. GET authenticates the handle before D1 and never resolves current identity. Jobs gate access and purge credentials, records, events, and files in bounded leased phases. Finalization clears audit attribution and requires no owned rows. Expose only coarse status. Same-email return creates a new UUID/empty namespaces; old JWTs may verify to `exp` but never authorize or identify it.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
 - Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.
@@ -171,7 +172,7 @@ Retain the reviewed `vendor/image-size-compat` override while Vinext's build-onl
 
 ## Database and Migrations
 
-D1 schema must explicitly cover users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs, audit events, admin submissions, rate limits, storage records/files, repair/fence state, and deletion jobs. Rate increments are single-statement atomic. Index expiration, cleanup joins, and pages; select bounded cleanup oldest-first with a `rowid` tie-breaker and retain new empty refresh families through the documented race-prevention grace window.
+D1 schema must explicitly cover users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs, audit and application events, admin submissions, rate limits, storage records/files, repair/fence state, and deletion jobs. Rate increments are single-statement atomic. Index expiration, cleanup joins, and pages; select bounded cleanup oldest-first with a `rowid` tie-breaker and retain new empty refresh families through the documented race-prevention grace window.
 
 Events retain 1-31,536,000 seconds (default 604,800); cleanup deletes at most 500 oldest expired rows and reports only category/count/limit.
 

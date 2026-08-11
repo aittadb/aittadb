@@ -5,6 +5,7 @@ import {
   AccountCredentialPurgeFailure,
   type AccountCredentialPurgeFailurePhase,
 } from "./store/account-credential-purge";
+import { ACCOUNT_EVENT_PURGE_MAX_BATCH } from "./store/account-event-purge";
 import { ACCOUNT_RECORD_PURGE_MAX_BATCH } from "./store/account-record-purge";
 import { STORAGE_FILE_WRITE_FENCE_CLEANUP_BATCH } from "./storage-file-write-fence";
 import type { AuthStore } from "./types";
@@ -26,6 +27,7 @@ export type AccountDeletionCoordinatorFailurePhase =
   | "fences"
   | "credentials"
   | "records"
+  | "events"
   | "files"
   | "finalization";
 export type AccountDeletionCoordinatorFailureObserver = (
@@ -113,6 +115,14 @@ export async function coordinateAccountDeletionBatch(
       ACCOUNT_RECORD_PURGE_MAX_BATCH,
     );
     if (!records.done && !deferredPhase) deferredPhase = "records";
+    phase = "events";
+    const events = await store.purgeAccountEvents(
+      job.subject,
+      job.attempt,
+      clock(),
+      ACCOUNT_EVENT_PURGE_MAX_BATCH,
+    );
+    if (!events.done && !deferredPhase) deferredPhase = "events";
     phase = "files";
     const files = await purgeAccountFilesBatch(
       store,
