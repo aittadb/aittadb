@@ -3,6 +3,7 @@ import { assertAuditEventAttribution } from "../audit";
 import { assertAccountFilePurgeInput } from "../account-file-purge";
 import {
   assertApplicationEvent,
+  assertApplicationEventInput,
   assertApplicationEventLookupInput,
   assertApplicationEventPageInput,
 } from "../application-events";
@@ -47,6 +48,8 @@ import type {
   AccountFilePurgeStageResult,
   AccountRecordPurgeBatch,
   ApplicationEvent,
+  ApplicationEventAppendResult,
+  ApplicationEventInput,
   ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
@@ -82,6 +85,37 @@ ON CONFLICT(email) DO UPDATE SET
   updated_at = excluded.updated_at
 WHERE users.principal_type = 'user'
 RETURNING id, email, display_name, created_at, updated_at`;
+
+const APPEND_APPLICATION_EVENT = `
+INSERT INTO application_events (
+  id, user_id, client_id, event_type, data_json, data_bytes,
+  idempotency_key_hash, request_hash, created_at, expires_at
+)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2)
+  AND EXISTS (
+    SELECT 1 FROM oauth_clients WHERE id = ?3 AND disabled_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM account_deletion_jobs WHERE subject = ?2
+  )
+ON CONFLICT DO NOTHING
+RETURNING *`;
+
+const SELECT_APPLICATION_EVENT_REPLAY = `
+SELECT event.*
+FROM application_events event
+WHERE event.user_id = ?1
+  AND event.client_id = ?2
+  AND event.idempotency_key_hash = ?3
+  AND EXISTS (SELECT 1 FROM users WHERE id = ?1)
+  AND EXISTS (
+    SELECT 1 FROM oauth_clients WHERE id = ?2 AND disabled_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM account_deletion_jobs WHERE subject = ?1
+  )
+LIMIT 1`;
 
 const ACCOUNT_CREDENTIAL_PURGE_DELETIONS = [
   {
@@ -1334,6 +1368,62 @@ export class D1AuthStore implements AuthStore {
     return row ? rowToApplicationEvent(row) : null;
   }
 
+  async appendApplicationEvent(
+    input: ApplicationEventInput,
+  ): Promise<ApplicationEventAppendResult> {
+    assertApplicationEventInput(input);
+    let inserted: Row | null;
+    try {
+      inserted = await this.db
+        .prepare(APPEND_APPLICATION_EVENT)
+        .bind(
+          input.id,
+          input.userId,
+          input.clientId,
+          input.type,
+          input.dataJson,
+          input.dataBytes,
+          input.idempotencyKeyHash,
+          input.requestHash,
+          input.createdAt,
+          input.expiresAt,
+        )
+        .first<Row>();
+    } catch (error) {
+      if (isInactiveApplicationEventInsert(error)) {
+        return { status: "unavailable" };
+      }
+      throw error;
+    }
+    if (inserted) {
+      const event = rowToApplicationEvent(inserted);
+      if (!sameApplicationEventInput(event, input)) {
+        throw new Error("application_event_append_result_invalid");
+      }
+      return { status: "created", event };
+    }
+    if (input.idempotencyKeyHash === null) {
+      return { status: "unavailable" };
+    }
+
+    const existing = await this.db
+      .prepare(SELECT_APPLICATION_EVENT_REPLAY)
+      .bind(input.userId, input.clientId, input.idempotencyKeyHash)
+      .first<Row>();
+    if (!existing) return { status: "unavailable" };
+    const event = rowToApplicationEvent(existing);
+    if (
+      event.userId !== input.userId ||
+      event.clientId !== input.clientId ||
+      event.idempotencyKeyHash !== input.idempotencyKeyHash
+    ) {
+      throw new Error("application_event_append_result_invalid");
+    }
+    return event.requestHash === input.requestHash
+      ? { status: "replayed", event }
+      : { status: "conflict" };
+  }
+
   async listStorageRecords(
     userId: string,
     clientId: string,
@@ -1979,6 +2069,31 @@ function rowToStorageFileOrphanRepair(row: Row): StorageFileOrphanRepair {
 
 function nullableNumber(value: unknown): number | null {
   return typeof value === "number" ? value : null;
+}
+
+function isInactiveApplicationEventInsert(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes("account_deletion_subject_inactive")
+  );
+}
+
+function sameApplicationEventInput(
+  event: ApplicationEvent,
+  input: ApplicationEventInput,
+): boolean {
+  return (
+    event.id === input.id &&
+    event.userId === input.userId &&
+    event.clientId === input.clientId &&
+    event.type === input.type &&
+    event.dataJson === input.dataJson &&
+    event.dataBytes === input.dataBytes &&
+    event.idempotencyKeyHash === input.idempotencyKeyHash &&
+    event.requestHash === input.requestHash &&
+    event.createdAt === input.createdAt &&
+    event.expiresAt === input.expiresAt
+  );
 }
 
 function mutationChanges(result: D1Result): number {
