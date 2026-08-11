@@ -1342,6 +1342,14 @@ async function route(
   }
   if (url.pathname.startsWith("/events/")) {
     if (request.method !== "GET") return methodNotAllowed("GET");
+    const limited = await endpointRateLimit(
+      store,
+      request,
+      config,
+      "events-read",
+      240,
+    );
+    if (limited) return limited;
     return applicationEventItemRoute(
       request,
       url.pathname.slice("/events/".length),

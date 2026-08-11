@@ -59,9 +59,9 @@ Point lookup requires the exact principal, client, and canonical public UUID in 
 
 With `FEATURE_EVENTS_ENABLED=true`, `GET /events/{id}` returns one unexpired event from the authenticated principal and OAuth-client namespace. Bearer requests require a short-lived AittaDB access token with `events.read`, an exact active token audience client, and an active human or service principal. A signed-in request without a bearer token uses the same canonical operation through the reserved current-session client; no internal token is rendered, persisted, or returned.
 
-The identifier must be a canonical lowercase UUIDv4. Malformed, absent, expired, other-user, and other-client identifiers produce the same generic `404` representation. Successful JSON exposes only `id`, `event_type`, the event's JSON object, `created_at`, and `expires_at`; it omits sequence, ownership, request hashes, and idempotency state. HTML renders those same fields accessibly. Both representations link to the future collection URI and advertise no mutation. Exact client-origin CORS, request and rate bounds, `Cache-Control: no-store`, and the outer Events gate apply before repository disclosure.
+The identifier must be a canonical lowercase UUIDv4. Malformed, absent, expired, other-user, and other-client identifiers produce the same generic `404` representation. Successful JSON exposes only `id`, `type`, the event's JSON object, `created_at`, and `expires_at`; it omits sequence, ownership, request hashes, and idempotency state. HTML renders those same fields accessibly. Both representations link to the implemented collection URI and advertise no mutation. Exact client-origin CORS, request and rate bounds, `Cache-Control: no-store`, and the outer Events gate apply before repository disclosure.
 
-The collection link defines the resource relationship but does not make `GET /events`, event publication, deletion, update, or long-poll delivery available in this preview.
+`GET /events` returns bounded deterministic pages and links every returned event to its exact immutable item resource. Event publication, deletion, update, and long-poll delivery remain unavailable in this preview.
 
 ## Internal Idempotent Append
 

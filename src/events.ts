@@ -151,6 +151,7 @@ async function requireApplicationEventRead(
       return oauthError("invalid_token", "Invalid token", 401);
     }
 
+    let userId: string;
     if (client.type === "service") {
       if (
         verified.claims.subject_type !== "service" ||
@@ -159,16 +160,16 @@ async function requireApplicationEventRead(
       ) {
         return oauthError("invalid_token", "Invalid token", 401);
       }
-      return { userId: client.id, client };
+      userId = client.id;
+    } else {
+      if (verified.claims.subject_type !== undefined) {
+        return oauthError("invalid_token", "Invalid token", 401);
+      }
+      const user = await store.getUser(verified.claims.sub);
+      if (!user) return oauthError("invalid_token", "Invalid token", 401);
+      userId = user.id;
     }
-
-    if (verified.claims.subject_type !== undefined) {
-      return oauthError("invalid_token", "Invalid token", 401);
-    }
-    const user = await store.getUser(verified.claims.sub);
-    return user
-      ? { userId: user.id, client }
-      : oauthError("invalid_token", "Invalid token", 401);
+    return { userId, client };
   } catch {
     return oauthError("invalid_token", "Invalid token", 401);
   }

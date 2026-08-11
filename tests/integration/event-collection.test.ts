@@ -39,6 +39,7 @@ interface EventItemDocument {
     created_at: number;
     expires_at: number;
   };
+  links: Array<{ rel: string[]; href: string }>;
 }
 
 interface EventCollectionData {
@@ -91,6 +92,15 @@ test("event collection returns bounded oldest-first pages and exact filtered res
     firstDocument.data.items.map((item) => item.data.id),
     fixture.ownedIds.slice(0, 2),
   );
+  for (const item of firstDocument.data.items) {
+    assert.ok(
+      item.links.some(
+        (candidate) =>
+          candidate.rel.includes("self") &&
+          candidate.href === `${ISSUER}/events/${item.data.id}`,
+      ),
+    );
+  }
   assert.ok(firstDocument.data.resume_cursor.length > 20);
   const firstBody = JSON.stringify(firstDocument);
   for (const forbidden of [
@@ -292,6 +302,10 @@ test("event collection supports the real signed-in HTML and hypermedia session",
   const page = await html.text();
   assert.match(page, /Application events/);
   assert.match(page, /1 top-level field/);
+  assert.match(
+    page,
+    /href="https:\/\/aittadb\.example\.test\/events\/[0-9a-f-]{36}"/,
+  );
   assert.doesNotMatch(page, /html-private-payload/);
   assert.doesNotMatch(page, /access_token|authorization: bearer/i);
 

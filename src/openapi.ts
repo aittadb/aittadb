@@ -2136,7 +2136,6 @@ export const openApiSpec = {
                 type: "boolean",
                 default: false,
                 description:
-                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, and implemented Events operations such as bounded collection reads may be advertised.",
                   "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, while implemented bounded collection and exact item reads may be advertised.",
               },
             },
@@ -2146,7 +2145,7 @@ export const openApiSpec = {
           plannedCapabilities: {
             type: "array",
             description:
-              "Planned capabilities, including unfinished Events publication, collection traversal, and long-polling delivery.",
+              "Planned capabilities, including unfinished Events publication and long-polling delivery.",
             items: { type: "string" },
           },
         },

@@ -216,7 +216,7 @@ export async function eventCollectionEndpoint(
   const response = acceptsHtml(request)
     ? html(
         applicationEventCollectionPage({
-          items: events.items.map(eventPageItem),
+          items: events.items.map((event) => eventPageItem(event, config)),
           pageSize: page.pageSize,
           maxPageSize: config.eventMaxPageSize,
           typeFilter: page.typeFilter,
@@ -355,6 +355,9 @@ function eventItem(
     id: event.id,
     data: eventData(event),
     links: [
+      link("self", `${config.issuerUrl}/events/${event.id}`, {
+        type: HYPERMEDIA_MEDIA_TYPE,
+      }),
       link("collection", `${config.issuerUrl}/events`, {
         type: HYPERMEDIA_MEDIA_TYPE,
       }),
@@ -373,10 +376,14 @@ function eventData(event: ApplicationEvent): EventItemData {
   };
 }
 
-function eventPageItem(event: ApplicationEvent): ApplicationEventPageItem {
+function eventPageItem(
+  event: ApplicationEvent,
+  config: AppConfig,
+): ApplicationEventPageItem {
   const data = eventData(event);
   return {
     id: data.id,
+    href: `${config.issuerUrl}/events/${data.id}`,
     type: data.type,
     data: data.data,
     createdAt: data.created_at,

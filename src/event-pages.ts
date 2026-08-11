@@ -3,6 +3,7 @@ import type { ApplicationEventData } from "./events";
 
 export interface ApplicationEventPageItem {
   id: string;
+  href: string;
   type: string;
   data: Record<string, unknown>;
   createdAt: number;
@@ -24,7 +25,7 @@ export function applicationEventCollectionPage(
   const rows = page.items
     .map(
       (event) =>
-        `<tr><td><code>${escapeHtml(event.id)}</code></td><td><code>${escapeHtml(event.type)}</code></td><td>${escapeHtml(dataSummary(event.data))}</td><td>${timeElement(event.createdAt)}</td><td>${timeElement(event.expiresAt)}</td></tr>`,
+        `<tr><td><a href="${escapeHtml(event.href)}"><code>${escapeHtml(event.id)}</code></a></td><td><code>${escapeHtml(event.type)}</code></td><td>${escapeHtml(dataSummary(event.data))}</td><td>${timeElement(event.createdAt)}</td><td>${timeElement(event.expiresAt)}</td></tr>`,
     )
     .join("");
   const state =
