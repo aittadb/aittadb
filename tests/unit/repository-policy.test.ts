@@ -4,6 +4,10 @@ import test from "node:test";
 
 const AGENTS_PATH = new URL("../../AGENTS.md", import.meta.url);
 const APP_PAGE_PATH = new URL("../../app/page.tsx", import.meta.url);
+const ARCHITECTURE_PATH = new URL(
+  "../../docs/architecture.md",
+  import.meta.url,
+);
 const BACKLOG_PATH = new URL("../../BACKLOG.md", import.meta.url);
 const CHANGELOG_PATH = new URL("../../CHANGELOG.md", import.meta.url);
 const DEPLOYMENT_PATH = new URL("../../docs/deployment.md", import.meta.url);
@@ -263,6 +267,36 @@ test("public copy distinguishes licensing from the current Sites dependency", as
     /Immutable typed event publication, bounded collection\/item reads, and cursor-based long polling behind a default-off feature flag/,
   );
   assert.match(readme, /feature-gated Events primitives above are implemented/);
+});
+
+test("Events documentation describes implemented publication and long polling", async () => {
+  const [architecture, styleGuide] = await Promise.all([
+    readFile(ARCHITECTURE_PATH, "utf8"),
+    readFile(STYLE_GUIDE_PATH, "utf8"),
+  ]);
+
+  assert.match(
+    architecture,
+    /feature-gated immutable publication, bounded collection\/item reads, and bounded cursor-based long polling/,
+  );
+  assert.match(
+    styleGuide,
+    /default-off immutable event publication, bounded collection\/item reads, and bounded long polling/,
+  );
+  assert.doesNotMatch(
+    architecture,
+    /publication and bounded waiting remain unavailable/i,
+  );
+  assert.doesNotMatch(styleGuide, /long-poll delivery remains planned/i);
+  assert.doesNotMatch(styleGuide, /planned long-poll delivery/i);
+  assert.match(
+    architecture,
+    /Event update, deletion, fan-out, and background\/unbounded delivery remain unavailable/,
+  );
+  assert.match(
+    styleGuide,
+    /Event update, deletion, fan-out, and unbounded\/background delivery are not implemented/,
+  );
 });
 
 test("ROADMAP.md is one stable flat list of unchecked future items", async () => {

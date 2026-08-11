@@ -19,9 +19,9 @@ The public service home is an operation map, not a simulated demo. Its links mus
 
 ## Terminology
 
-Lead with **hosted application backend for third-party apps**. Follow with the concrete capabilities available now: ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, file storage, and default-off immutable event publication and reads. Long-poll delivery remains planned. Do not lead with OAuth/OIDC terminology or describe AittaDB as only an authentication broker.
+Lead with **hosted application backend for third-party apps**. Follow with the concrete capabilities available now: ChatGPT sign-in inside ChatGPT Sites, AittaDB-issued sessions, isolated JSON records, file storage, and default-off immutable event publication, bounded collection/item reads, and bounded long polling. Event update, deletion, fan-out, and unbounded/background delivery are not implemented. Do not lead with OAuth/OIDC terminology or describe AittaDB as only an authentication broker.
 
-Use **Identity / Data / Files / Events** as the compact product-capability label. In prose, distinguish the implemented default-off Events operations from planned long-poll delivery.
+Use **Identity / Data / Files / Events** as the compact product-capability label. In prose, distinguish the implemented default-off Events operations from future update, deletion, fan-out, or broader delivery capabilities.
 
 Describe AittaDB positively as a source-available project deployed on OpenAI-hosted ChatGPT Sites. Keep hero summaries short and capability-focused; do not repeat detailed licensing, platform, or credential-boundary prose beneath the title and again in a nearby notice. State the essential trust boundary once and link to the complete licensing/platform explanation. The detailed documentation must explain that the current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets; current public releases use FSL-1.1-MIT and convert to MIT after two years; and an MIT license for immediate use is also available commercially. Do not call the current public FSL release open source or imply technical independence from the platform.
 
