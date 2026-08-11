@@ -32,7 +32,26 @@ curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
   --data-urlencode 'scope=events.publish events.read'
 ```
 
-`events.read` authorizes bounded immutable collection and item reads. `events.publish` and `events.subscribe` remain reserved until their publication and bounded-delivery operations are released. If Events is disabled, registration and every grant path reject its scopes and both read routes fail closed; existing storage and OIDC scopes are unchanged.
+`events.publish` authorizes immutable append, while `events.read` authorizes bounded collection and item reads. `events.subscribe` remains reserved until bounded delivery is released. If Events is disabled, registration and every grant path reject its scopes and the entire route family fails closed; existing storage and OIDC scopes are unchanged.
+
+## Event Publication
+
+Register or use a client allowed to request `events.publish`, obtain its AittaDB access token, and append one immutable event:
+
+```sh
+curl -i --request POST "$ISSUER_URL/events" \
+  --header "Authorization: Bearer $ACCESS_TOKEN" \
+  --header 'Accept: application/vnd.aittadb+json; version=0.1' \
+  --header 'Content-Type: application/json' \
+  --header 'Idempotency-Key: example-order-ready-42' \
+  --data '{"type":"orders.ready","data":{"order_id":"example-42","ready":true}}'
+```
+
+The first accepted append returns `201 Created`, an absolute event `Location`, and only the public UUID, type, data, creation time, and expiry. Repeating the exact type and data with the same key returns the original event with `200 OK` and `Idempotency-Replayed: true`; changing the content returns `409 idempotency_conflict`. The key is scoped to the verified subject/client namespace and only its hash is durable. Omit it when independent duplicate-looking events are intentional.
+
+For a human check, sign in and open `/events`. The HTML collection includes a publication form backed by the same canonical append logic. It uses same-origin and CSRF protection and never displays or stores the short-lived internal AittaDB token. The operation accepts only a 1-128 character event type and a JSON object no larger than 64 KiB; clients must treat `413`, `429`, and `507` as bounded admission failures. Publication triggers no callback or fan-out.
+
+## Event Reads
 
 Read the first page and then follow the returned semantic `next` or `resume` link rather than constructing a cursor:
 
@@ -54,7 +73,7 @@ curl -s "$ISSUER_URL/events/$EVENT_ID" \
 
 The response contains only the immutable public event fields plus self and collection links. A ChatGPT-signed-in user can open the same URL with `Accept: text/html`; AittaDB invokes the canonical read through its reserved current-session namespace without exposing the internal token. `events.subscribe` is reserved for bounded delivery and will also require `events.read` at the operation boundary.
 
-The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; bounded collection and item reads are available only when enabled, while event publication and long polling remain planned.
+The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; publication and bounded collection/item reads are available only when Events is enabled, while long polling remains planned.
 
 ## Hypermedia Traversal
 

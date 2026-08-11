@@ -6,7 +6,7 @@
 
 **A source-available application backend that developers can deploy entirely on OpenAI-hosted ChatGPT Sites.**
 
-AittaDB currently provides identity, authentication, persistent JSON data, object storage, and feature-gated immutable event reads through a self-contained ChatGPT Sites deployment. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Developers can deploy their own separate AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure.
+AittaDB currently provides identity, authentication, persistent JSON data, object storage, and feature-gated immutable event publication and reads through a self-contained ChatGPT Sites deployment. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Developers can deploy their own separate AittaDB instance and use it as a shared backend for third-party applications, services, and agents without maintaining separate application servers, database servers, object-storage services, or authentication infrastructure.
 
 > **Experimental:** AittaDB is under active development. Its interfaces and operational requirements may change before a stable release.
 
@@ -58,18 +58,18 @@ AittaDB separately enforces finite application-level ceilings for the deployment
 - OAuth 2.0 and OpenID Connect sessions for third-party applications.
 - Persistent structured application data.
 - Object and file storage.
+- Immutable typed event publication and bounded collection/item reads behind a default-off feature flag.
 - HTTP APIs for applications, services, and AI agents.
-- Feature-gated bounded collection and item reads of persistent immutable application events; publication and long-polling delivery remain planned.
 
 The goal is to let developers build persistent, authenticated applications without first deploying and maintaining a conventional backend stack.
 
-The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, files, and feature-gated event collection/item reads are implemented; event publication and long polling remain planned. [PLAN.md](PLAN.md) contains accepted unfinished work, while completed task history moves to [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
+The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, files, and feature-gated immutable event publication and collection/item reads are implemented; long-polling delivery remains planned. [PLAN.md](PLAN.md) contains accepted unfinished work, while completed task history moves to [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
 
 ## Why AittaDB?
 
 In Finnish, an _aitta_ is a traditional detached storehouse on a farmstead. It was built to keep grain, food, tools, and other valuable supplies safe and available.
 
-AittaDB follows the same idea for software: a dependable place for an application's identity, data, files, and immutable event stream.
+AittaDB follows the same idea for software: a dependable place for an application's identity, data, files, and events.
 
 ## MVP Capabilities
 
@@ -81,7 +81,7 @@ AittaDB follows the same idea for software: a dependable place for an applicatio
 - Opaque hashed refresh tokens with rotation and reuse detection.
 - D1-backed durable state with checked-in migrations.
 - Per-user, per-client application storage: JSON records in D1 and file bytes in R2.
-- Feature-gated bounded immutable event collection reads with exact type filtering and opaque resume cursors.
+- Feature-gated immutable event publication and bounded reads in D1 with hash-only idempotency, exact type filtering, opaque cursors, finite quotas, retention, and rate controls.
 - Finite storage ceilings, bounded cursor pagination, atomic rate counters, and a deployment storage-write kill switch.
 - ChatGPT-sign-in-protected browser operations for current-session UserInfo, personal record/file storage, device approval, consent, and client administration.
 - Administrator access limited to signed-in local UUID subjects configured in `ADMIN_SUBJECTS`.
@@ -106,13 +106,16 @@ npm run validate
 - `JWT_PRIVATE_JWK`: ES256 P-256 private JWK JSON.
 - `ADMIN_SUBJECTS`: comma-separated canonical local UUIDv4 subjects for administrators. Sign in at `/session`, read the deployment-local AittaDB subject, and add it through Sites configuration. Only a current trusted Sites session mapped to an entry can use administration. An empty list disables administration, and UUID allowlisting does not eliminate upstream email-reassignment risk.
 - `PRIVACY_CONTROLLER_*` / `PRIVACY_CONTACT_*`: optional public operator and contact details for `/privacy`. Explicit values take precedence; missing required details fall back to only the stored email and optional display name of the first resolvable `ADMIN_SUBJECTS` user. No UUID, allowlist, or private configuration is published. A generic `503` is returned when neither source resolves a usable controller and contact.
-- `FEATURE_RECORDS_ENABLED`, `FEATURE_FILES_ENABLED`, `FEATURE_STATISTICS_ENABLED`, and `FEATURE_OAUTH_APPS_ENABLED`: strict per-feature booleans. Records, Files, and Statistics default on; downstream OAuth Apps default off. The effective state is visible in service HTML and versioned hypermedia without exposing raw configuration. Setting `FEATURE_RECORDS_ENABLED=false` removes Records controls and rejects `/storage/records` before repository work. Setting `FEATURE_FILES_ENABLED=false` likewise removes Files controls and rejects every `/storage/files` operation before D1 metadata, R2, rate-limit, body-parsing, or cleanup work. When Statistics is off, the root omits its control and `GET /statistics` fails before querying D1. When OAuth Apps is off, client administration, Authorization Code and Device Grant initiation, their browser continuations, token exchange, revocation, introspection, and UserInfo are hidden or rejected before body, identity, client, credential, bearer, or repository work. Discovery retains only the issuer, JWKS URI, and ES256 verification algorithm; the public JWKS remains available so AittaDB's private session JWTs can still be verified. The reserved signed-in-session client remains available for enabled storage. Other enabled feature families remain available.
+- `FEATURE_RECORDS_ENABLED`, `FEATURE_FILES_ENABLED`, `FEATURE_STATISTICS_ENABLED`, `FEATURE_OAUTH_APPS_ENABLED`, and `FEATURE_EVENTS_ENABLED`: strict per-feature booleans. Records, Files, and Statistics default on; downstream OAuth Apps and Events default off. The effective state is visible in service HTML and versioned hypermedia without exposing raw configuration. Setting `FEATURE_RECORDS_ENABLED=false` removes Records controls and rejects `/storage/records` before repository work. Setting `FEATURE_FILES_ENABLED=false` likewise removes Files controls and rejects every `/storage/files` operation before D1 metadata, R2, rate-limit, body-parsing, or cleanup work. When Statistics is off, the root omits its control and `GET /statistics` fails before querying D1. When OAuth Apps is off, client administration, Authorization Code and Device Grant initiation, their browser continuations, token exchange, revocation, introspection, and UserInfo are hidden or rejected before body, identity, client, credential, bearer, or repository work. When Events is off, its scopes and `/events` family fail before origin, body, authentication, rate, or event repository work; when enabled, immutable publication is available while reads and long polling remain pending. Discovery retains only the issuer, JWKS URI, and ES256 verification algorithm when OAuth Apps is off; the public JWKS remains available so AittaDB's private session JWTs can still be verified. The reserved signed-in-session client remains available for enabled storage and Events operations. Other enabled feature families remain available.
 - `STORAGE_WRITES_ENABLED`: deployment storage-write kill switch; disabling it leaves authorized reads and deletes available.
 - `STORAGE_GLOBAL_MAX_ITEMS` / `STORAGE_GLOBAL_MAX_BYTES`: combined record-and-file ceiling for the deployment; defaults to 10,000 items and 1 GiB.
 - `STORAGE_USER_MAX_ITEMS` / `STORAGE_USER_MAX_BYTES`: combined ceiling across one local user's client namespaces; defaults to 1,000 items and 100 MiB.
 - `STORAGE_NAMESPACE_MAX_ITEMS` / `STORAGE_NAMESPACE_MAX_BYTES`: combined ceiling for one local user and OAuth client; defaults to 500 items and 50 MiB.
 - `STORAGE_DEFAULT_PAGE_SIZE` / `STORAGE_MAX_PAGE_SIZE`: collection-page bounds; defaults to 50 and 100.
 - `STORAGE_READ_RATE_LIMIT` / `STORAGE_WRITE_RATE_LIMIT`: per-user/client storage limits per minute; defaults to 120 and 30.
+- `EVENTS_GLOBAL_MAX_*`, `EVENTS_USER_MAX_*`, and `EVENTS_NAMESPACE_MAX_*`: independent finite event item and exact payload-byte ceilings; defaults are documented in [the deployment guide](docs/deployment.md).
+- `EVENTS_PUBLISH_RATE_LIMIT`: per-principal/client publication attempts per minute; defaults to 30 in addition to fixed IP/global entry limits.
+- `EVENT_RETENTION_SECONDS`: server-derived lifetime for new immutable events, from 1 second through one year; defaults to seven days.
 - D1 binding named `DB`.
 - R2 binding named `BUCKET` for `/storage/files/*`.
 
@@ -132,6 +135,8 @@ npm run validate
 - `POST /oauth/revoke`
 - `POST /oauth/introspect`
 - `GET /userinfo`
+- `GET /events` (signed-in publication form or hypermedia action)
+- `POST /events`
 - `GET /storage/records`
 - `PUT /storage/records/{key}`
 - `GET /storage/records/{key}`
@@ -152,7 +157,7 @@ At `/admin/clients`, an allowlisted signed-in administrator receives the same cr
 
 ### Server-to-server access
 
-Register a `service` client with one or more of `storage.read`, `storage.write`, and `storage.delete`, then save its one-time-displayed secret in the calling service's server-side secret configuration. The service can repeatedly authenticate at `POST /oauth/token` with `grant_type=client_credentials` to obtain normal 10-minute AittaDB access tokens. Each token uses the service client's UUID as a non-user subject and audience, reaches only that client's stable isolated storage namespace, and contains no email or display name. This grant never returns an ID token or refresh token and cannot use interactive authorization flows or browser CORS. See the [curl example](docs/examples.md#service-client-credentials).
+Register a `service` client with the minimum enabled storage or Events scopes it needs, then save its one-time-displayed secret in the calling service's server-side secret configuration. The service can repeatedly authenticate at `POST /oauth/token` with `grant_type=client_credentials` to obtain normal 10-minute AittaDB access tokens. Each token uses the service client's UUID as a non-user subject and audience, reaches only that client's stable isolated namespace, and contains no email or display name. This grant never returns an ID token or refresh token and cannot use interactive authorization flows or browser CORS. See the [service credential](docs/examples.md#service-client-credentials) and [event publication](docs/examples.md#event-publication) examples.
 
 `/docs` is a self-hosted Swagger UI backed directly by the canonical `/openapi.json`. Its assets are pinned and served from AittaDB without a CDN. "Try it out" sends requests to the origin serving the viewer, so a custom-domain deployment does not accidentally call a legacy hostname embedded in an older specification. When OAuth Apps are enabled, browser forms are also available directly on the authorization, device authorization, token, revocation, introspection, and UserInfo routes; state-changing browser submissions are same-origin and CSRF protected, and credential values are never placed in URLs.
 

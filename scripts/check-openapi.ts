@@ -60,7 +60,10 @@ const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/oauth/revoke", "get", "200", HYPERMEDIA_HTML),
   response("/oauth/introspect", "get", "200", HYPERMEDIA_HTML),
   response("/userinfo", "get", "200", HYPERMEDIA_HTML),
+  response("/events", "get", "200", HYPERMEDIA_HTML),
   response("/events/{id}", "get", "200", HYPERMEDIA_HTML),
+  response("/events", "post", "200", HYPERMEDIA_HTML),
+  response("/events", "post", "201", HYPERMEDIA_HTML),
   response("/storage/records", "get", "200", HYPERMEDIA_HTML),
   response("/storage/records", "post", "200", HYPERMEDIA_HTML),
   response("/storage/records/{key}", "get", "200", HYPERMEDIA_HTML),
@@ -110,6 +113,7 @@ const REQUEST_REQUIREMENTS: readonly RequestRequirement[] = [
   request("/oauth/revoke", "post", [FORM_MEDIA]),
   request("/oauth/introspect", "post", [FORM_MEDIA]),
   request("/userinfo", "post", [FORM_MEDIA]),
+  request("/events", "post", [JSON_MEDIA, FORM_MEDIA]),
   request("/storage/records", "post", [FORM_MEDIA]),
   request("/storage/records/{key}", "post", [FORM_MEDIA]),
   request("/storage/files", "post", [BINARY_MEDIA, MULTIPART_MEDIA]),
@@ -155,6 +159,13 @@ export function extractImplementedOperations(
     )
   ) {
     addOperation(operations, { path: "/events/{id}", method: "get" });
+  }
+  if (
+    /url\.pathname\s*===\s*["']\/events["'][\s\S]{0,120}request\.method\s*===\s*["']GET["']/.test(
+      handlerSource,
+    )
+  ) {
+    addOperation(operations, { path: "/events", method: "get" });
   }
   return [...operations.values()].sort(compareOperations);
 }

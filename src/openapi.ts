@@ -199,7 +199,19 @@ const filesUnavailableResponse = {
 
 const eventsUnavailableResponse = {
   description:
-    "Events is disabled by deployment configuration or D1 is unavailable. A disabled request is rejected at the outer route boundary before CORS client lookup, bearer or Sites identity processing, rate limiting, cursor opening, repository access, or cleanup scheduling.",
+    "Events is disabled by deployment configuration or D1 is unavailable. A disabled request is rejected at the outer route boundary before origin/CORS handling, body reading, bearer or Sites identity processing, rate limiting, cursor opening, repository access, event persistence, or cleanup scheduling.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
+const eventPublicationTooLargeResponse = {
+  description:
+    "The JSON or URL-encoded publication wrapper exceeds its finite media-type-specific limit, or the decoded event data object exceeds 64 KiB when serialized as UTF-8 JSON. Declared and streamed wrapper overflow is rejected before CORS client lookup, rate limiting, authentication, or event persistence.",
+  content: hypermediaContent("#/components/schemas/HypermediaError"),
+} as const;
+
+const eventQuotaExceededResponse = {
+  description:
+    "The atomic append would exceed a finite deployment-wide, local-user, or user-and-client event item or payload-byte ceiling. No event is created; an exact idempotent replay remains readable from the existing row and consumes no additional quota.",
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
@@ -296,7 +308,7 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1, files in R2, and feature-gated immutable event collection and item reads. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Event publication and bounded long-polling delivery remain planned. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
+      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1, files in R2, and feature-gated immutable event publication plus bounded collection and item reads. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Bounded long-polling event delivery remains planned. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
   },
   "x-aittadb-oauth-scopes": oauthScopeMetadata,
   paths: {
@@ -952,6 +964,7 @@ export const openApiSpec = {
           eventCursorParameter,
           eventTypeParameter,
         ],
+        "x-aittadb-sites-session-supported": true,
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -984,6 +997,112 @@ export const openApiSpec = {
           "406": notAcceptableResponse,
           "429": rateLimitedResponse(true),
           "503": eventsUnavailableResponse,
+        },
+      },
+      post: {
+        summary: "Publish one immutable application event",
+        description: `When FEATURE_EVENTS_ENABLED is true, the canonical JSON operation requires an AittaDB access token with events.publish. A same-origin URL-encoded browser form instead uses the current trusted ChatGPT Sites session plus the host-only CSRF cookie; its internal short-lived token is never returned. The server derives the local subject and client namespace only from the verified token, generates a random UUID and bounded expiry, and atomically admits one D1 row under finite deployment/user/namespace item and payload-byte ceilings. It performs no fan-out or participant callback. An optional 1-200 visible-ASCII Idempotency-Key is hashed at rest; exact type/data replay returns the existing event and Location without another row, while different content under that key returns 409. Event identifiers, payloads, keys, credentials, subjects, client identifiers, and deployment secrets are never logged. ${tokenBoundCorsDescription}`,
+        security: [{ bearer: [] }],
+        "x-aittadb-sites-session-alternative": true,
+        parameters: [
+          {
+            name: "Idempotency-Key",
+            in: "header",
+            required: false,
+            schema: {
+              type: "string",
+              minLength: 1,
+              maxLength: 200,
+              pattern: "^[\\x21-\\x7E]+$",
+            },
+            description:
+              "Optional retry key for the JSON bearer representation. The equivalent protected HTML field is idempotency_key.",
+          },
+        ],
+        requestBody: {
+          description: `${browserMutationOriginDescription} The JSON wrapper is bounded to 66,560 bytes; the URL-encoded wrapper is bounded to 200,704 bytes so percent-encoding does not reduce the shared 64 KiB decoded event-data ceiling.`,
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/EventPublicationInput",
+              },
+              example: {
+                type: "orders.ready",
+                data: { order_id: "example-42", ready: true },
+              },
+            },
+            "application/x-www-form-urlencoded": {
+              schema: {
+                $ref: "#/components/schemas/EventPublicationFormInput",
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "A new immutable event was appended",
+            headers: {
+              Location: {
+                description: "Canonical absolute event item URL.",
+                schema: { type: "string", format: "uri" },
+              },
+            },
+            content: hypermediaContent(
+              "#/components/schemas/ApplicationEventDocument",
+            ),
+          },
+          "200": {
+            description:
+              "An exact idempotent replay returned the original event without another write",
+            headers: {
+              Location: {
+                description: "The original canonical event item URL.",
+                schema: { type: "string", format: "uri" },
+              },
+              "Idempotency-Replayed": {
+                description: "Always true for this replay response.",
+                schema: { type: "string", const: "true" },
+              },
+            },
+            content: hypermediaContent(
+              "#/components/schemas/ApplicationEventDocument",
+            ),
+          },
+          "302": {
+            description:
+              "Continue to the Sites-owned ChatGPT sign-in route for an anonymous browser form",
+          },
+          "400": {
+            description:
+              "Malformed JSON/form input, unsupported fields, invalid event type/data, or invalid idempotency key",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description:
+              "Missing, invalid, revoked, wrong-purpose, inactive-subject, or disabled-client credential",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description:
+              "Missing events.publish scope, invalid browser origin, disallowed bearer origin, or failed CSRF validation",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "409": {
+            description:
+              "The Idempotency-Key already identifies different event content in this exact subject/client namespace",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "413": eventPublicationTooLargeResponse,
+          "415": {
+            description:
+              "The request is neither canonical JSON nor the current-session URL-encoded form",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "429": rateLimitedResponse(true),
+          "503": eventsUnavailableResponse,
+          "507": eventQuotaExceededResponse,
+          "406": notAcceptableResponse,
         },
       },
     },
@@ -2136,7 +2255,7 @@ export const openApiSpec = {
                 type: "boolean",
                 default: false,
                 description:
-                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, while implemented bounded collection and exact item reads may be advertised.",
+                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, while runtime discovery advertises immutable publication and bounded collection/item reads.",
               },
             },
             additionalProperties: false,
@@ -2145,7 +2264,7 @@ export const openApiSpec = {
           plannedCapabilities: {
             type: "array",
             description:
-              "Planned capabilities, including unfinished Events publication and long-polling delivery.",
+              "Planned capabilities that are not available in the current build, including bounded long-polling event delivery.",
             items: { type: "string" },
           },
         },
@@ -2533,6 +2652,75 @@ export const openApiSpec = {
                   title: { type: "string" },
                   protocol_response: { type: "string" },
                 },
+              },
+            },
+          },
+        ],
+      },
+      EventPublicationInput: {
+        type: "object",
+        required: ["type", "data"],
+        properties: {
+          type: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            description: "Vendor-neutral application event type.",
+          },
+          data: {
+            type: "object",
+            description:
+              "Application-defined JSON object whose UTF-8 JSON serialization is at most 64 KiB.",
+            additionalProperties: true,
+          },
+        },
+        additionalProperties: false,
+      },
+      EventPublicationFormInput: {
+        type: "object",
+        required: ["csrf_token", "type", "data"],
+        properties: {
+          csrf_token: {
+            type: "string",
+            pattern: "^[A-Za-z0-9_-]{32}$",
+            description:
+              "Must exactly match the protected host-only CSRF cookie.",
+          },
+          type: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          },
+          data: {
+            type: "string",
+            description:
+              "A JSON object serialized into the form field; decoded event data has the same 64 KiB UTF-8 ceiling as bearer JSON.",
+          },
+          idempotency_key: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            pattern: "^[\\x21-\\x7E]+$",
+          },
+        },
+        additionalProperties: false,
+      },
+      EventPublicationResourceDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "event-publication" },
+              data: {
+                type: "object",
+                required: ["publication_available"],
+                properties: {
+                  publication_available: { type: "boolean", const: true },
+                },
+                additionalProperties: false,
               },
             },
           },

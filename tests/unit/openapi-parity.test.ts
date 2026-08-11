@@ -24,6 +24,8 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
     "GET /statistics",
     "GET /account/deletion",
     "POST /account/deletion",
+    "GET /events",
+    "POST /events",
     "POST /storage/files",
     "POST /device/decision",
     "POST /consent",
@@ -45,6 +47,72 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
   ]) {
     assert.ok(operations.has(operation), `missing ${operation}`);
   }
+});
+
+test("OpenAPI documents the bounded isolated event publication contract", () => {
+  const get = openApiOperation("/events", "get");
+  assert.equal(get["x-aittadb-sites-session-supported"], true);
+  assert.match(String(get.description), /events\.read/);
+  assert.match(String(get.description), /never returned/);
+
+  const post = openApiOperation("/events", "post");
+  const description = String(post.description);
+  for (const pattern of [
+    /events\.publish/,
+    /subject and client namespace only from the verified token/,
+    /atomically admits/,
+    /no fan-out/,
+    /hashed at rest/,
+    /Origin must exactly match/,
+  ]) {
+    assert.match(description, pattern);
+  }
+  assert.equal(post["x-aittadb-sites-session-alternative"], true);
+
+  const requestBody = asObject(post.requestBody, "event request body");
+  const content = asObject(requestBody.content, "event request content");
+  assert.ok("application/json" in content);
+  assert.ok("application/x-www-form-urlencoded" in content);
+  assert.deepEqual(openApiSchema("EventPublicationInput").required, [
+    "type",
+    "data",
+  ]);
+  assert.deepEqual(openApiSchema("ApplicationEventData").required, [
+    "id",
+    "type",
+    "data",
+    "created_at",
+    "expires_at",
+  ]);
+  assert.doesNotMatch(
+    JSON.stringify(openApiSchema("ApplicationEventData")),
+    /client_id|user_id|sequence|request_hash|idempotency_key_hash/,
+  );
+
+  const responses = operationResponses("/events", "post");
+  for (const status of [
+    "200",
+    "201",
+    "400",
+    "401",
+    "403",
+    "409",
+    "413",
+    "415",
+    "429",
+    "503",
+    "507",
+  ]) {
+    assert.ok(status in responses, `POST /events must document ${status}`);
+  }
+  assert.match(
+    String(asObject(responses["409"], "event conflict").description),
+    /different event content/,
+  );
+  assert.match(
+    String(asObject(responses["507"], "event quota").description),
+    /atomic append/,
+  );
 });
 
 test("OpenAPI and discovery document the bounded service-client grant", () => {
@@ -422,7 +490,7 @@ test("OpenAPI distinguishes licensing posture from the current Sites dependency"
   assert.equal(
     Object.hasOwn(openApiSpec.paths, "/events"),
     true,
-    "feature metadata must document the implemented gated Events collection",
+    "feature metadata must document the implemented gated Events collection and publication route",
   );
   assert.equal(Object.hasOwn(openApiSpec.paths, "/events/{id}"), true);
   assert.match(String(hostingPlatform.description), /depends on this platform/);

@@ -16,6 +16,10 @@ const UUID_V4 =
 const SHA256_BASE64URL = /^[A-Za-z0-9_-]{43}$/;
 const EVENT_TYPE = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$/;
 
+export function isValidApplicationEventType(value: string): boolean {
+  return EVENT_TYPE.test(value);
+}
+
 export function assertApplicationEventInput(
   input: ApplicationEventInput,
 ): void {
@@ -24,7 +28,7 @@ export function assertApplicationEventInput(
   }
   assertNamespacePart(input.userId, "principal");
   assertNamespacePart(input.clientId, "client");
-  if (!EVENT_TYPE.test(input.type)) {
+  if (!isValidApplicationEventType(input.type)) {
     throw new RangeError("application_event_type_invalid");
   }
   const dataBytes = new TextEncoder().encode(input.dataJson).byteLength;
