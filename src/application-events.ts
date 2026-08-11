@@ -65,6 +65,17 @@ export function assertApplicationEventNamespace(
   assertNamespacePart(clientId, "client");
 }
 
+export function assertApplicationEventLookupInput(
+  userId: string,
+  clientId: string,
+  id: string,
+): void {
+  assertApplicationEventNamespace(userId, clientId);
+  if (!UUID_V4.test(id)) {
+    throw new RangeError("application_event_id_invalid");
+  }
+}
+
 export function assertApplicationEventPageInput(
   userId: string,
   clientId: string,

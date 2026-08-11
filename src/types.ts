@@ -307,6 +307,14 @@ export interface ApplicationEventPageRepository {
   ): Promise<ApplicationEventPage>;
 }
 
+export interface ApplicationEventLookupRepository {
+  getApplicationEvent(
+    userId: string,
+    clientId: string,
+    id: string,
+  ): Promise<ApplicationEvent | null>;
+}
+
 export interface AccountFilePurgeStageResult {
   selected: number;
   staged: number;
@@ -377,7 +385,8 @@ export interface AuthStore
     AccountCredentialPurgeRepository,
     AccountRecordPurgeRepository,
     AccountDeletionFinalizationRepository,
-    ApplicationEventPageRepository {
+    ApplicationEventPageRepository,
+    ApplicationEventLookupRepository {
   cleanup(now: number): Promise<CleanupReport>;
   rateLimit(
     key: string,

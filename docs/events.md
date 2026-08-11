@@ -30,3 +30,7 @@ Malformed values fail before persistence. D1 constraints repeat the security-rel
 The internal page repository reads one exact principal/client namespace in increasing sequence order. Callers may start at the beginning or continue strictly after one validated sequence. Each call accepts a finite limit no larger than 100, asks D1 for only `limit + 1` rows, returns no more than the requested limit, and reports only whether another page exists. Empty namespaces return an empty final page.
 
 Repository consumers must not serialize the internal sequence. The public Events collection will translate it into a namespace-bound encrypted cursor in a separate primitive. Malformed page positions and limits fail before D1, and a repository row that violates the durable contract fails closed instead of being partially returned.
+
+## Internal Point Lookup
+
+Point lookup requires the exact principal, client, and canonical public UUID in one prepared query. A matching row is returned as a validated defensive value. An absent UUID and an event owned by another principal or client all return the same `null` result, so the repository does not reveal whether another namespace contains that identifier. Malformed namespace values or identifiers fail before D1 access, and malformed persisted rows fail closed.
