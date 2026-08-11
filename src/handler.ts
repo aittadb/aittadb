@@ -161,8 +161,13 @@ import {
   pollDeviceToken,
   rotateRefreshToken,
   validateClientRegistrationInput,
+  validateScopes,
   verifyAccessToken,
 } from "./oauth";
+import {
+  availableOAuthScopes,
+  availableServiceClientScopes,
+} from "./oauth-scopes";
 import {
   isSubjectAuthorizationDenied,
   requireActiveSubject,
@@ -768,6 +773,7 @@ async function route(
   ) {
     const configuration = oidcConfiguration(config.issuerUrl, {
       oauthAppsEnabled: config.features.oauthApps,
+      eventsEnabled: config.features.events,
     });
     return prefersRawJson(request, url)
       ? json(configuration)
@@ -2406,13 +2412,20 @@ async function deviceEntryPost(
   );
   if (identity instanceof Response) return identity;
   const client = await store.getClient(grant.clientId);
-  if (!client || isBrowserSessionClientId(client.id))
+  if (!client || client.disabledAt || isBrowserSessionClientId(client.id))
     return negotiatedFormError(
       request,
       "invalid_request",
       "Client is unavailable",
       400,
     );
+  const scopeError = validateScopes(
+    parseScopes(grant.scope),
+    client,
+    config.features.events,
+  );
+  if (scopeError)
+    return negotiatedFormError(request, "invalid_scope", scopeError, 400);
   if (grant.status !== "pending") {
     return acceptsHtml(request)
       ? html(deviceOutcomePage(grant.status))
@@ -2475,6 +2488,21 @@ async function deviceDecisionPost(
       400,
     );
   }
+  const client = await store.getClient(grant.clientId);
+  if (!client || client.disabledAt)
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Client is unavailable",
+      400,
+    );
+  const scopeError = validateScopes(
+    parseScopes(grant.scope),
+    client,
+    config.features.events,
+  );
+  if (scopeError)
+    return negotiatedFormError(request, "invalid_scope", scopeError, 400);
   const now = nowSeconds();
   const status = form.get("decision") === "approve" ? "approved" : "denied";
   const user =
@@ -2523,13 +2551,20 @@ async function consentGet(
       400,
     );
   const client = await store.getClient(authRequest.clientId);
-  if (!client || isBrowserSessionClientId(client.id))
+  if (!client || client.disabledAt || isBrowserSessionClientId(client.id))
     return negotiatedFormError(
       request,
       "invalid_request",
       "Client is unavailable",
       400,
     );
+  const scopeError = validateScopes(
+    parseScopes(authRequest.scope),
+    client,
+    config.features.events,
+  );
+  if (scopeError)
+    return negotiatedFormError(request, "invalid_scope", scopeError, 400);
   const user = await store.findOrCreateUser(identity, nowSeconds());
   if (await store.hasConsent(user.id, client.id, authRequest.scope)) {
     const code = await approveAuthorizationRequest(
@@ -2605,6 +2640,21 @@ async function consentPost(
       "Authorization request expired",
       400,
     );
+  const client = await store.getClient(authRequest.clientId);
+  if (!client || client.disabledAt)
+    return negotiatedFormError(
+      request,
+      "invalid_request",
+      "Client is unavailable",
+      400,
+    );
+  const scopeError = validateScopes(
+    parseScopes(authRequest.scope),
+    client,
+    config.features.events,
+  );
+  if (scopeError)
+    return negotiatedFormError(request, "invalid_scope", scopeError, 400);
   if (form.get("decision") !== "approve") {
     if (!(await denyAuthorizationRequest(authRequest, store, nowSeconds())))
       return negotiatedFormError(
@@ -2831,7 +2881,10 @@ async function adminClientsPost(
     ),
     origins: splitLines(form.get("origins") || ""),
   };
-  const validationError = validateClientRegistrationInput(input);
+  const validationError = validateClientRegistrationInput(
+    input,
+    config.features.events,
+  );
   if (validationError) {
     return adminClientsError(
       request,
@@ -2855,7 +2908,9 @@ async function adminClientsPost(
       409,
     );
   }
-  const result = await createClientRegistration(input, store, nowSeconds());
+  const result = await createClientRegistration(input, store, nowSeconds(), {
+    eventsEnabled: config.features.events,
+  });
   await auditAdminMutation(store, "create", result.client.id, admin);
   return adminMutationSuccess(
     request,
@@ -2993,9 +3048,17 @@ function adminClientsResponse(
   const headers = new Headers({ "set-cookie": csrfCookie(csrf) });
   if (clearResult) headers.append("set-cookie", clearAdminResultCookie());
   if (acceptsHtml(request)) {
-    return html(adminClientsPage(clients, csrf, submissionToken, result), {
-      headers,
-    });
+    return html(
+      adminClientsPage(
+        clients,
+        csrf,
+        submissionToken,
+        result,
+        availableOAuthScopes(config.features.events),
+        availableServiceClientScopes(config.features.events),
+      ),
+      { headers },
+    );
   }
   return hypermediaJson(
     request,
@@ -3005,6 +3068,7 @@ function adminClientsResponse(
       csrf,
       submissionToken,
       result,
+      config.features.events,
     ),
     { headers },
   );
@@ -3016,6 +3080,7 @@ function adminClientsDocument(
   csrf: string,
   submissionToken: string,
   result: AdminMutationResult | null,
+  eventsEnabled: boolean,
 ) {
   const operationFields = (clientId: string, operation: string) => [
     field("csrf_token", "CSRF token", "string", "body", {
@@ -3086,6 +3151,7 @@ function adminClientsDocument(
           field("scopes", "Allowed scopes", "string", "body", {
             required: true,
             value: "storage.read storage.write storage.delete",
+            description: `Space-separated scopes. Interactive clients may use: ${availableOAuthScopes(eventsEnabled).join(" ")}. Service clients may use only: ${availableServiceClientScopes(eventsEnabled).join(" ")}.`,
           }),
           field("origins", "Allowed browser origins", "string", "body", {
             description:

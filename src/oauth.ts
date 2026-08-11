@@ -12,6 +12,10 @@ import {
 } from "./crypto";
 import { oauthError, parseBasicAuth } from "./http";
 import { HYPERMEDIA_API_VERSION, action, field, link } from "./hypermedia";
+import {
+  availableServiceClientScopes,
+  validateAvailableScopes,
+} from "./oauth-scopes";
 import { isBrowserSessionClientId } from "./system-client";
 import {
   isSubjectAuthorizationDenied,
@@ -28,13 +32,14 @@ import type {
   OAuthClient,
   RefreshTokenFamily,
 } from "./types";
-import { SUPPORTED_SCOPES } from "./types";
+export { SERVICE_CLIENT_SCOPES } from "./oauth-scopes";
 
-export const SERVICE_CLIENT_SCOPES = [
-  "storage.read",
-  "storage.write",
-  "storage.delete",
-] as const;
+export class OAuthScopePolicyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OAuthScopePolicyError";
+  }
+}
 
 export function parseScopes(value: string | null | undefined): string[] {
   const scopes = (value || "").split(/\s+/).filter(Boolean);
@@ -44,10 +49,11 @@ export function parseScopes(value: string | null | undefined): string[] {
 export function validateScopes(
   scopes: readonly string[],
   client: ClientView,
+  eventsEnabled = false,
 ): string | null {
+  const availabilityError = validateAvailableScopes(scopes, eventsEnabled);
+  if (availabilityError) return availabilityError;
   for (const scope of scopes) {
-    if (!SUPPORTED_SCOPES.includes(scope as never))
-      return `Unsupported scope: ${scope}`;
     if (!client.scopes.includes(scope))
       return `Client is not allowed to request scope: ${scope}`;
   }
@@ -84,8 +90,12 @@ export async function createClientRegistration(
   input: ClientRegistrationInput,
   store: AuthStore,
   now: number,
+  options: { eventsEnabled?: boolean } = {},
 ): Promise<{ client: ClientView; secret: string | null }> {
-  const validationError = validateClientRegistrationInput(input);
+  const validationError = validateClientRegistrationInput(
+    input,
+    options.eventsEnabled,
+  );
   if (validationError) throw new Error(validationError);
   const secret = input.type === "public" ? null : randomToken(32);
   const secretHash = secret ? await sha256(secret) : null;
@@ -95,6 +105,7 @@ export async function createClientRegistration(
 
 export function validateClientRegistrationInput(
   input: ClientRegistrationInput,
+  eventsEnabled = false,
 ): string | null {
   const name = input.name.trim();
   if (!name) return "Client name is required";
@@ -105,15 +116,19 @@ export function validateClientRegistrationInput(
     input.type !== "service"
   )
     return "Invalid client type";
+  const scopeError = validateAvailableScopes(input.scopes, eventsEnabled);
+  if (scopeError) return scopeError;
   if (input.type === "service") {
     if (input.redirectUris.length)
       return "Service clients cannot register redirect URIs";
     if (input.origins.length)
       return "Service clients cannot register browser origins";
-    if (!input.scopes.length) return "Service clients require a storage scope";
+    if (!input.scopes.length)
+      return "Service clients require an AittaDB data scope";
+    const serviceScopes = availableServiceClientScopes(eventsEnabled);
     for (const scope of input.scopes) {
-      if (!SERVICE_CLIENT_SCOPES.includes(scope as never))
-        return "Service clients may request only storage scopes";
+      if (!serviceScopes.includes(scope as never))
+        return "Service clients may request only enabled AittaDB data scopes";
     }
   }
   for (const uri of input.redirectUris) {
@@ -130,7 +145,7 @@ export function validateClientRegistrationInput(
       return knownValidationMessage(error, "Invalid origin");
     }
   }
-  return validateRawScopes(input.scopes);
+  return null;
 }
 
 export async function issueTokens(params: {
@@ -143,8 +158,14 @@ export async function issueTokens(params: {
   includeRefresh: boolean;
   now: number;
 }): Promise<Record<string, unknown>> {
-  await requireActiveSubject(params.store, params.user.id);
   const scopeList = parseScopes(params.scope);
+  const scopeError = validateScopes(
+    scopeList,
+    params.client,
+    params.config.features.events,
+  );
+  if (scopeError) throw new OAuthScopePolicyError(scopeError);
+  await requireActiveSubject(params.store, params.user.id);
   const accessJti = uuid();
   const accessToken = await signJwt(
     {
@@ -238,15 +259,23 @@ export async function issueClientCredentialsToken(params: {
   const scopes = parseScopes(
     params.requestedScope ?? params.client.scopes.join(" "),
   );
-  const scopeError = validateScopes(scopes, params.client);
+  const scopeError = validateScopes(
+    scopes,
+    params.client,
+    params.config.features.events,
+  );
+  const serviceScopes = availableServiceClientScopes(
+    params.config.features.events,
+  );
   if (
     !scopes.length ||
     scopeError ||
-    scopes.some((scope) => !SERVICE_CLIENT_SCOPES.includes(scope as never))
+    scopes.some((scope) => !serviceScopes.includes(scope as never))
   ) {
     return oauthError(
       "invalid_scope",
-      scopeError ?? "Service clients may request only storage scopes",
+      scopeError ??
+        "Service clients may request only enabled AittaDB data scopes",
     );
   }
   return jsonToken({
@@ -289,7 +318,7 @@ export async function createDeviceAuthorization(
     );
   }
   const scopes = parseScopes(form.get("scope") || "openid email profile");
-  const scopeError = validateScopes(scopes, client);
+  const scopeError = validateScopes(scopes, client, config.features.events);
   if (scopeError) return oauthError("invalid_scope", scopeError);
 
   const deviceCode = randomToken(40);
@@ -383,6 +412,12 @@ export async function pollDeviceToken(
     return oauthError("invalid_grant", "Invalid device code");
   if (grant.expiresAt <= now)
     return oauthError("expired_token", "Device code expired", 400);
+  const scopeError = validateScopes(
+    parseScopes(grant.scope),
+    authenticatedClient,
+    config.features.events,
+  );
+  if (scopeError) return oauthError("invalid_scope", scopeError);
   if (
     grant.lastPollAt &&
     now - grant.lastPollAt < grant.intervalSeconds + grant.slowDownCount * 5
@@ -482,7 +517,7 @@ export async function createAuthorizeRequest(
   const scopes = parseScopes(
     url.searchParams.get("scope") || "openid email profile",
   );
-  const scopeError = validateScopes(scopes, client);
+  const scopeError = validateScopes(scopes, client, config.features.events);
   if (scopeError)
     return redirectOAuthError(
       new URL(redirectUri),
@@ -584,6 +619,12 @@ export async function exchangeAuthorizationCode(
   ) {
     return oauthError("invalid_grant", "PKCE verification failed");
   }
+  const scopeError = validateScopes(
+    parseScopes(code.scope),
+    client,
+    config.features.events,
+  );
+  if (scopeError) return oauthError("invalid_scope", scopeError);
   const user = await store.getUser(code.userId);
   if (!user) return oauthError("invalid_grant", "Invalid authorization code");
   try {
@@ -620,6 +661,12 @@ export async function rotateRefreshToken(
     now,
   );
   if (!existing) return oauthError("invalid_grant", "Invalid refresh token");
+  const scopeError = validateScopes(
+    parseScopes(existing.scope),
+    client,
+    config.features.events,
+  );
+  if (scopeError) return oauthError("invalid_scope", scopeError);
   const user = await store.getUser(existing.userId);
   if (!user) return oauthError("invalid_grant", "Invalid refresh token");
   let tokens: Record<string, unknown>;
@@ -695,14 +742,6 @@ export function clientLike(client: ClientView): OAuthClient {
     disabledAt: client.disabledAt,
     createdAt: client.createdAt,
   };
-}
-
-function validateRawScopes(scopes: readonly string[]): string | null {
-  for (const scope of scopes) {
-    if (!SUPPORTED_SCOPES.includes(scope as never))
-      return `Unsupported scope: ${scope}`;
-  }
-  return null;
 }
 
 function assertExactUri(value: string): void {

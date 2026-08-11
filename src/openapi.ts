@@ -1,3 +1,46 @@
+import { availableOAuthScopes } from "./oauth-scopes";
+import type { OAuthScope } from "./types";
+
+export const oauthScopeMetadata: Readonly<
+  Record<OAuthScope, { description: string; feature?: string }>
+> = {
+  openid: {
+    description: "Request an AittaDB ID token and access to UserInfo.",
+  },
+  email: {
+    description: "Include the local AittaDB user's upstream email signal.",
+  },
+  profile: {
+    description: "Include the local AittaDB user's display name.",
+  },
+  offline_access: {
+    description: "Request a rotating AittaDB refresh token for a human grant.",
+  },
+  "storage.read": {
+    description: "Read records and files in the token's AittaDB namespace.",
+  },
+  "storage.write": {
+    description:
+      "Create or replace records and files in the token's AittaDB namespace.",
+  },
+  "storage.delete": {
+    description: "Delete records and files in the token's AittaDB namespace.",
+  },
+  "events.publish": {
+    description: "Publish immutable events in the token's AittaDB namespace.",
+    feature: "FEATURE_EVENTS_ENABLED",
+  },
+  "events.read": {
+    description: "Read immutable events in the token's AittaDB namespace.",
+    feature: "FEATURE_EVENTS_ENABLED",
+  },
+  "events.subscribe": {
+    description:
+      "Use bounded event delivery in the token's AittaDB namespace; operations also require events.read.",
+    feature: "FEATURE_EVENTS_ENABLED",
+  },
+};
+
 const storageKeyParameter = {
   name: "key",
   in: "path",
@@ -204,6 +247,7 @@ export const openApiSpec = {
     description:
       "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1 and files in R2. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Persistent events and long-polling delivery are planned and are not part of the current MVP. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
   },
+  "x-aittadb-oauth-scopes": oauthScopeMetadata,
   paths: {
     "/": {
       get: {
@@ -586,7 +630,7 @@ export const openApiSpec = {
         summary:
           "OAuth 2.0 token endpoint for device, authorization_code, refresh_token, and client_credentials grants",
         description:
-          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject every grant before reading the body or accessing client and credential state. A service client authenticates with its secret and may use client_credentials to obtain a short-lived access token limited to its registered storage scopes and isolated service namespace; this grant returns no user claims, ID token, or refresh token. Service clients cannot use interactive grants. When enabled, a cross-origin preflight is allowed only for an exact origin registered on an active interactive OAuth client, so service clients are server-to-server only. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential. Every interactive token grant rejects an inactive local subject generically; refresh exchange creates no successor after that denial.",
+          "Available only when FEATURE_OAUTH_APPS_ENABLED is true. Disabled deployments reject every grant before reading the body or accessing client and credential state. A service client authenticates with its secret and may use client_credentials to obtain a short-lived access token limited to its registered, currently enabled AittaDB storage or Events scopes and isolated service namespace; this grant returns no user claims, ID token, or refresh token. Events scopes are available only when FEATURE_EVENTS_ENABLED is true and authorize only AittaDB resources, never ChatGPT or OpenAI data. Service clients cannot use interactive grants. When enabled, a cross-origin preflight is allowed only for an exact origin registered on an active interactive OAuth client, so service clients are server-to-server only. The actual request is bound to the client_id or HTTP Basic client before any authorization code, device code, or refresh token is consumed; a foreign origin is rejected without changing that credential. Every interactive token grant rejects an inactive local subject generically; refresh exchange creates no successor after that denial.",
         requestBody: {
           description: browserMutationOriginDescription,
           required: true,
@@ -619,7 +663,7 @@ export const openApiSpec = {
                   scope: {
                     type: "string",
                     description:
-                      "Optional subset of the service client's registered storage scopes for client_credentials.",
+                      "Optional subset of the service client's registered and currently enabled AittaDB storage or Events scopes for client_credentials. Events scopes require FEATURE_EVENTS_ENABLED.",
                   },
                   ui: { type: "string", const: "1" },
                   csrf_token: { type: "string" },
@@ -1958,7 +2002,7 @@ export const openApiSpec = {
                 type: "boolean",
                 default: false,
                 description:
-                  "Effective deployment policy for the planned Events feature. This metadata flag does not advertise an Events route or operation before that resource is implemented.",
+                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes; this metadata flag still does not advertise an Events route or operation before that resource is implemented.",
               },
             },
             additionalProperties: false,
@@ -2657,7 +2701,8 @@ export const openApiSpec = {
           },
           scopes: {
             type: "string",
-            description: "Space-separated allowed AittaDB scopes.",
+            description:
+              "Space-separated allowed AittaDB scopes. events.publish, events.read, and events.subscribe are accepted only while FEATURE_EVENTS_ENABLED is true and grant no access to ChatGPT or OpenAI data. Service clients may use only enabled AittaDB storage and Events scopes, with no identity scopes, redirects, origins, ID tokens, or refresh tokens.",
           },
           origins: {
             type: "string",
@@ -2785,9 +2830,10 @@ export const openApiSpec = {
 
 export function oidcConfiguration(
   issuer: string,
-  options: { oauthAppsEnabled?: boolean } = {},
+  options: { oauthAppsEnabled?: boolean; eventsEnabled?: boolean } = {},
 ) {
   const oauthAppsEnabled = options.oauthAppsEnabled ?? true;
+  const eventsEnabled = options.eventsEnabled ?? false;
   if (!oauthAppsEnabled) {
     return {
       issuer,
@@ -2818,15 +2864,7 @@ export function oidcConfiguration(
       "client_secret_basic",
       "client_secret_post",
     ],
-    scopes_supported: [
-      "openid",
-      "email",
-      "profile",
-      "offline_access",
-      "storage.read",
-      "storage.write",
-      "storage.delete",
-    ],
+    scopes_supported: [...availableOAuthScopes(eventsEnabled)],
     code_challenge_methods_supported: ["S256"],
     claims_supported: [
       "iss",
