@@ -1,3 +1,1 @@
 # AittaDB Implementation Plan
-
-- [ ] TASK-221: Prepare the validated `develop` release for review against `main`. DoD: confirm `develop` contains the complete intended Events release and is based directly on current `origin/main`; run complete validation on the exact proposed head; create exactly one draft pull request from `develop` to `main` with a concise security-conscious summary, migration and hosted-rollout notes, validation evidence, residual risks, and no credentials or private deployment values; verify GitHub reports the PR open, conflict-free, and attached to passing exact-head checks; leave PR #3 closed, perform no merge or deployment, archive coarse evidence in `CHANGELOG.md`, and push the resulting zero-task planning state to `develop`.
