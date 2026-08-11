@@ -1,18 +1,18 @@
 # AittaDB Agent Instructions
 
-Authoritative for contributors; read before changes. Keep below 32,000 bytes (`npm run agents:check`). Put rationale in `docs/` without trimming mandatory boundaries.
+Read before changes. Keep below 32,000 bytes (`npm run agents:check`); put rationale in `docs/` and retain boundaries.
 
 ## Purpose and Product Boundary
 
 AittaDB is a general-purpose hosted database server and application-backend service. It exposes small, independent, reusable primitives through stable HTTP protocols. On ChatGPT Sites it maps trusted server-side sign-in to a local user, issues AittaDB OAuth/OIDC/JWT credentials, and isolates data.
 
-Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated immutable Events publication, reads, and bounded waits.
+Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated immutable Events publication/reads/bounded waits.
 
-Server boundary: identity/authentication; isolation; records, objects, events/delivery; conditional writes, versions, cursors, idempotency, bounded atomics, quotas, expiry/retention/cleanup, hypermedia, OpenAPI, and operations docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols only.
+Server boundary: identity/authentication; isolation; records/objects/events; conditional writes/versions/cursors/idempotency; bounded atomics/quotas/expiry/cleanup; hypermedia/OpenAPI/ops docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols only.
 
-Application workflows (billing, membership, provisioning, messaging, games) belong outside AittaDB and compose primitives. Examples cannot define provider-specific routes, schemas, configuration, scopes, or rules.
+Application workflows (billing, membership, provisioning, messaging, games) belong outside AittaDB and compose primitives. Examples cannot define provider routes/schemas/configuration/scopes/rules.
 
-AittaDB is source-available, not affiliated with or endorsed by OpenAI. The current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, sign-in, D1, R2, configuration, and secrets. Local users, credentials, grants, sessions, and data belong to that AittaDB deployment, not OpenAI or ChatGPT. Never call it "OpenAI Auth", "ChatGPT OAuth", or an official "Sign in with ChatGPT" OAuth service, or imply its credentials are OpenAI/ChatGPT credentials.
+AittaDB is source-available and not affiliated with/endorsed by OpenAI. The current implementation depends on OpenAI-hosted ChatGPT Sites for runtime/sign-in/D1/R2/configuration/secrets. Local users, credentials, grants, sessions, and data belong to that AittaDB deployment, not OpenAI or ChatGPT. Never call it "OpenAI Auth", "ChatGPT OAuth", or an official "Sign in with ChatGPT" OAuth service, or imply its credentials are OpenAI/ChatGPT credentials.
 
 AittaDB does not expose or forward ChatGPT cookies, credentials, tokens, or sessions. It does not access ChatGPT conversations, files, Projects, Library, connectors, subscriptions, roles, billing, or API quota. Its scopes authorize only AittaDB resources.
 
@@ -20,11 +20,11 @@ Public releases use FSL-1.1-MIT and convert to MIT after two years; an immediate
 
 ## Canonical Source and Origin
 
-`https://github.com/aittadb/aittadb` is canonical, public, and secret-free. Preserve its files, lockfile, package choices, instructions, and unrelated changes. Commit no secrets or private deployment material; use inert placeholders and synthetic fixtures. Never echo suspected exposure; escalate privately. Rotation, revocation, or history rewrites need approval.
+`https://github.com/aittadb/aittadb` is canonical/public/secret-free. Preserve files/lockfile/package choices/instructions/unrelated changes. Commit no secrets/private deployment material; use inert placeholders/synthetic fixtures. Never echo suspected exposure; escalate privately. Rotation, revocation, or history rewrites need approval.
 
 The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
-`develop` is the primary workspace tracking `main`; only validated, main-ready features may rebase onto it. Keep unfinished work separate. Approval is required to push/merge `main` or alter `aittadb.com` deployment, secrets, access, or versions. `test.aittadb.com` is preapproved for bounded reversible tests and changes; restore settings and remove fixtures, identities, and secrets.
+`develop` tracks `main`; only validated main-ready work belongs there. Keep unfinished work separate. `test.aittadb.com` permits bounded reversible tests; restore settings and delete fixtures/secrets. Production must use the exact commit/artifact accepted there. Approval is required to push/merge `main` or alter `aittadb.com` deployment, secrets, access, or versions.
 
 ## Runtime Contract
 
@@ -53,7 +53,7 @@ Trust only these server-side headers inside the trusted Sites runtime:
 
 Decode a full name only when encoding is exactly `percent-encoded-utf-8`. Fall back to email for display. A display name is never authorization data. Use email only to find or create a local user with an immutable generated UUID; that UUID is downstream `sub`. Document email change and reassignment risk.
 
-Never trust browser JavaScript for identity or accept arbitrary `oai-authenticated-user-*` headers outside Sites. Production app assembly injects only the Sites header provider and has no identity bypass or test binding. Mock providers live under `tests/` and enter only through explicit dependency injection. Automated tests never require a real ChatGPT account.
+Never trust browser JavaScript for identity or accept arbitrary `oai-authenticated-user-*` headers outside Sites. Production injects only the Sites provider; no identity bypass/test binding. Mocks live under `tests/` and use explicit dependency injection. Tests never require a real ChatGPT account.
 
 ## AittaDB Credentials and Scopes
 
@@ -243,13 +243,13 @@ Implementation DoD: contract/code/negative tests/user+developer docs/passing for
 
 ## Git, Review, and Deployment
 
-Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; reset/checkout needs approval. Run `npm run validate` before handoff. Feature PRs target `develop`; at most one `main` PR, normally `develop`; no merge without approval; close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits.
+Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; reset/checkout needs approval. Run `npm run validate` before handoff. Feature PRs target `develop`; keep at most one `main` PR from `develop`; no merge without approval; close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits.
 
-Outside the preapproved test Site, deployment requires approval. Publish exact validated committed source, apply checked-in migrations through Sites, preserve bindings/secrets, and verify status. Claim Sites sign-in E2E only after real hosted testing; record remaining hosted uncertainty and the next manual step.
+Outside test, deployment needs approval. Package one pushed `develop` commit; deploy/verify it on acceptance, then deploy that exact artifact to production without configuration changes. Never bypass/reverse this order. Sites version numbers are project-local; compare commits. Apply checked-in migrations and verify status. Claim sign-in E2E only after hosted testing; record uncertainty and next step.
 
 ## Maintaining This File
 
-Update `AGENTS.md` when architecture/interfaces/commands/constraints/security/structure/deployment/operations/workflow change. Keep below 32,000 bytes. Rationale in docs; replace stale text.
+Update `AGENTS.md` when architecture/interfaces/commands/constraints/security/structure/deployment/operations/workflow change. Keep below 32,000 bytes; put rationale in docs and replace stale text.
 
 ## Multi-agent execution
 
