@@ -59,11 +59,11 @@ AittaDB separately enforces finite application-level ceilings for the deployment
 - Persistent structured application data.
 - Object and file storage.
 - HTTP APIs for applications, services, and AI agents.
-- Feature-gated bounded reads of persistent immutable application events; publication and long-polling delivery remain planned.
+- Feature-gated bounded collection and item reads of persistent immutable application events; publication and long-polling delivery remain planned.
 
 The goal is to let developers build persistent, authenticated applications without first deploying and maintaining a conventional backend stack.
 
-The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, files, and feature-gated event collection reads are implemented; event publication and long polling remain planned. [PLAN.md](PLAN.md) contains accepted unfinished work, while completed task history moves to [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
+The browser interface summarizes this product direction as **Identity / Data / Files / Events**. Identity, data, files, and feature-gated event collection/item reads are implemented; event publication and long polling remain planned. [PLAN.md](PLAN.md) contains accepted unfinished work, while completed task history moves to [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) for product direction and [BACKLOG.md](BACKLOG.md) for unscheduled ideas such as backup and live synchronization. Unchecked items are not current features or release commitments.
 
 ## Why AittaDB?
 

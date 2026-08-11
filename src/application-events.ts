@@ -118,9 +118,13 @@ export function assertApplicationEventLookupInput(
   id: string,
 ): void {
   assertApplicationEventNamespace(userId, clientId);
-  if (!UUID_V4.test(id)) {
+  if (!isCanonicalApplicationEventId(id)) {
     throw new RangeError("application_event_id_invalid");
   }
+}
+
+export function isCanonicalApplicationEventId(id: string): boolean {
+  return UUID_V4.test(id);
 }
 
 export function assertApplicationEventPageInput(

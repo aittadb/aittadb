@@ -49,6 +49,19 @@ const storageKeyParameter = {
   description: "Application-defined logical object key.",
 } as const;
 
+const applicationEventIdParameter = {
+  name: "id",
+  in: "path",
+  required: true,
+  schema: {
+    type: "string",
+    format: "uuid",
+    pattern:
+      "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+  },
+  description: "Canonical lowercase UUIDv4 event identifier.",
+} as const;
+
 const hypermediaVendorType = "application/vnd.aittadb+json; version=0.1";
 
 function hypermediaContent(schema: string, includeHtml = true) {
@@ -186,7 +199,7 @@ const filesUnavailableResponse = {
 
 const eventsUnavailableResponse = {
   description:
-    "Events is disabled by deployment configuration. The request is rejected before bearer parsing, Sites identity lookup, CORS client authorization, rate limiting, cursor opening, or event repository access.",
+    "Events is disabled by deployment configuration or D1 is unavailable. A disabled request is rejected at the outer route boundary before CORS client lookup, bearer or Sites identity processing, rate limiting, cursor opening, repository access, or cleanup scheduling.",
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
 
@@ -283,7 +296,7 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1, files in R2, and feature-gated immutable event collection reads. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Event publication and bounded long-polling delivery remain planned. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
+      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1, files in R2, and feature-gated immutable event collection and item reads. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Event publication and bounded long-polling delivery remain planned. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
   },
   "x-aittadb-oauth-scopes": oauthScopeMetadata,
   paths: {
@@ -966,6 +979,45 @@ export const openApiSpec = {
           "403": {
             description:
               "The valid AittaDB access token lacks events.read or its exact registered browser origin is not allowed",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "406": notAcceptableResponse,
+          "429": rateLimitedResponse(true),
+          "503": eventsUnavailableResponse,
+        },
+      },
+    },
+    "/events/{id}": {
+      get: {
+        summary: "Read one immutable application event",
+        description: `Available only when FEATURE_EVENTS_ENABLED is true. A bearer request requires events.read and returns only an unexpired event owned by the token's exact active principal and OAuth-client namespace. A signed-in HTML or hypermedia request without a bearer token uses an unexposed short-lived current-session credential for the reserved browser-client namespace. The canonical lowercase UUIDv4 is validated before lookup; malformed, absent, expired, other-user, and other-client identifiers share one not-found response. Internal sequence, ownership keys, idempotency hashes, and request hashes are never returned. No update or delete transition exists. ${tokenBoundCorsDescription}`,
+        "x-aittadb-sites-session-supported": true,
+        security: [{ bearer: [] }],
+        parameters: [applicationEventIdParameter],
+        responses: {
+          "200": {
+            description:
+              "The immutable event as versioned hypermedia JSON, compatible JSON, or accessible HTML with only self and collection navigation",
+            content: hypermediaContent(
+              "#/components/schemas/ApplicationEventDocument",
+            ),
+          },
+          "302": {
+            description:
+              "An anonymous HTML request continues through the Sites-owned ChatGPT sign-in route and returns to this exact item URL",
+          },
+          "401": {
+            description:
+              "Missing, malformed, expired, revoked, inactive-subject, unknown-client, disabled-client, or wrong-purpose access token",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "The access token does not include events.read",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "404": {
+            description:
+              "One generic result for malformed, absent, expired, other-user, and other-client event identifiers",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "406": notAcceptableResponse,
@@ -2085,6 +2137,7 @@ export const openApiSpec = {
                 default: false,
                 description:
                   "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, and implemented Events operations such as bounded collection reads may be advertised.",
+                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, while implemented bounded collection and exact item reads may be advertised.",
               },
             },
             additionalProperties: false,
@@ -2093,7 +2146,7 @@ export const openApiSpec = {
           plannedCapabilities: {
             type: "array",
             description:
-              "Planned capabilities, including Events, that are not available in the current MVP.",
+              "Planned capabilities, including unfinished Events publication, collection traversal, and long-polling delivery.",
             items: { type: "string" },
           },
         },
@@ -2490,7 +2543,12 @@ export const openApiSpec = {
         type: "object",
         required: ["id", "type", "data", "created_at", "expires_at"],
         properties: {
-          id: { type: "string", format: "uuid" },
+          id: {
+            type: "string",
+            format: "uuid",
+            pattern:
+              "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          },
           type: {
             type: "string",
             minLength: 1,
@@ -2511,6 +2569,7 @@ export const openApiSpec = {
             properties: {
               type: { const: "application-event" },
               data: { $ref: "#/components/schemas/ApplicationEventData" },
+              actions: { type: "array", maxItems: 0 },
             },
           },
         ],

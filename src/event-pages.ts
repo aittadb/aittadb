@@ -1,4 +1,5 @@
 import { escapeHtml, pageDocument } from "./pages";
+import type { ApplicationEventData } from "./events";
 
 export interface ApplicationEventPageItem {
   id: string;
@@ -58,12 +59,35 @@ export function applicationEventCollectionPage(
   });
 }
 
+export function applicationEventItemPage(
+  event: ApplicationEventData,
+  collectionHref: string,
+): string {
+  return pageDocument({
+    title: `${event.type} event`,
+    eyebrow: "Persistent application event",
+    heading: "Event details",
+    summary:
+      "This immutable event belongs to the current AittaDB user and application namespace.",
+    visualEyebrow: "Immutable application state",
+    visualHeading: "One event. One subject and client boundary.",
+    visualSummary:
+      "AittaDB returns an event only when the current session or access token owns its exact namespace.",
+    body: `<section class="storage-state" aria-labelledby="event-content-heading"><h2 id="event-content-heading">Event content</h2><section class="info-grid" aria-label="Event metadata"><div><span>Event ID</span><code>${escapeHtml(event.id)}</code></div><div><span>Event type</span><strong>${escapeHtml(event.type)}</strong></div><div><span>Created</span>${timeElement(event.created_at)}</div><div><span>Expires</span>${timeElement(event.expires_at)}</div></section><h3>Event data</h3><pre class="record-value" aria-label="Event JSON data">${escapeHtml(JSON.stringify(event.data, null, 2))}</pre></section>`,
+    actions: [{ href: collectionHref, label: "Back to events" }],
+  });
+}
+
 function dataSummary(value: Record<string, unknown>): string {
   const count = Object.keys(value).length;
   return count === 1 ? "1 top-level field" : `${count} top-level fields`;
 }
 
 function timeElement(value: number): string {
-  const iso = new Date(value * 1000).toISOString();
-  return `<time datetime="${iso}">${escapeHtml(iso)}</time>`;
+  const date = new Date(value * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return `<span>${escapeHtml(String(value))} Unix seconds</span>`;
+  }
+  const iso = date.toISOString();
+  return `<time datetime="${escapeHtml(iso)}">${escapeHtml(iso)}</time>`;
 }

@@ -150,7 +150,7 @@ test("discovery and OpenAPI describe conditional AittaDB-only Events scopes and 
     assert.match(metadata.description, /AittaDB namespace/);
   }
   assert.equal("/events" in openApiSpec.paths, true);
-  assert.equal("/events/{id}" in openApiSpec.paths, false);
+  assert.equal("/events/{id}" in openApiSpec.paths, true);
 });
 
 test("migration seeds all Events scopes for the reserved browser client only once", async () => {

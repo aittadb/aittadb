@@ -61,6 +61,8 @@ import {
   MAX_STORAGE_FORM_BYTES,
   storageBrowserEndpoint,
 } from "./storage-browser";
+import { applicationEventItemEndpoint, isApplicationEventData } from "./events";
+import { applicationEventItemPage } from "./event-pages";
 import {
   hasBrowserSession,
   issueBrowserSessionAccessToken,
@@ -1338,6 +1340,16 @@ async function route(
     if (browserResponse) return browserResponse;
     return eventCollectionEndpoint(request, url, store, config);
   }
+  if (url.pathname.startsWith("/events/")) {
+    if (request.method !== "GET") return methodNotAllowed("GET");
+    return applicationEventItemRoute(
+      request,
+      url.pathname.slice("/events/".length),
+      store,
+      config,
+      identityProvider,
+    );
+  }
   if (url.pathname.startsWith("/storage/")) {
     const limited = await endpointRateLimit(
       store,
@@ -2253,6 +2265,74 @@ async function browserJsonResponse(
     statusText: response.statusText,
     headers: response.headers,
   });
+}
+
+async function applicationEventItemRoute(
+  request: Request,
+  id: string,
+  store: AuthStore,
+  config: ReturnType<typeof loadConfig>,
+  identityProvider: UpstreamIdentityProvider,
+): Promise<Response> {
+  let endpointRequest = request;
+  if (
+    !bearerToken(request) &&
+    (acceptsHtml(request) || identityProvider.read(request) !== null)
+  ) {
+    const accessToken = await issueBrowserSessionAccessToken(
+      request,
+      identityProvider,
+      store,
+      config,
+      ["events.read"],
+    );
+    if (accessToken instanceof Response) return accessToken;
+    const headers = new Headers({ authorization: `Bearer ${accessToken}` });
+    const accept = request.headers.get("accept");
+    if (accept) headers.set("accept", accept);
+    endpointRequest = new Request(request.url, { headers });
+  }
+
+  const response = await applicationEventItemEndpoint(
+    endpointRequest,
+    id,
+    store,
+    config,
+  );
+  if (!acceptsHtml(request)) return response;
+  if (response.status === 404) {
+    return html(
+      errorPage("Event not found", "Event not found", {
+        status: 404,
+        error: "not_found",
+        actions: [
+          { href: `${config.issuerUrl}/events`, label: "Back to events" },
+        ],
+      }),
+      {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      },
+    );
+  }
+  if (!response.ok) return response;
+
+  const payload = (await response
+    .clone()
+    .json()
+    .catch(() => null)) as { data?: unknown } | null;
+  if (!payload || !isApplicationEventData(payload.data)) {
+    return oauthError("server_error", "Unexpected server error", 500);
+  }
+  return html(
+    applicationEventItemPage(payload.data, `${config.issuerUrl}/events`),
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    },
+  );
 }
 
 function methodNotAllowed(allowed: string): Response {

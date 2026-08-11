@@ -6,7 +6,7 @@ Authoritative for contributors; read before changes. Keep below 32,000 bytes (`n
 
 AittaDB is a general-purpose hosted database server and application-backend service. It serves apps, services, and agents through small, independent, reusable primitives and stable HTTP protocols. On OpenAI-hosted ChatGPT Sites it maps trusted server-side sign-in to a local user, issues its own OAuth/OIDC/JWT credentials, and provides isolated data.
 
-Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated event reads; publication/long polling are unavailable.
+Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated event collection/item reads; publication and long polling are unavailable.
 
 The server boundary includes identity/authentication; user/client/application/namespace isolation; records, objects, events/delivery; conditional writes, versions, cursors, idempotency, bounded atomic operations, quotas, expiry, retention, cleanup, hypermedia, OpenAPI, and protocol/operations docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols, not clients.
 
@@ -57,7 +57,7 @@ Never trust browser JavaScript for identity or accept arbitrary `oai-authenticat
 
 ## AittaDB Credentials and Scopes
 
-AittaDB issues all downstream credentials. Scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, `storage.delete`, `events.publish`, `events.read`, and `events.subscribe`. Events scopes require `FEATURE_EVENTS_ENABLED=true` and authorize AittaDB only; `events.read` serves `/events`, while publication/subscription await their tasks. Add no other scope without its owning task.
+AittaDB issues all downstream credentials. Scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, `storage.delete`, `events.publish`, `events.read`, and `events.subscribe`. Events scopes require `FEATURE_EVENTS_ENABLED=true` and authorize AittaDB only; `events.read` serves collection/item reads, while publication/subscription await their tasks. Add no other scope without its owning task.
 
 Lead public descriptions with "source-available hosted application backend for third-party apps", then ChatGPT sign-in inside ChatGPT Sites, AittaDB sessions, JSON records, and files. State the Sites dependency without leading with defensive "third-party"/"non-official" labels; keep no-affiliation/no-endorsement secondary and never imply technical independence. Avoid unexplained "Sites identity" or "Token authority"; use "Session issuer". Keep `officialOpenAIProduct: false` in machine metadata, not browser copy.
 
@@ -90,7 +90,7 @@ Each unit is a reusable vendor-neutral primitive with bounded execution, isolati
 - Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own narrow records. Audit actor attribution is a nullable canonical SHA-256 base64url field, never generic JSON.
 - Storage owns UUID/client-keyed records and file metadata; R2 uses generated keys.
-- Events are immutable, quota-bounded principal/client rows; deletion purges only the exact leased human subject in finite batches.
+- Events owns immutable, quota-bounded principal/client rows and collection/item reads; deletion purges only the exact leased human subject in finite batches.
 - Account deletion follows `docs/account-deletion-jobs.md`. POST requires trusted identity, exact-email lookup, origin, a 1 KiB bound, CSRF, phrase, and bound encryption; admins/replay fail. GET authenticates the handle before D1 and never resolves current identity. Jobs gate access and purge credentials, records, events, and files in bounded leased phases. Finalization clears audit attribution and requires no owned rows. Expose only coarse status. Same-email return creates a new UUID/empty namespaces; old JWTs may verify to `exp` but never authorize or identify it.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
@@ -104,9 +104,9 @@ Use dependency injection where useful. Separate protocol-independent logic from 
 
 Use TypeScript `strict`; avoid `any`. Parse unknown input with explicit guards and structured APIs. Prefer small modules, pure domain functions, existing local patterns, and conservative changes. Use succinct comments only for non-obvious blocks.
 
-Before adding work, answer: (1) server/backend primitive? (2) demonstrated problem? (3) useful across unrelated apps without provider rules? (4) extend an existing primitive? (5) contract smaller than its motivating feature? (6) externally composable through public protocols? (7) every new abstraction needed now? If mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation and propose the smallest general-purpose enabling primitive; request a decision only if none fits.
+Before work ask: (1) server primitive? (2) demonstrated problem? (3) useful across unrelated apps without provider rules? (4) extend an existing primitive? (5) contract smaller than the motivating feature? (6) externally composable through public protocols? (7) every abstraction needed now? Keep application features, clients, provider integrations, and speculative extension systems outside. On conflict propose the smallest general-purpose primitive and request a decision only if none fits.
 
-Choose the smallest complete design; reuse primitives first. Add no framework, plugin/extension system, generic query language, workflow engine, or configuration layer without a concrete unmet requirement. Do not generalize one example without an independent contract, relocate complexity, or add infrastructure outside the server role. Prefer explicit models, narrow interfaces, and short composable operations. Keep behavior deterministic, bounded, observable, and testable; preserve contracts unless a necessary change is versioned. Simplicity never weakens correctness, durability, security, privacy, authorization, or failure handling.
+Choose the smallest complete design; reuse primitives first. Add no framework, extension system, generic query language, workflow engine, or configuration layer without a concrete unmet requirement. Do not generalize one example without an independent contract, relocate complexity, or add non-server infrastructure. Prefer explicit models, narrow interfaces, and short composable operations. Keep behavior deterministic, bounded, observable, and testable; version necessary contract changes. Simplicity never weakens correctness, durability, security, privacy, authorization, or failure handling.
 
 Use prepared SQL with one statement per `prepare()` and bound untrusted values. Never construct SQL identifiers or clauses from caller input. Use documented integer Unix seconds or ISO text consistently. Use Web-standard `Request`, `Response`, URL, streams, and Web Crypto in deployed code.
 
@@ -188,7 +188,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events gates scopes/routes before body, auth, rate, repository, or maintenance work and omits disabled controls. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
+`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes plus collection/item reads; when off, reject before body, CORS/auth/rate/repository/maintenance and omit controls. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
 
 Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 
@@ -225,7 +225,7 @@ Keep commands synchronized with `package.json`, CI, README, and contributor docs
 
 ## PLAN.md Workflow
 
-Before repository-affecting work, first add or amend an unchecked root `PLAN.md` task; questions without changes need none. PLAN is one flat unfinished `TASK-NNN` queue, may be empty, and keeps IDs stable in PLAN/CHANGELOG. Each item MUST own exactly one server primitive or one narrowly bounded operational proof, fit one focused commit, and state an objective pass/fail DoD. Never combine independent resources, methods, controls, migrations, or live matrices in one task. Broad requests first create a decomposition task; add dependency-ordered replacements, then retire the umbrella unchanged with its mapping in CHANGELOG without claiming delivery. Describe the primitive, not its motivating application.
+Before repository changes, first add or amend an unchecked root `PLAN.md` task; questions need none. PLAN is one flat unfinished `TASK-NNN` queue with stable PLAN/CHANGELOG IDs. Each item MUST own exactly one server primitive or narrow operational proof, fit one focused commit, and state an objective pass/fail DoD. Never combine independent resources, methods, controls, migrations, or live matrices. For a broad request, create a decomposition task, add dependency-ordered replacements, then retire the unchanged umbrella with its CHANGELOG mapping without claiming delivery. Describe the primitive, not its motivating application.
 
 Implementation tasks deliver contract, code, negative tests, docs, failures, applicable configuration/migration/OpenAPI/AGENTS changes, and evidence together. A Sites-only acceptance task proves one named behavior against one exact deployment and invents no source work. Process dependencies in order; parallelize independent items. Add missing work first. After DoD, remove the task from PLAN and append its unchanged description to CHANGELOG. Never archive partial work or keep completed PLAN checkboxes.
 

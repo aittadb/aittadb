@@ -60,6 +60,7 @@ const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/oauth/revoke", "get", "200", HYPERMEDIA_HTML),
   response("/oauth/introspect", "get", "200", HYPERMEDIA_HTML),
   response("/userinfo", "get", "200", HYPERMEDIA_HTML),
+  response("/events/{id}", "get", "200", HYPERMEDIA_HTML),
   response("/storage/records", "get", "200", HYPERMEDIA_HTML),
   response("/storage/records", "post", "200", HYPERMEDIA_HTML),
   response("/storage/records/{key}", "get", "200", HYPERMEDIA_HTML),
@@ -147,6 +148,13 @@ export function extractImplementedOperations(
     for (const delegated of extractDelegatedStorageOperations(storageSources)) {
       addOperation(operations, delegated);
     }
+  }
+  if (
+    /url\.pathname\.startsWith\(["']\/events\/["']\)[\s\S]{0,160}request\.method\s*!==\s*["']GET["']/.test(
+      handlerSource,
+    )
+  ) {
+    addOperation(operations, { path: "/events/{id}", method: "get" });
   }
   return [...operations.values()].sort(compareOperations);
 }
