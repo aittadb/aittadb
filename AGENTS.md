@@ -6,7 +6,7 @@ Authoritative for contributors; read before changes. Keep below 32,000 bytes (`n
 
 AittaDB is a general-purpose hosted database server and application-backend service. It exposes small, independent, reusable primitives through stable HTTP protocols. On ChatGPT Sites it maps trusted server-side sign-in to a local user, issues AittaDB OAuth/OIDC/JWT credentials, and isolates data.
 
-Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated immutable event publication plus bounded collection/item reads. Long polling is unavailable.
+Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated immutable event publication, collection/item reads, and bounded long polling.
 
 Server boundary: identity/authentication; isolation; records, objects, events/delivery; conditional writes, versions, cursors, idempotency, bounded atomics, quotas, expiry/retention/cleanup, hypermedia, OpenAPI, and operations docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols only.
 
@@ -16,7 +16,7 @@ AittaDB is source-available, not affiliated with or endorsed by OpenAI. The curr
 
 AittaDB does not expose or forward ChatGPT cookies, credentials, tokens, or sessions. It does not access ChatGPT conversations, files, Projects, Library, connectors, subscriptions, roles, billing, or API quota. Its scopes authorize only AittaDB resources.
 
-Current public releases use FSL-1.1-MIT and convert to MIT two years after publication. An MIT license for immediate use is also available commercially. Describe a current public FSL release as source-available, not open source; a converted or directly MIT-licensed version is open-source software.
+Public releases use FSL-1.1-MIT and convert to MIT after two years; an immediate MIT license is available commercially. Call a current FSL release source-available, not open source; converted or direct MIT versions are open-source software.
 
 ## Canonical Source and Origin
 
@@ -57,7 +57,7 @@ Never trust browser JavaScript for identity or accept arbitrary `oai-authenticat
 
 ## AittaDB Credentials and Scopes
 
-AittaDB issues all downstream credentials. Scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, `storage.delete`, `events.publish`, `events.read`, and `events.subscribe`. Events scopes require `FEATURE_EVENTS_ENABLED=true` and authorize AittaDB only; publication and collection/item reads are implemented, while subscription awaits its owning task. Add no scope without its owning task.
+AittaDB issues all downstream credentials. Scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, `storage.delete`, `events.publish`, `events.read`, and `events.subscribe`. Events scopes require `FEATURE_EVENTS_ENABLED=true` and authorize AittaDB only: publication requires `events.publish`, reads require `events.read`, and bounded waits also require `events.subscribe`. Add no scope without its owning task.
 
 Lead public descriptions with "source-available hosted application backend for third-party apps", then ChatGPT sign-in inside ChatGPT Sites, AittaDB sessions, JSON records, files, and enabled Events. State the Sites dependency without leading with defensive "third-party"/"non-official" labels; keep no-affiliation/no-endorsement secondary and never imply technical independence. Avoid unexplained "Sites identity" or "Token authority"; use "Session issuer". Keep `officialOpenAIProduct: false` in machine metadata, not browser copy.
 
@@ -90,7 +90,7 @@ Each unit is a reusable vendor-neutral primitive with bounded execution, isolati
 - Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own narrow records. Audit actor attribution is a nullable canonical SHA-256 base64url field, never generic JSON.
 - Storage owns UUID/client-keyed records and file metadata; R2 uses generated physical keys.
-- Events owns quota-bounded immutable rows, atomic `POST /events`, and bounded collection/item reads. Derive ownership only from validated tokens, hash idempotency keys, perform no fan-out or payload/type logging, and purge only the exact leased human subject in finite batches.
+- Events owns quota-bounded immutable rows, atomic publication, bounded reads, and bounded waits. Derive ownership only from validated tokens; hash idempotency keys; require read+subscribe scopes and a bound cursor for waits; enforce separate rate, deadline, read, and cancellation bounds; perform no fan-out or payload/type logging; purge only the exact leased human subject in finite batches.
 - Account deletion follows `docs/account-deletion-jobs.md`. POST requires trusted identity/exact-email, origin, 1 KiB, CSRF, phrase, and bound encryption; admins/replay fail. GET authenticates the handle before D1 without identity resolution. Bounded leased phases purge credentials, records, events, and files; finalization clears audit attribution and requires no owned rows. Expose only coarse status. Same-email return creates a new UUID/empty namespaces; old JWTs may verify to `exp` but never authorize or identify it.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
@@ -188,7 +188,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes, publication, and collection/item reads; when off, reject before origin/body/CORS/auth/rate/repository/maintenance and omit controls. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
+`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes, publication, reads, and bounded waits; when off, reject before origin/body/CORS/auth/rate/repository/maintenance and omit controls. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
 
 Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 

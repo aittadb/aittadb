@@ -505,11 +505,13 @@ test("OpenAPI documents bounded event collection reads", () => {
   assert.match(String(operation.description), /events\.read/);
   assert.match(String(operation.description), /oldest-first/);
   assert.match(String(operation.description), /exact type/);
+  assert.match(String(operation.description), /events\.subscribe/);
+  assert.match(String(operation.description), /valid cursor/);
   assert.deepEqual(operation.security, [{ bearer: [] }]);
   const parameters = operation.parameters as Array<Record<string, unknown>>;
   assert.deepEqual(
     parameters.map((parameter) => parameter.name),
-    ["page_size", "cursor", "type"],
+    ["page_size", "cursor", "type", "wait"],
   );
   const responses = asObject(operation.responses, "Events responses");
   assert.ok(responses["200"]);
@@ -517,6 +519,7 @@ test("OpenAPI documents bounded event collection reads", () => {
   assert.ok(responses["401"]);
   assert.ok(responses["403"]);
   assert.ok(responses["429"]);
+  assert.ok(responses["499"]);
   assert.ok(responses["503"]);
 });
 

@@ -8,6 +8,7 @@ import {
 import { issueBrowserSessionAccessToken } from "../../src/browser-session";
 import { loadConfig } from "../../src/config";
 import { nowSeconds, sha256, uuid } from "../../src/crypto";
+import type { EventWaitScheduler } from "../../src/event-collection";
 import type { HypermediaDocument } from "../../src/hypermedia";
 import { createClientRegistration, issueTokens } from "../../src/oauth";
 import { MemoryAuthStore } from "../../src/store/memory";
@@ -60,6 +61,7 @@ interface EventFixture {
   client: ClientView;
   otherClient: ClientView;
   accessToken: string;
+  subscribeToken: string;
   otherClientToken: string;
   otherUserToken: string;
   missingScopeToken: string;
@@ -88,6 +90,11 @@ test("event collection returns bounded oldest-first pages and exact filtered res
   assert.equal(firstDocument.data.page_size, 2);
   assert.equal(firstDocument.data.has_more, true);
   assert.equal(firstDocument.data.type_filter, null);
+  assert.equal("delivery" in firstDocument.data, false);
+  assert.equal(
+    firstDocument.actions.some((item) => item.name === "wait-for-events"),
+    false,
+  );
   assert.deepEqual(
     firstDocument.data.items.map((item) => item.data.id),
     fixture.ownedIds.slice(0, 2),
@@ -197,6 +204,10 @@ test("event collection returns bounded oldest-first pages and exact filtered res
     "page_size=101",
     "type=bad%20type",
     "type=one&type=two",
+    "wait=1",
+    "wait=0",
+    "wait=01",
+    "wait=26",
     "unknown=value",
   ]) {
     const response = await bearerGet(
@@ -301,6 +312,8 @@ test("event collection supports the real signed-in HTML and hypermedia session",
   assert.equal(html.headers.get("cache-control"), "no-store");
   const page = await html.text();
   assert.match(page, /Application events/);
+  assert.match(page, /Wait for later events/);
+  assert.match(page, /name="cursor" value="[^"]+"/);
   assert.match(page, /1 top-level field/);
   assert.match(
     page,
@@ -329,6 +342,13 @@ test("event collection supports the real signed-in HTML and hypermedia session",
     (await json.json()) as HypermediaDocument<EventCollectionData>;
   const action = document.actions.find((item) => item.name === "list-events");
   assert.equal(action?.authorization?.scheme, "sites-session");
+  const waitAction = document.actions.find(
+    (item) => item.name === "wait-for-events",
+  );
+  assert.deepEqual(waitAction?.authorization?.scopes, [
+    "events.read",
+    "events.subscribe",
+  ]);
 
   const signedOutApp = createTestAittaDB(env, new MemoryAuthStore(), null);
   const signedOutJson = await requiredResponse(
@@ -356,6 +376,180 @@ test("event collection supports the real signed-in HTML and hypermedia session",
   );
 });
 
+test("bounded event wait returns promptly only for a later event in the exact namespace", async () => {
+  const scheduler = new DeterministicWaitScheduler();
+  const fixture = await eventFixture(
+    {
+      EVENTS_MAX_WAIT_SECONDS: "4",
+      EVENTS_MAX_WAIT_READS: "5",
+    },
+    scheduler,
+  );
+  const cursor = await latestCursor(fixture);
+  let sleepCount = 0;
+  scheduler.onSleep = async () => {
+    sleepCount += 1;
+    if (sleepCount === 1) {
+      await appendEvent(
+        fixture.store,
+        fixture.config,
+        fixture.user.id,
+        fixture.otherClient.id,
+        "private.client",
+        "cross-namespace-later",
+      );
+    } else if (sleepCount === 2) {
+      await appendEvent(
+        fixture.store,
+        fixture.config,
+        fixture.user.id,
+        fixture.client.id,
+        "invoice.ready",
+        "owned-later",
+      );
+    }
+  };
+
+  const response = await bearerGet(
+    fixture,
+    `${ISSUER}/events?cursor=${encodeURIComponent(cursor)}&page_size=10&wait=4`,
+    fixture.subscribeToken,
+  );
+  assert.equal(response.status, 200);
+  const document = (await response.json()) as HypermediaDocument<
+    EventCollectionData & {
+      delivery: { wait_seconds: number; timed_out: boolean };
+    }
+  >;
+  assert.equal(document.data.delivery.wait_seconds, 4);
+  assert.equal(document.data.delivery.timed_out, false);
+  assert.equal(document.data.count, 1);
+  assert.equal(document.data.items[0]?.data.type, "invoice.ready");
+  assert.equal(
+    JSON.stringify(document).includes("cross-namespace-later"),
+    false,
+  );
+  assert.equal(scheduler.sleeps.length, 2);
+  assert.deepEqual(scheduler.sleeps, [1000, 1000]);
+});
+
+test("bounded event wait has deterministic timeout and finite repository reads", async () => {
+  const scheduler = new DeterministicWaitScheduler();
+  const fixture = await eventFixture(
+    {
+      EVENTS_MAX_WAIT_SECONDS: "3",
+      EVENTS_MAX_WAIT_READS: "4",
+    },
+    scheduler,
+  );
+  const cursor = await latestCursor(fixture);
+  const originalList = fixture.store.listApplicationEvents.bind(fixture.store);
+  let reads = 0;
+  fixture.store.listApplicationEvents = async (...args) => {
+    reads += 1;
+    return originalList(...args);
+  };
+
+  const response = await bearerGet(
+    fixture,
+    `${ISSUER}/events?cursor=${encodeURIComponent(cursor)}&wait=3`,
+    fixture.subscribeToken,
+  );
+  assert.equal(response.status, 200);
+  const document = (await response.json()) as HypermediaDocument<
+    EventCollectionData & {
+      delivery: { wait_seconds: number; timed_out: boolean };
+    }
+  >;
+  assert.equal(document.data.count, 0);
+  assert.deepEqual(document.data.delivery, {
+    wait_seconds: 3,
+    timed_out: true,
+  });
+  assert.equal(reads, 4);
+  assert.deepEqual(scheduler.sleeps, [1000, 1000, 1000]);
+});
+
+test("bounded event wait stops on cancellation without another repository read", async () => {
+  const scheduler = new DeterministicWaitScheduler();
+  const fixture = await eventFixture({}, scheduler);
+  const cursor = await latestCursor(fixture);
+  const controller = new AbortController();
+  scheduler.onSleep = () => {
+    controller.abort();
+  };
+  const originalList = fixture.store.listApplicationEvents.bind(fixture.store);
+  let reads = 0;
+  fixture.store.listApplicationEvents = async (...args) => {
+    reads += 1;
+    return originalList(...args);
+  };
+  const response = await requiredResponse(
+    fixture.app.fetch(
+      new Request(
+        `${ISSUER}/events?cursor=${encodeURIComponent(cursor)}&wait=5`,
+        {
+          signal: controller.signal,
+          headers: {
+            accept: HYPERMEDIA,
+            authorization: `Bearer ${fixture.subscribeToken}`,
+          },
+        },
+      ),
+    ),
+  );
+  assert.equal(response.status, 499);
+  assert.equal(reads, 1);
+  assert.equal(scheduler.sleeps.length, 1);
+});
+
+test("bounded event wait rejects invalid cursors, missing scope, disabled clients, and subscribe abuse before waiting", async () => {
+  const scheduler = new DeterministicWaitScheduler();
+  const fixture = await eventFixture(
+    { EVENTS_SUBSCRIBE_RATE_LIMIT: "1" },
+    scheduler,
+  );
+  const cursor = await latestCursor(fixture);
+
+  const invalid = await bearerGet(
+    fixture,
+    `${ISSUER}/events?cursor=invalid&wait=1`,
+    fixture.subscribeToken,
+  );
+  assert.equal(invalid.status, 400);
+  const missingScope = await bearerGet(
+    fixture,
+    `${ISSUER}/events?cursor=${encodeURIComponent(cursor)}&wait=1`,
+    fixture.accessToken,
+  );
+  assert.equal(missingScope.status, 403);
+  assert.equal(scheduler.sleeps.length, 0);
+
+  const first = await bearerGet(
+    fixture,
+    `${ISSUER}/events?cursor=${encodeURIComponent(cursor)}&wait=1`,
+    fixture.subscribeToken,
+  );
+  assert.equal(first.status, 200);
+  const sleepsAfterFirstWait = scheduler.sleeps.length;
+  const limited = await bearerGet(
+    fixture,
+    `${ISSUER}/events?cursor=${encodeURIComponent(cursor)}&wait=1`,
+    fixture.subscribeToken,
+  );
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("retry-after"), "60");
+  assert.equal(scheduler.sleeps.length, sleepsAfterFirstWait);
+
+  await fixture.store.setClientDisabled(fixture.client.id, nowSeconds());
+  const disabled = await bearerGet(
+    fixture,
+    `${ISSUER}/events?cursor=${encodeURIComponent(cursor)}&wait=1`,
+    fixture.subscribeToken,
+  );
+  assert.equal(disabled.status, 401);
+});
+
 test("event collection feature gate and read rate limit fail before disclosure", async () => {
   const disabledEnv = await testEnv({ FEATURE_EVENTS_ENABLED: "false" });
   const disabledStore = new MemoryAuthStore();
@@ -365,7 +559,7 @@ test("event collection feature gate and read rate limit fail before disclosure",
   const disabledApp = createTestAittaDB(disabledEnv, disabledStore, null);
   const disabled = await requiredResponse(
     disabledApp.fetch(
-      new Request(`${ISSUER}/events`, {
+      new Request(`${ISSUER}/events?wait=999`, {
         headers: { accept: HYPERMEDIA, authorization: "Bearer invalid" },
       }),
     ),
@@ -389,6 +583,7 @@ test("event collection feature gate and read rate limit fail before disclosure",
 
 async function eventFixture(
   extra: Partial<RuntimeEnv> = {},
+  scheduler?: EventWaitScheduler,
 ): Promise<EventFixture> {
   const env = await eventEnv(extra);
   const config = loadConfig(env, ISSUER);
@@ -438,7 +633,7 @@ async function eventFixture(
   );
 
   return {
-    app: createTestAittaDB(env, store, IDENTITY),
+    app: createTestAittaDB(env, store, IDENTITY, scheduler),
     config,
     store,
     user,
@@ -446,6 +641,13 @@ async function eventFixture(
     client,
     otherClient,
     accessToken: await readToken(config, store, user, client, "events.read"),
+    subscribeToken: await readToken(
+      config,
+      store,
+      user,
+      client,
+      "events.read events.subscribe",
+    ),
     otherClientToken: await readToken(
       config,
       store,
@@ -494,7 +696,7 @@ async function registerClient(
         type: "public",
         name,
         redirectUris: [`${origin}/callback`],
-        scopes: ["events.read", "storage.read"],
+        scopes: ["events.read", "events.subscribe", "storage.read"],
         origins: [origin],
       },
       store,
@@ -592,4 +794,33 @@ async function requiredResponse(
   const resolved = await response;
   assert.ok(resolved);
   return resolved;
+}
+
+async function latestCursor(fixture: EventFixture): Promise<string> {
+  const response = await bearerGet(
+    fixture,
+    `${ISSUER}/events?page_size=100`,
+    fixture.subscribeToken,
+  );
+  assert.equal(response.status, 200);
+  const document =
+    (await response.json()) as HypermediaDocument<EventCollectionData>;
+  return document.data.resume_cursor;
+}
+
+class DeterministicWaitScheduler implements EventWaitScheduler {
+  now = 0;
+  readonly sleeps: number[] = [];
+  onSleep: (() => void | Promise<void>) | null = null;
+
+  nowMilliseconds(): number {
+    return this.now;
+  }
+
+  async sleep(milliseconds: number, signal: AbortSignal): Promise<boolean> {
+    this.sleeps.push(milliseconds);
+    this.now += milliseconds;
+    await this.onSleep?.();
+    return !signal.aborted;
+  }
 }

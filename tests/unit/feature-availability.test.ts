@@ -85,21 +85,34 @@ test("Events collection paging and read-rate configuration is finite and strict"
   assert.equal(defaultConfig.eventDefaultPageSize, 50);
   assert.equal(defaultConfig.eventMaxPageSize, 100);
   assert.equal(defaultConfig.eventReadRateLimit, 120);
+  assert.equal(defaultConfig.eventSubscribeRateLimit, 30);
+  assert.equal(defaultConfig.eventMaxWaitSeconds, 25);
+  assert.equal(defaultConfig.eventMaxWaitReads, 26);
 
   const custom = await testEnv({
     EVENTS_DEFAULT_PAGE_SIZE: "7",
     EVENTS_MAX_PAGE_SIZE: "13",
     EVENTS_READ_RATE_LIMIT: "29",
+    EVENTS_SUBSCRIBE_RATE_LIMIT: "11",
+    EVENTS_MAX_WAIT_SECONDS: "7",
+    EVENTS_MAX_WAIT_READS: "8",
   });
   const customConfig = loadConfig(custom, custom.ISSUER_URL!);
   assert.equal(customConfig.eventDefaultPageSize, 7);
   assert.equal(customConfig.eventMaxPageSize, 13);
   assert.equal(customConfig.eventReadRateLimit, 29);
+  assert.equal(customConfig.eventSubscribeRateLimit, 11);
+  assert.equal(customConfig.eventMaxWaitSeconds, 7);
+  assert.equal(customConfig.eventMaxWaitReads, 8);
 
   for (const [name, value, pattern] of [
     ["EVENTS_DEFAULT_PAGE_SIZE", "0", /Expected positive integer/],
     ["EVENTS_MAX_PAGE_SIZE", "101", /must not exceed 100/],
     ["EVENTS_READ_RATE_LIMIT", "1.5", /Expected positive integer/],
+    ["EVENTS_SUBSCRIBE_RATE_LIMIT", "0", /Expected positive integer/],
+    ["EVENTS_MAX_WAIT_SECONDS", "31", /must not exceed 30/],
+    ["EVENTS_MAX_WAIT_READS", "32", /must not exceed 31/],
+    ["EVENTS_MAX_WAIT_READS", "1", /must be at least 2/],
   ] as const) {
     const env = await testEnv({ [name]: value });
     assert.throws(() => loadConfig(env, env.ISSUER_URL!), pattern);

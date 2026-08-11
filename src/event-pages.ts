@@ -18,6 +18,10 @@ export interface ApplicationEventCollectionPage {
   nextHref: string | null;
   signedIn: boolean;
   publicationForm: string | null;
+  resumeCursor: string;
+  maxWaitSeconds: number;
+  canSubscribe: boolean;
+  waitResult: { seconds: number; timedOut: boolean } | null;
 }
 
 export function applicationEventCollectionPage(
@@ -42,18 +46,26 @@ export function applicationEventCollectionPage(
   const publication = page.publicationForm
     ? `<section class="resource-workbench" aria-labelledby="event-publish-heading"><h2 id="event-publish-heading">Publish an event</h2><p>Append one typed JSON object to this signed-in AittaDB namespace.</p>${page.publicationForm}</section>`
     : "";
+  const waitStatus = page.waitResult
+    ? page.waitResult.timedOut
+      ? `<p class="empty-state" role="status">No later events arrived within ${page.waitResult.seconds} ${page.waitResult.seconds === 1 ? "second" : "seconds"}.</p>`
+      : `<p class="note" role="status">Later events arrived before the ${page.waitResult.seconds}-second wait ended.</p>`
+    : "";
+  const waitForm = page.canSubscribe
+    ? `<section class="resource-workbench" aria-labelledby="event-wait-heading"><h2 id="event-wait-heading">Wait for later events</h2><p>Resume from the current opaque position and wait for a bounded interval.</p><form method="get" action="/events" class="stacked-form"><input type="hidden" name="cursor" value="${escapeHtml(page.resumeCursor)}"><input type="hidden" name="page_size" value="${page.pageSize}">${page.typeFilter ? `<input type="hidden" name="type" value="${escapeHtml(page.typeFilter)}">` : ""}<label for="event-wait">Wait seconds</label><input id="event-wait" name="wait" type="number" min="1" max="${page.maxWaitSeconds}" value="${page.maxWaitSeconds}" required><button type="submit">Wait for events</button></form></section>`
+    : "";
 
   return pageDocument({
     title: "Application events",
     eyebrow: "Persistent event stream",
     heading: "Application events",
     summary:
-      "Publish and read immutable events in this AittaDB identity and client namespace.",
+      "Read immutable events from this AittaDB identity and client namespace in deterministic order.",
     visualEyebrow: "Bounded delivery",
     visualHeading: "A durable stream with an opaque position.",
     visualSummary:
       "Every page stays inside one authenticated AittaDB namespace; internal ordering and credentials never enter the representation.",
-    body: `${publication}<section class="storage-state" aria-labelledby="event-list-heading"><div class="storage-state-heading"><div><h2 id="event-list-heading">Available events</h2><p>${page.items.length} ${page.items.length === 1 ? "event" : "events"} on this page${page.typeFilter ? ` for <code>${escapeHtml(page.typeFilter)}</code>` : ""}.</p></div></div>${state}${pagination}</section><section class="resource-workbench" aria-labelledby="event-filter-heading"><h2 id="event-filter-heading">Filter the collection</h2><form method="get" action="/events" class="stacked-form"><label for="event-type">Exact event type</label><input id="event-type" name="type" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,127}" value="${escapeHtml(page.typeFilter ?? "")}" autocomplete="off"><label for="event-page-size">Page size</label><input id="event-page-size" name="page_size" type="number" min="1" max="${page.maxPageSize}" value="${page.pageSize}" required><div class="actions"><button type="submit">Apply filter</button>${clearFilter}</div></form></section><p class="note">The browser uses only the current ChatGPT-signed-in AittaDB session. API clients use AittaDB bearer tokens with <code>events.read</code> and, for publication, <code>events.publish</code>. Event data is immutable and isolated from every other user and client namespace.</p>`,
+    body: `${publication}<section class="storage-state" aria-labelledby="event-list-heading"><div class="storage-state-heading"><div><h2 id="event-list-heading">Available events</h2><p>${page.items.length} ${page.items.length === 1 ? "event" : "events"} on this page${page.typeFilter ? ` for <code>${escapeHtml(page.typeFilter)}</code>` : ""}.</p></div></div>${waitStatus}${state}${pagination}</section><section class="resource-workbench" aria-labelledby="event-filter-heading"><h2 id="event-filter-heading">Filter the collection</h2><form method="get" action="/events" class="stacked-form"><label for="event-type">Exact event type</label><input id="event-type" name="type" maxlength="128" pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,127}" value="${escapeHtml(page.typeFilter ?? "")}" autocomplete="off"><label for="event-page-size">Page size</label><input id="event-page-size" name="page_size" type="number" min="1" max="${page.maxPageSize}" value="${page.pageSize}" required><div class="actions"><button type="submit">Apply filter</button>${clearFilter}</div></form></section>${waitForm}<p class="note">The browser uses only the current ChatGPT-signed-in AittaDB session. API clients use AittaDB bearer tokens with <code>events.read</code> and, for publication, <code>events.publish</code>; bounded waiting also requires <code>events.subscribe</code>. Event data is immutable and isolated from every other user and client namespace.</p>`,
     actions: [
       {
         href: "/session",

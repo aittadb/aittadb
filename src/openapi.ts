@@ -141,7 +141,16 @@ const eventCursorParameter = {
   required: false,
   schema: { type: "string", minLength: 1, maxLength: 342 },
   description:
-    "Opaque encrypted resume cursor returned by this collection. It is bound to the issuer, key, exact principal, OAuth client, and event-type filter and exposes no internal sequence or namespace identifier.",
+    "Opaque encrypted resume cursor returned by this collection. It is bound to the issuer, key, exact principal, OAuth client, and event-type filter and exposes no internal sequence or namespace identifier. It is required when wait is present.",
+} as const;
+
+const eventWaitParameter = {
+  name: "wait",
+  in: "query",
+  required: false,
+  schema: { type: "integer", minimum: 1, maximum: 30 },
+  description:
+    "Bounded long-poll duration in seconds. Requires cursor plus events.read and events.subscribe. The deployment may configure a lower maximum.",
 } as const;
 
 const eventTypeParameter = {
@@ -308,7 +317,7 @@ export const openApiSpec = {
     version: "0.1.0",
     license: { name: "FSL-1.1-MIT" },
     description:
-      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1, files in R2, and feature-gated immutable event publication plus bounded collection and item reads. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Bounded long-polling event delivery remains planned. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
+      "AittaDB is a source-available project providing a hosted application backend for third-party apps, services, and agents. Current public releases use FSL-1.1-MIT and become MIT-licensed two years after publication; an MIT license for immediate use is also available commercially. Its current implementation depends on OpenAI-hosted ChatGPT Sites for runtime, ChatGPT sign-in, D1, R2, configuration, and secrets. Within that platform boundary, AittaDB maps the server-side ChatGPT sign-in signal to a separate local user, issues its own OAuth 2.0, OpenID Connect, and JWT credentials, and provides user-and-client-isolated JSON records in D1, files in R2, and feature-gated immutable event publication, collection/item reads, and bounded long polling. Those credentials and stored data belong to AittaDB, are not OpenAI or ChatGPT credentials or data, and ChatGPT credentials are never forwarded. AittaDB is not affiliated with or endorsed by OpenAI. Browser-only forms require a present, independently verified same-origin signal plus a host-only CSRF session cookie; the validated token remains stable across concurrently open operation pages. Application resources negotiate HTML, compatible JSON, or versioned hypermedia using Accept and return 406 when none is acceptable; standards-defined OAuth/OIDC and binary responses retain their protocol media types.",
   },
   "x-aittadb-oauth-scopes": oauthScopeMetadata,
   paths: {
@@ -958,13 +967,14 @@ export const openApiSpec = {
     "/events": {
       get: {
         summary: "List immutable events in one authenticated namespace",
-        description: `Available only when FEATURE_EVENTS_ENABLED is true. A bearer request requires events.read and is bound to the token's active local principal and OAuth client. A request without a bearer token uses only the current ChatGPT-signed-in AittaDB browser session and the reserved browser-client namespace; its short-lived internal token is never returned. Results are oldest-first, bounded, optionally filtered by one exact type, and resumable through an encrypted cursor. Internal sequence, owner/client identifiers, credential state, and idempotency hashes are never represented. Immediate polling is the only behavior in this operation; bounded waiting is not yet available. ${tokenBoundCorsDescription}`,
+        description: `Available only when FEATURE_EVENTS_ENABLED is true. A bearer request requires events.read and is bound to the token's active local principal and OAuth client. A request without a bearer token uses only the current ChatGPT-signed-in AittaDB browser session and the reserved browser-client namespace; its short-lived internal token is never returned. Results are oldest-first, bounded, optionally filtered by one exact type, and resumable through an encrypted cursor. Supplying wait extends the same collection operation with a Worker-safe long poll and additionally requires events.subscribe plus a valid cursor. It returns promptly for a later matching event, otherwise returns an empty page whose delivery object marks the timeout. Internal sequence, owner/client identifiers, credential state, and idempotency hashes are never represented. ${tokenBoundCorsDescription}`,
+        "x-aittadb-sites-session-supported": true,
         parameters: [
           eventPageSizeParameter,
           eventCursorParameter,
           eventTypeParameter,
+          eventWaitParameter,
         ],
-        "x-aittadb-sites-session-supported": true,
         security: [{ bearer: [] }],
         responses: {
           "200": {
@@ -991,11 +1001,16 @@ export const openApiSpec = {
           },
           "403": {
             description:
-              "The valid AittaDB access token lacks events.read or its exact registered browser origin is not allowed",
+              "The valid AittaDB access token lacks events.read, a wait request lacks events.subscribe, or its exact registered browser origin is not allowed",
             content: hypermediaContent("#/components/schemas/HypermediaError"),
           },
           "406": notAcceptableResponse,
           "429": rateLimitedResponse(true),
+          "499": {
+            description:
+              "The request signal was cancelled while waiting; no later repository read is performed",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
           "503": eventsUnavailableResponse,
         },
       },
@@ -2255,7 +2270,7 @@ export const openApiSpec = {
                 type: "boolean",
                 default: false,
                 description:
-                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, while runtime discovery advertises immutable publication and bounded collection/item reads.",
+                  "Effective deployment policy for Events. When true, client registration and OAuth discovery may expose the AittaDB-only events.publish, events.read, and events.subscribe scopes, while runtime discovery advertises immutable publication, collection/item reads, and bounded long polling.",
               },
             },
             additionalProperties: false,
@@ -2264,7 +2279,7 @@ export const openApiSpec = {
           plannedCapabilities: {
             type: "array",
             description:
-              "Planned capabilities that are not available in the current build, including bounded long-polling event delivery.",
+              "Capabilities reserved for future versions and not available in this build.",
             items: { type: "string" },
           },
         },
@@ -2332,6 +2347,17 @@ export const openApiSpec = {
             type: "array",
             minItems: 1,
             items: { type: "string", minLength: 1 },
+          },
+          delivery: {
+            type: "object",
+            description:
+              "Present only for an explicit bounded wait. Ordinary polling retains the existing collection shape.",
+            required: ["wait_seconds", "timed_out"],
+            properties: {
+              wait_seconds: { type: "integer", minimum: 1, maximum: 30 },
+              timed_out: { type: "boolean" },
+            },
+            additionalProperties: false,
           },
         },
         additionalProperties: false,

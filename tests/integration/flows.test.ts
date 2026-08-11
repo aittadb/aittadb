@@ -107,9 +107,7 @@ test("metadata routes negotiate HTML for browsers and JSON for API clients", asy
     "D1-backed JSON records isolated by AittaDB user and client",
     "R2-backed files with D1 metadata isolated by AittaDB user and client",
   ]);
-  assert.deepEqual(apiRootJson.data.plannedCapabilities, [
-    "Persistent events and long-polling delivery",
-  ]);
+  assert.deepEqual(apiRootJson.data.plannedCapabilities, []);
   assert.equal(Object.hasOwn(apiRootJson.data, "tokenAuthority"), false);
   assert.equal(
     apiRootJson.links.find((item) => item.rel.includes("documentation"))?.href,
