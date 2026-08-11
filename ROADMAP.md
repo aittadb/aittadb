@@ -14,13 +14,13 @@ ChatGPT Sites D1/R2 capacity remains subject to unknown plan-specific aggregate 
 - [ ] ROADMAP-006: Add previous-page recovery and explicitly supported logical-key, content-type, or update-time filters to the existing bounded file pagination without exposing R2 internals.
 - [ ] ROADMAP-007: Add file entity tags and conditional reads/writes so clients can validate cached metadata and prevent lost byte or metadata updates.
 - [ ] ROADMAP-008: Add authorized HTTP byte-range retrieval for files with correct range validation, content headers, and unchanged user/client isolation.
-- [ ] ROADMAP-009: Define and migrate durable D1 event persistence with immutable event IDs, ordered timestamps, payload bounds, idempotency rules, and user/client ownership keys.
-- [ ] ROADMAP-010: Add scoped event publication with versioned hypermedia and HTML contracts, durable writes, idempotency behavior, request limits, and no implicit cross-client fan-out.
-- [ ] ROADMAP-011: Add bounded event collection and item retrieval with deterministic ordering, filtering rules, and no access outside the authenticated user/client namespace.
-- [ ] ROADMAP-012: Add long-poll event delivery with bounded wait duration, cancellation handling, rate limits, Worker-compatible execution, and ordinary polling fallback.
-- [ ] ROADMAP-013: Add opaque event cursors with stable resume semantics, expiry behavior, malformed-cursor rejection, and no embedded identity or deployment secrets.
-- [ ] ROADMAP-014: Add configurable event retention and bounded cleanup with documented deletion guarantees, safe defaults, and no long background jobs.
-- [ ] ROADMAP-015: Add event authorization scopes and policy enforcement for publish, read, and subscribe operations, including negative cross-user and cross-client paths.
+- [ ] ROADMAP-009: Define and migrate durable D1 event persistence with immutable event IDs, ordered timestamps, payload bounds, idempotency rules, and user/client ownership keys. Promoted to `TASK-182`; `PLAN.md` is authoritative for implementation status.
+- [ ] ROADMAP-010: Add scoped event publication with versioned hypermedia and HTML contracts, durable writes, idempotency behavior, request limits, and no implicit cross-client fan-out. Promoted to `TASK-188`; `PLAN.md` is authoritative for implementation status.
+- [ ] ROADMAP-011: Add bounded event collection and item retrieval with deterministic ordering, filtering rules, and no access outside the authenticated user/client namespace. Promoted to `TASK-189` and `TASK-190`; `PLAN.md` is authoritative for implementation status.
+- [ ] ROADMAP-012: Add long-poll event delivery with bounded wait duration, cancellation handling, rate limits, Worker-compatible execution, and ordinary polling fallback. Promoted to `TASK-191`; `PLAN.md` is authoritative for implementation status.
+- [ ] ROADMAP-013: Add opaque event cursors with stable resume semantics, expiry behavior, malformed-cursor rejection, and no embedded identity or deployment secrets. Promoted to `TASK-185`; `PLAN.md` is authoritative for implementation status.
+- [ ] ROADMAP-014: Add configurable event retention and bounded cleanup with documented deletion guarantees, safe defaults, and no long background jobs. Promoted to `TASK-186`; `PLAN.md` is authoritative for implementation status.
+- [ ] ROADMAP-015: Add event authorization scopes and policy enforcement for publish, read, and subscribe operations, including negative cross-user and cross-client paths. Promoted to `TASK-183`; `PLAN.md` is authoritative for implementation status.
 - [ ] ROADMAP-016: Add allowlisted-administrator storage ACL and policy management without granting generic D1/R2 access or bypassing immutable user/client namespace isolation.
 - [ ] ROADMAP-017: Add configurable per-user storage quotas aggregated safely across that user's client namespaces without revealing one client's contents to another.
 - [ ] ROADMAP-018: Add configurable per-client storage quotas that remain independent for each user/client namespace and cannot target AittaDB's internal clients or tables.
