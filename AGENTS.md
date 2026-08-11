@@ -24,7 +24,7 @@ Public releases use FSL-1.1-MIT and convert to MIT after two years; an immediate
 
 The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
-`develop` tracks `main`; only validated main-ready work belongs there. Keep unfinished work separate. `test.aittadb.com` permits bounded reversible tests; restore settings and delete fixtures/secrets. Production must use the exact commit/artifact accepted there. Approval is required to push/merge `main` or alter `aittadb.com` deployment, secrets, access, or versions.
+`develop` tracks `main`; only validated main-ready work belongs there. Keep unfinished work separate. `test.aittadb.com` permits bounded reversible tests; restore settings and delete fixtures/secrets. Production must use the accepted commit/build. Approval is required to push/merge `main` or alter `aittadb.com` deployment, secrets, access, or versions.
 
 ## Runtime Contract
 
@@ -245,7 +245,7 @@ Implementation DoD: contract/code/negative tests/user+developer docs/passing for
 
 Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; reset/checkout needs approval. Run `npm run validate` before handoff. Feature PRs target `develop`; keep at most one `main` PR from `develop`; no merge without approval; close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits.
 
-Outside test, deployment needs approval. Package one pushed `develop` commit; deploy/verify it on acceptance, then deploy that exact artifact to production without configuration changes. Never bypass/reverse this order. Sites version numbers are project-local; compare commits. Apply checked-in migrations and verify status. Claim sign-in E2E only after hosted testing; record uncertainty and next step.
+Outside test, deployment needs approval. Build one pushed `develop` commit; deploy/verify it on acceptance, then deploy the same commit/build to production without configuration changes. Archives may differ only by required target `project_id`. Never bypass/reverse this order. Sites version numbers are project-local; compare commits. Apply migrations and verify status. Claim sign-in E2E only after hosted testing; record uncertainty/next step.
 
 ## Maintaining This File
 
