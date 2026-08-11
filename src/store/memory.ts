@@ -1052,13 +1052,21 @@ export class MemoryAuthStore implements AuthStore {
     clientId: string,
     afterSequence: number | null,
     limit: number,
+    eventType: string | null = null,
   ): Promise<ApplicationEventPage> {
-    assertApplicationEventPageInput(userId, clientId, afterSequence, limit);
+    assertApplicationEventPageInput(
+      userId,
+      clientId,
+      afterSequence,
+      limit,
+      eventType,
+    );
     const selected = Array.from(this.applicationEvents.values())
       .filter(
         (event) =>
           event.userId === userId &&
           event.clientId === clientId &&
+          (eventType === null || event.type === eventType) &&
           (afterSequence === null || event.sequence > afterSequence),
       )
       .sort((left, right) => left.sequence - right.sequence)

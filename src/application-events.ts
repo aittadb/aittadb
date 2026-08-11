@@ -128,6 +128,7 @@ export function assertApplicationEventPageInput(
   clientId: string,
   afterSequence: number | null,
   limit: number,
+  eventType: string | null = null,
 ): void {
   assertApplicationEventNamespace(userId, clientId);
   if (
@@ -138,6 +139,13 @@ export function assertApplicationEventPageInput(
     limit > APPLICATION_EVENT_MAX_PAGE_SIZE
   ) {
     throw new RangeError("application_event_page_invalid");
+  }
+  if (eventType !== null) assertApplicationEventType(eventType);
+}
+
+export function assertApplicationEventType(value: string): void {
+  if (!EVENT_TYPE.test(value)) {
+    throw new RangeError("application_event_type_invalid");
   }
 }
 

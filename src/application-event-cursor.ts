@@ -1,4 +1,7 @@
-import { assertApplicationEventNamespace } from "./application-events";
+import {
+  assertApplicationEventNamespace,
+  assertApplicationEventType,
+} from "./application-events";
 import { base64UrlDecode, base64UrlEncode } from "./crypto";
 import type { AppConfig } from "./types";
 
@@ -29,8 +32,9 @@ export async function encodeApplicationEventCursor(
   afterSequence: number,
   now: number,
   config: AppConfig,
+  eventType: string | null = null,
 ): Promise<string> {
-  assertCursorInput(principalId, clientId, afterSequence, now);
+  assertCursorInput(principalId, clientId, afterSequence, now, eventType);
   const payload: CursorPayload = {
     v: CURSOR_VERSION,
     sequence: afterSequence,
@@ -40,7 +44,7 @@ export async function encodeApplicationEventCursor(
   const iv = new Uint8Array(IV_BYTES);
   crypto.getRandomValues(iv);
   const ciphertext = await crypto.subtle.encrypt(
-    aesGcmParameters(iv, principalId, clientId, config),
+    aesGcmParameters(iv, principalId, clientId, eventType, config),
     await cursorKey(config),
     ownedBuffer(plaintext),
   );
@@ -56,9 +60,10 @@ export async function decodeApplicationEventCursor(
   clientId: string,
   now: number,
   config: AppConfig,
+  eventType: string | null = null,
 ): Promise<ApplicationEventCursorCheckpoint | null> {
   if (
-    !isCursorContext(principalId, clientId, now) ||
+    !isCursorContext(principalId, clientId, now, eventType) ||
     !isCanonicalToken(value)
   ) {
     return null;
@@ -76,7 +81,7 @@ export async function decodeApplicationEventCursor(
     const iv = token.slice(0, IV_BYTES);
     const ciphertext = token.slice(IV_BYTES);
     const decrypted = await crypto.subtle.decrypt(
-      aesGcmParameters(iv, principalId, clientId, config),
+      aesGcmParameters(iv, principalId, clientId, eventType, config),
       await cursorKey(config),
       ownedBuffer(ciphertext),
     );
@@ -114,6 +119,7 @@ function aesGcmParameters(
   iv: Uint8Array,
   principalId: string,
   clientId: string,
+  eventType: string | null,
   config: AppConfig,
 ): AesGcmParams {
   const additionalData = new TextEncoder().encode(
@@ -124,6 +130,7 @@ function aesGcmParameters(
       config.jwtKeyId,
       principalId,
       clientId,
+      eventType,
     ]),
   );
   return {
@@ -139,8 +146,10 @@ function assertCursorInput(
   clientId: string,
   afterSequence: number,
   now: number,
+  eventType: string | null,
 ): void {
   assertApplicationEventNamespace(principalId, clientId);
+  if (eventType !== null) assertApplicationEventType(eventType);
   if (
     !Number.isSafeInteger(afterSequence) ||
     afterSequence < 0 ||
@@ -154,10 +163,12 @@ function isCursorContext(
   principalId: string,
   clientId: string,
   now: number,
+  eventType: string | null,
 ): boolean {
   if (!isSafeNow(now)) return false;
   try {
     assertApplicationEventNamespace(principalId, clientId);
+    if (eventType !== null) assertApplicationEventType(eventType);
     return true;
   } catch {
     return false;

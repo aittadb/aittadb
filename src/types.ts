@@ -55,6 +55,9 @@ export interface RuntimeEnv {
   EVENTS_USER_MAX_BYTES?: string;
   EVENTS_NAMESPACE_MAX_ITEMS?: string;
   EVENTS_NAMESPACE_MAX_BYTES?: string;
+  EVENTS_DEFAULT_PAGE_SIZE?: string;
+  EVENTS_MAX_PAGE_SIZE?: string;
+  EVENTS_READ_RATE_LIMIT?: string;
   MAINTENANCE_CLEANUP_TELEMETRY_ENABLED?: string;
   STORAGE_WRITES_ENABLED?: string;
   STORAGE_GLOBAL_MAX_ITEMS?: string;
@@ -128,6 +131,9 @@ export interface AppConfig {
   eventRetentionSeconds: number;
   maintenanceCleanupTelemetryEnabled: boolean;
   eventLimits: ApplicationEventLimits;
+  eventDefaultPageSize: number;
+  eventMaxPageSize: number;
+  eventReadRateLimit: number;
   storageLimits: StorageLimits;
   storageDefaultPageSize: number;
   storageMaxPageSize: number;
@@ -330,6 +336,7 @@ export interface ApplicationEventPageRepository {
     clientId: string,
     afterSequence: number | null,
     limit: number,
+    eventType?: string | null,
   ): Promise<ApplicationEventPage>;
 }
 

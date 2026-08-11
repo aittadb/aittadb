@@ -127,7 +127,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
       items: [
         "The email address and optional display name supplied server-side by ChatGPT Sites when you sign in, together with a separate locally generated UUID and timestamps.",
         "OAuth clients, requested scopes, authorization and consent state, token metadata, hashed opaque credentials, and access-token revocation identifiers.",
-        "JSON records, logical keys, application events, files, file metadata, and other content that you or an authorized application choose to store.",
+        "JSON records, logical keys, files, file metadata, immutable application events, and other content that you or an authorized application choose to store.",
         "Internal account-deletion job state containing the local subject, coarse state, claim attempt, and timestamps. An eligible signed-in user can start this state through a protected account-deletion request; no job details are returned.",
         "Redacted audit events and pseudonymous rate-limit identifiers used for security, abuse prevention, and reliability.",
       ],
@@ -144,7 +144,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
       id: "purposes",
       title: "Purposes and legal bases",
       paragraphs: [
-        "The operator uses this data to create and protect your local AittaDB identity; issue AittaDB sessions; perform approved OAuth and OpenID Connect operations; provide isolated records, events, and files; prevent abuse; investigate security and reliability problems; and meet applicable legal obligations.",
+        "The operator uses this data to create and protect your local AittaDB identity; issue AittaDB sessions; perform approved OAuth and OpenID Connect operations; provide isolated records, files, and event streams; prevent abuse; investigate security and reliability problems; and meet applicable legal obligations.",
         "Where the GDPR applies, the operator generally relies on processing necessary to provide the service you request and on legitimate interests in operating, securing, and preventing abuse of this deployment. Other legal bases can apply when required by the deployment's circumstances. OAuth approval is an authorization control and is not, by itself, a statement that consent is the data-protection legal basis.",
       ],
     },
@@ -153,7 +153,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
       title: "Recipients and authorized applications",
       paragraphs: [
         "OpenAI hosts ChatGPT Sites and may process Hosted Data to host, maintain, and support this deployment under the terms and data-processing agreement applicable to the operator's account.",
-        "An authorized application receives the local subject and only claims covered by approved AittaDB scopes. Email and name are released only through the corresponding approved scopes. Records, events, and files stay isolated to the signed-in user and the application client that owns that namespace.",
+        "An authorized application receives the local subject and only claims covered by approved AittaDB scopes. Email and name are released only through the corresponding approved scopes. Records, files, and application events stay isolated to the signed-in user and the application client that owns that namespace.",
         "The core service does not sell personal data or use advertising or analytics services. Information may also be disclosed where required or permitted by law. Third-party applications remain responsible for their own processing and privacy notices.",
       ],
     },
@@ -162,7 +162,7 @@ function privacySections(config: AppConfig): readonly PrivacyPolicySection[] {
       title: "Retention and deletion",
       paragraphs: [
         `Access tokens normally expire after ${formatDuration(config.accessTokenTtlSeconds)}, authorization codes after ${formatDuration(config.authCodeTtlSeconds)}, device grants after ${formatDuration(config.deviceCodeTtlSeconds)}, and refresh tokens after ${formatDuration(config.refreshTokenTtlSeconds)}. These periods are deployment-configurable. Expired protocol rows become eligible for bounded, traffic-dependent cleanup and may remain until cleanup runs.`,
-        "One-time administrator submission hashes become eligible for bounded cleanup after 15 minutes. Audit events become eligible after 90 days; account deletion clears their structured subject-derived actor attribution before removing the local identity while retaining the redacted events. One-minute rate-limit counters become eligible after five minutes. Local identities, remembered consents, client metadata, and application content do not share one automatic expiry period.",
+        `Application events carry a server-assigned expiry of ${formatDuration(config.eventRetentionSeconds)} by default for this deployment and become eligible for bounded cleanup afterward; eligibility is not immediate physical deletion. One-time administrator submission hashes become eligible after 15 minutes. Audit events become eligible after 90 days; account deletion clears their structured subject-derived actor attribution before removing the local identity while retaining the redacted events. One-minute rate-limit counters become eligible after five minutes. Local identities, remembered consents, client metadata, and other application content do not share one automatic expiry period.`,
         "Authorized users and applications can delete individual records and files. An eligible signed-in user can also request deletion of the current local AittaDB account after same-origin, CSRF, explicit-phrase, and short-lived account-bound confirmation checks. Administrators cannot start this operation. Acceptance blocks account access and new event writes immediately, then starts bounded deletion of owned credentials, records, application events, file metadata and objects, and the local identity. A protected status resource exposes only pending, running, retry, or completed. The completed state retains only a terminal pseudonymous idempotency tombstone with no automatic retention limit or direct public representation.",
       ],
     },

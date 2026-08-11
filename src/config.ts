@@ -1,6 +1,7 @@
 import type { AppConfig, PrivacyConfig, RuntimeEnv } from "./types";
 import {
   APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS,
+  APPLICATION_EVENT_MAX_PAGE_SIZE,
   APPLICATION_EVENT_MAX_RETENTION_SECONDS,
 } from "./application-events";
 
@@ -15,6 +16,8 @@ const DEFAULT_EVENTS_USER_MAX_ITEMS = 1_000;
 const DEFAULT_EVENTS_USER_MAX_BYTES = 32 * 1024 * 1024;
 const DEFAULT_EVENTS_NAMESPACE_MAX_ITEMS = 500;
 const DEFAULT_EVENTS_NAMESPACE_MAX_BYTES = 16 * 1024 * 1024;
+const DEFAULT_EVENTS_PAGE_SIZE = 50;
+const DEFAULT_EVENTS_READ_RATE_LIMIT = 120;
 const DEFAULT_STORAGE_GLOBAL_MAX_ITEMS = 10_000;
 const DEFAULT_STORAGE_GLOBAL_MAX_BYTES = 1024 * 1024 * 1024;
 const DEFAULT_STORAGE_USER_MAX_ITEMS = 1_000;
@@ -59,6 +62,21 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
   if (storageDefaultPageSize > storageMaxPageSize) {
     throw new Error(
       "STORAGE_DEFAULT_PAGE_SIZE must not exceed STORAGE_MAX_PAGE_SIZE",
+    );
+  }
+  const eventMaxPageSize = readBoundedPositiveInt(
+    env.EVENTS_MAX_PAGE_SIZE,
+    APPLICATION_EVENT_MAX_PAGE_SIZE,
+    APPLICATION_EVENT_MAX_PAGE_SIZE,
+    "EVENTS_MAX_PAGE_SIZE",
+  );
+  const eventDefaultPageSize = readPositiveInt(
+    env.EVENTS_DEFAULT_PAGE_SIZE,
+    DEFAULT_EVENTS_PAGE_SIZE,
+  );
+  if (eventDefaultPageSize > eventMaxPageSize) {
+    throw new Error(
+      "EVENTS_DEFAULT_PAGE_SIZE must not exceed EVENTS_MAX_PAGE_SIZE",
     );
   }
 
@@ -130,6 +148,12 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
         DEFAULT_EVENTS_NAMESPACE_MAX_BYTES,
       ),
     },
+    eventDefaultPageSize,
+    eventMaxPageSize,
+    eventReadRateLimit: readPositiveInt(
+      env.EVENTS_READ_RATE_LIMIT,
+      DEFAULT_EVENTS_READ_RATE_LIMIT,
+    ),
     storageLimits: {
       writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),
       globalMaxItems: readPositiveInt(

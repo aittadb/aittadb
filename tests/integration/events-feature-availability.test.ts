@@ -21,9 +21,9 @@ for (const [configured, expected] of [
   ["false", false],
   ["true", true],
 ] as const) {
-  test(`Events ${configured} is visible as policy without advertising an unavailable operation`, async () => {
+  test(`Events ${configured} controls collection discovery and operation maps`, async () => {
     const env = await testEnv({ FEATURE_EVENTS_ENABLED: configured });
-    const app = createTestAittaDB(env, new MemoryAuthStore(), null);
+    const app = createTestAittaDB(env, new MemoryAuthStore());
 
     const jsonResponse = await app.fetch(
       new Request("https://aittadb.example.test/", {
@@ -38,13 +38,15 @@ for (const [configured, expected] of [
       (await jsonResponse.json()) as HypermediaDocument<ServiceMetadata>;
     assert.equal(document.data.features.events, expected);
     assert.deepEqual(document.data.plannedCapabilities, [
-      "Persistent events and long-polling delivery",
+      expected
+        ? "Event publication and bounded long-polling delivery"
+        : "Persistent events and long-polling delivery",
     ]);
     assert.equal(
       document.data.capabilities.some((capability) =>
-        /events/i.test(capability),
+        /event/i.test(capability),
       ),
-      false,
+      expected,
     );
     assert.equal(
       document.links.some(
@@ -52,7 +54,7 @@ for (const [configured, expected] of [
           item.rel.some((relation) => /events/i.test(relation)) ||
           new URL(item.href).pathname.startsWith("/events"),
       ),
-      false,
+      expected,
     );
     assert.equal(
       document.actions.some(
@@ -60,7 +62,7 @@ for (const [configured, expected] of [
           /events/i.test(item.name) ||
           new URL(item.href).pathname.startsWith("/events"),
       ),
-      false,
+      expected,
     );
 
     const htmlResponse = await app.fetch(
@@ -72,6 +74,26 @@ for (const [configured, expected] of [
     assert.equal(htmlResponse.status, 200);
     const html = await htmlResponse.text();
     assert.match(html, new RegExp(`Events ${expected ? "on" : "off"}`));
-    assert.doesNotMatch(html, /href="\/events(?:[/?#"])/);
+    assert.equal(/href="\/events(?:[/?#"])/.test(html), expected);
+
+    const sessionResponse = await app.fetch(
+      new Request("https://aittadb.example.test/session", {
+        headers: { accept: "application/vnd.aittadb+json; version=0.1" },
+      }),
+    );
+    assert.ok(sessionResponse);
+    assert.equal(sessionResponse.status, 200);
+    const session =
+      (await sessionResponse.json()) as HypermediaDocument<unknown>;
+    assert.equal(
+      session.links.some((item) =>
+        item.rel.some((relation) => /events/i.test(relation)),
+      ),
+      expected,
+    );
+    assert.equal(
+      session.actions.some((item) => /events/i.test(item.name)),
+      expected,
+    );
   });
 }

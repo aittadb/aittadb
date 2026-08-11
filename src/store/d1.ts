@@ -1413,18 +1413,33 @@ export class D1AuthStore implements AuthStore {
     clientId: string,
     afterSequence: number | null,
     limit: number,
+    eventType: string | null = null,
   ): Promise<ApplicationEventPage> {
-    assertApplicationEventPageInput(userId, clientId, afterSequence, limit);
+    assertApplicationEventPageInput(
+      userId,
+      clientId,
+      afterSequence,
+      limit,
+      eventType,
+    );
     const rows = await this.db
       .prepare(
-        afterSequence === null
-          ? "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? ORDER BY sequence ASC LIMIT ?"
-          : "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?",
+        eventType === null
+          ? afterSequence === null
+            ? "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? ORDER BY sequence ASC LIMIT ?"
+            : "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?"
+          : afterSequence === null
+            ? "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? AND event_type = ? ORDER BY sequence ASC LIMIT ?"
+            : "SELECT * FROM application_events WHERE user_id = ? AND client_id = ? AND event_type = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?",
       )
       .bind(
-        ...(afterSequence === null
-          ? [userId, clientId, limit + 1]
-          : [userId, clientId, afterSequence, limit + 1]),
+        ...[
+          userId,
+          clientId,
+          ...(eventType === null ? [] : [eventType]),
+          ...(afterSequence === null ? [] : [afterSequence]),
+          limit + 1,
+        ],
       )
       .all<Row>();
     const selected = (rows.results ?? []).map(rowToApplicationEvent);

@@ -6,7 +6,7 @@ Authoritative for contributors; read before changes. Keep below 32,000 bytes (`n
 
 AittaDB is a general-purpose hosted database server and application-backend service. It serves apps, services, and agents through small, independent, reusable primitives and stable HTTP protocols. On OpenAI-hosted ChatGPT Sites it maps trusted server-side sign-in to a local user, issues its own OAuth/OIDC/JWT credentials, and provides isolated data.
 
-Current: identity mapping, OAuth/OIDC/JWT, D1 JSON records, and R2 files with D1 metadata. Events/long polling are unavailable.
+Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated event reads; publication/long polling are unavailable.
 
 The server boundary includes identity/authentication; user/client/application/namespace isolation; records, objects, events/delivery; conditional writes, versions, cursors, idempotency, bounded atomic operations, quotas, expiry, retention, cleanup, hypermedia, OpenAPI, and protocol/operations docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols, not clients.
 
@@ -57,7 +57,7 @@ Never trust browser JavaScript for identity or accept arbitrary `oai-authenticat
 
 ## AittaDB Credentials and Scopes
 
-AittaDB issues all downstream credentials. Scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, `storage.delete`, `events.publish`, `events.read`, and `events.subscribe`. Events scopes require `FEATURE_EVENTS_ENABLED=true`, authorize AittaDB only, and expose no route by themselves. Add no other scope without its owning task.
+AittaDB issues all downstream credentials. Scopes are `openid`, `email`, `profile`, `offline_access`, `storage.read`, `storage.write`, `storage.delete`, `events.publish`, `events.read`, and `events.subscribe`. Events scopes require `FEATURE_EVENTS_ENABLED=true` and authorize AittaDB only; `events.read` serves `/events`, while publication/subscription await their tasks. Add no other scope without its owning task.
 
 Lead public descriptions with "source-available hosted application backend for third-party apps", then ChatGPT sign-in inside ChatGPT Sites, AittaDB sessions, JSON records, and files. State the Sites dependency without leading with defensive "third-party"/"non-official" labels; keep no-affiliation/no-endorsement secondary and never imply technical independence. Avoid unexplained "Sites identity" or "Token authority"; use "Session issuer". Keep `officialOpenAIProduct: false` in machine metadata, not browser copy.
 
@@ -188,7 +188,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes but no routes yet; disabled scope use fails even from persisted state. Future routes gate before body/auth/rate/repository/maintenance and omit controls when off. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
+`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events gates scopes/routes before body, auth, rate, repository, or maintenance work and omits disabled controls. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
 
 Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 

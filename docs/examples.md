@@ -32,9 +32,19 @@ curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
   --data-urlencode 'scope=events.publish events.read'
 ```
 
-The scopes can be registered and issued before the Events HTTP resources are released, but they do not create an endpoint or persistence capability by themselves. `events.subscribe` is reserved for bounded delivery and will also require `events.read` at the operation boundary. If Events is disabled, registration and every grant path reject its scopes; existing storage and OIDC scopes are unchanged.
+`events.read` authorizes the current bounded immutable collection at `GET /events`. `events.publish` and `events.subscribe` remain reserved until their publication and bounded-delivery operations are released. If Events is disabled, registration and every grant path reject its scopes and the collection route fails closed; existing storage and OIDC scopes are unchanged.
 
-The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; Events is planned and is not an available API in the MVP.
+Read the first page and then follow the returned semantic `next` or `resume` link rather than constructing a cursor:
+
+```sh
+curl -s "$ISSUER_URL/events?page_size=50&type=example.created" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Accept: application/vnd.aittadb+json; version=0.1'
+```
+
+The optional `type` is one exact case-sensitive event type. The opaque cursor is short-lived and bound to the token's principal, client, and filter. Browsers can open the same `/events` URI with `Accept: text/html` and use the current ChatGPT-signed-in AittaDB session without handling its internal token.
+
+The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; bounded event reads are available only when enabled, while event publication and long polling remain planned.
 
 ## Hypermedia Traversal
 

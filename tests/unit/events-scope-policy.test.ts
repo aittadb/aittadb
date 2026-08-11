@@ -117,7 +117,7 @@ test("public, confidential, and service registration apply one Events scope poli
   );
 });
 
-test("discovery and OpenAPI describe conditional AittaDB-only Events scopes without routes", () => {
+test("discovery and OpenAPI describe conditional AittaDB-only Events scopes and implemented routes", () => {
   const disabled = oidcConfiguration("https://aittadb.example.test", {
     oauthAppsEnabled: true,
     eventsEnabled: false,
@@ -149,7 +149,7 @@ test("discovery and OpenAPI describe conditional AittaDB-only Events scopes with
     assert.equal(metadata.feature, "FEATURE_EVENTS_ENABLED");
     assert.match(metadata.description, /AittaDB namespace/);
   }
-  assert.equal("/events" in openApiSpec.paths, false);
+  assert.equal("/events" in openApiSpec.paths, true);
   assert.equal("/events/{id}" in openApiSpec.paths, false);
 });
 

@@ -260,7 +260,7 @@ test("public copy distinguishes licensing from the current Sites dependency", as
 
   assert.match(
     readme,
-    /Persistent events and long-polling delivery as a planned capability/,
+    /Feature-gated bounded reads of persistent immutable application events/,
   );
 });
 
