@@ -6,7 +6,7 @@ Authoritative for contributors; read before changes. Keep below 32,000 bytes (`n
 
 AittaDB is a general-purpose hosted database server and application-backend service. It exposes small, independent, reusable primitives through stable HTTP protocols. On ChatGPT Sites it maps trusted server-side sign-in to a local user, issues AittaDB OAuth/OIDC/JWT credentials, and isolates data.
 
-Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated immutable event publication, collection/item reads, and bounded long polling.
+Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated immutable Events publication, reads, and bounded waits.
 
 Server boundary: identity/authentication; isolation; records, objects, events/delivery; conditional writes, versions, cursors, idempotency, bounded atomics, quotas, expiry/retention/cleanup, hypermedia, OpenAPI, and operations docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols only.
 
@@ -24,7 +24,7 @@ Public releases use FSL-1.1-MIT and convert to MIT after two years; an immediate
 
 The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
-`develop` is the primary workspace and tracks `main`. Rebase only validated, main-ready features onto it; unfinished work stays separate. Never push or merge `main`, or change `aittadb.com` deployment, versions, secrets, or access, without approval. `test.aittadb.com` is preapproved for bounded testing and reversible configuration, key, fixture, and deployment changes; restore settings, remove fixtures, and retain no identity or secret.
+`develop` is the primary workspace tracking `main`; only validated, main-ready features may rebase onto it. Keep unfinished work separate. Approval is required to push/merge `main` or alter `aittadb.com` deployment, secrets, access, or versions. `test.aittadb.com` is preapproved for bounded reversible tests and changes; restore settings and remove fixtures, identities, and secrets.
 
 ## Runtime Contract
 
@@ -90,7 +90,7 @@ Each unit is a reusable vendor-neutral primitive with bounded execution, isolati
 - Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own narrow records. Audit actor attribution is a nullable canonical SHA-256 base64url field, never generic JSON.
 - Storage owns UUID/client-keyed records and file metadata; R2 uses generated physical keys.
-- Events owns quota-bounded immutable rows, atomic publication, bounded reads, and bounded waits. Derive ownership only from validated tokens; hash idempotency keys; require read+subscribe scopes and a bound cursor for waits; enforce separate rate, deadline, read, and cancellation bounds; perform no fan-out or payload/type logging; purge only the exact leased human subject in finite batches.
+- Events owns quota-bounded immutable rows, atomic publication, and bounded reads/waits. Ownership comes only from validated tokens. Hash idempotency keys; waits require read+subscribe scopes, a bound cursor, and separate rate/deadline/read/cancellation limits. No fan-out or payload/type logs. Purge only the exact leased human subject in finite batches.
 - Account deletion follows `docs/account-deletion-jobs.md`. POST requires trusted identity/exact-email, origin, 1 KiB, CSRF, phrase, and bound encryption; admins/replay fail. GET authenticates the handle before D1 without identity resolution. Bounded leased phases purge credentials, records, events, and files; finalization clears audit attribution and requires no owned rows. Expose only coarse status. Same-email return creates a new UUID/empty namespaces; old JWTs may verify to `exp` but never authorize or identify it.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
 - Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
@@ -252,7 +252,7 @@ Never split one unit's implementation, tests, or documentation into separate tas
 
 ## Git, Review, and Deployment
 
-Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning-only commits may be direct. Preserve unrelated work; no destructive reset/checkout without approval. Run `npm run validate` before handoff. Feature PRs target `develop`; only complete DoD work enters it. Keep at most one `main` PR, normally from `develop`; never merge without approval. Close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits. Reviews prioritize security, regressions, protocol drift, and missing tests.
+Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; destructive reset/checkout requires approval. Run `npm run validate` before handoff. Feature PRs target `develop`. Keep at most one `main` PR, normally from `develop`; never merge without approval, and close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits. Reviews prioritize security, regressions, protocol drift, and missing tests.
 
 Outside the preapproved test Site, deployment requires approval. Publish exact validated committed source, apply checked-in migrations through Sites, preserve bindings/secrets, and verify status. Claim Sites sign-in E2E only after real hosted testing; record remaining hosted uncertainty and the next manual step.
 
