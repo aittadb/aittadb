@@ -32,7 +32,7 @@ curl --user "$AITTADB_CLIENT_ID:$AITTADB_CLIENT_SECRET" \
   --data-urlencode 'scope=events.publish events.read'
 ```
 
-`events.read` authorizes the current bounded immutable collection at `GET /events`. `events.publish` and `events.subscribe` remain reserved until their publication and bounded-delivery operations are released. If Events is disabled, registration and every grant path reject its scopes and the collection route fails closed; existing storage and OIDC scopes are unchanged.
+`events.read` authorizes bounded immutable collection and item reads. `events.publish` and `events.subscribe` remain reserved until their publication and bounded-delivery operations are released. If Events is disabled, registration and every grant path reject its scopes and both read routes fail closed; existing storage and OIDC scopes are unchanged.
 
 Read the first page and then follow the returned semantic `next` or `resume` link rather than constructing a cursor:
 
@@ -44,7 +44,17 @@ curl -s "$ISSUER_URL/events?page_size=50&type=example.created" \
 
 The optional `type` is one exact case-sensitive event type. The opaque cursor is short-lived and bound to the token's principal, client, and filter. Browsers can open the same `/events` URI with `Accept: text/html` and use the current ChatGPT-signed-in AittaDB session without handling its internal token.
 
-The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; bounded event reads are available only when enabled, while event publication and long polling remain planned.
+Follow an event's `self` link, or read an already-known identifier from the same exact namespace:
+
+```sh
+curl -s "$ISSUER_URL/events/$EVENT_ID" \
+  --header 'Accept: application/vnd.aittadb+json; version=0.1' \
+  --header "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+The response contains only the immutable public event fields plus self and collection links. A ChatGPT-signed-in user can open the same URL with `Accept: text/html`; AittaDB invokes the canonical read through its reserved current-session namespace without exposing the internal token. `events.subscribe` is reserved for bounded delivery and will also require `events.read` at the operation boundary.
+
+The public root offers sign-in or sign-out according to the trusted ChatGPT Sites identity signal. Its compact product label is **Identity / Data / Files / Events**; bounded collection and item reads are available only when enabled, while event publication and long polling remain planned.
 
 ## Hypermedia Traversal
 

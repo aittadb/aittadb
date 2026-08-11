@@ -1,6 +1,6 @@
 # Persistent Events
 
-Persistent Events is being built as small composable AittaDB server primitives. When `FEATURE_EVENTS_ENABLED=true`, the current release exposes bounded immutable collection reads at `GET /events`; publication, item retrieval, and long-poll delivery remain unavailable until their owning tasks land.
+Persistent Events is being built as small composable AittaDB server primitives. When `FEATURE_EVENTS_ENABLED=true`, the current release exposes bounded collection reads at `GET /events` and immutable item reads at `GET /events/{id}`; publication and long-poll delivery remain unavailable until their owning tasks land.
 
 ## Durable Event Contract
 
@@ -17,7 +17,7 @@ Persistent Events is being built as small composable AittaDB server primitives. 
 
 The optional idempotency value is never stored in plaintext. A namespace can use one hash once; rows without an idempotency hash remain independently insertable. D1 foreign keys require existing principals and clients. A database trigger rejects inserts after account deletion begins, and another trigger rejects every update. Retention and account-deletion workers may delete rows through separately bounded primitives.
 
-The public UUID is not an authorization capability. Future reads must bind the caller's exact principal and client namespace in every query. Internal sequences must never be returned directly; resumable traversal uses the authenticated opaque cursor described below.
+The public UUID is not an authorization capability. Every read binds the caller's exact principal and client namespace in its query. Internal sequences must never be returned directly; resumable traversal uses the authenticated opaque cursor described below.
 
 ## Validation and Failures
 
@@ -54,6 +54,14 @@ Opening accepts only bounded canonical unpadded base64url, strict UTF-8, the exa
 ## Internal Point Lookup
 
 Point lookup requires the exact principal, client, and canonical public UUID in one prepared query. A matching row is returned as a validated defensive value. An absent UUID and an event owned by another principal or client all return the same `null` result, so the repository does not reveal whether another namespace contains that identifier. Malformed namespace values or identifiers fail before D1 access, and malformed persisted rows fail closed.
+
+## Immutable Item Read
+
+With `FEATURE_EVENTS_ENABLED=true`, `GET /events/{id}` returns one unexpired event from the authenticated principal and OAuth-client namespace. Bearer requests require a short-lived AittaDB access token with `events.read`, an exact active token audience client, and an active human or service principal. A signed-in request without a bearer token uses the same canonical operation through the reserved current-session client; no internal token is rendered, persisted, or returned.
+
+The identifier must be a canonical lowercase UUIDv4. Malformed, absent, expired, other-user, and other-client identifiers produce the same generic `404` representation. Successful JSON exposes only `id`, `event_type`, the event's JSON object, `created_at`, and `expires_at`; it omits sequence, ownership, request hashes, and idempotency state. HTML renders those same fields accessibly. Both representations link to the future collection URI and advertise no mutation. Exact client-origin CORS, request and rate bounds, `Cache-Control: no-store`, and the outer Events gate apply before repository disclosure.
+
+The collection link defines the resource relationship but does not make `GET /events`, event publication, deletion, update, or long-poll delivery available in this preview.
 
 ## Internal Idempotent Append
 

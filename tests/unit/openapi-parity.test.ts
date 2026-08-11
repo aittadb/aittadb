@@ -29,6 +29,7 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
     "POST /consent",
     "GET /admin/clients",
     "POST /admin/clients",
+    "GET /events/{id}",
     "GET /storage/records",
     "POST /storage/records",
     "GET /storage/records/{key}",
@@ -423,6 +424,7 @@ test("OpenAPI distinguishes licensing posture from the current Sites dependency"
     true,
     "feature metadata must document the implemented gated Events collection",
   );
+  assert.equal(Object.hasOwn(openApiSpec.paths, "/events/{id}"), true);
   assert.match(String(hostingPlatform.description), /depends on this platform/);
   assert.match(
     String(officialOpenAIProduct.description),
@@ -503,6 +505,7 @@ test("OpenAPI documents implemented security controls", () => {
     ["/oauth/token", "post"],
     ["/oauth/revoke", "post"],
     ["/oauth/introspect", "post"],
+    ["/events/{id}", "get"],
     ["/storage/records", "get"],
     ["/storage/records", "post"],
     ["/storage/records/{key}", "get"],
@@ -555,6 +558,7 @@ test("OpenAPI documents implemented security controls", () => {
 
   for (const [path, method] of [
     ["/userinfo", "get"],
+    ["/events/{id}", "get"],
     ["/storage/records", "get"],
     ["/storage/records/{key}", "get"],
     ["/storage/records/{key}", "put"],
@@ -569,6 +573,37 @@ test("OpenAPI documents implemented security controls", () => {
     assert.match(description, /Origin must exactly match/);
     assert.match(description, /active OAuth client/);
   }
+
+  const eventRead = openApiOperation("/events/{id}", "get");
+  assert.equal(eventRead["x-aittadb-sites-session-supported"], true);
+  assert.match(String(eventRead.description), /events\.read/);
+  assert.match(String(eventRead.description), /No update or delete/);
+  assert.ok("404" in operationResponses("/events/{id}", "get"));
+  assert.deepEqual(
+    Object.keys(asObject(openApiSpec.paths["/events/{id}"], "event item path")),
+    ["get"],
+  );
+  const eventDocumentParts = openApiSchema("ApplicationEventDocument").allOf;
+  assert.ok(Array.isArray(eventDocumentParts));
+  const eventDocumentProperties = asObject(
+    asObject(eventDocumentParts[1], "event document specialization").properties,
+    "event document properties",
+  );
+  assert.equal(
+    asObject(eventDocumentProperties.actions, "event actions").maxItems,
+    0,
+  );
+  const eventDataProperties = asObject(
+    openApiSchema("ApplicationEventData").properties,
+    "event data properties",
+  );
+  assert.deepEqual(Object.keys(eventDataProperties), [
+    "id",
+    "type",
+    "data",
+    "created_at",
+    "expires_at",
+  ]);
 
   const userInfoUnauthorized = asObject(
     operationResponses("/userinfo", "get")["401"],
