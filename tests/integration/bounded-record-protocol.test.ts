@@ -290,6 +290,44 @@ test("current ChatGPT Sites session drives real HTML record operations with CSRF
   );
 });
 
+test("signed-in initial record list form submits a canonical collection GET", async () => {
+  const env = await testEnv();
+  const app = createTestAittaDB(env, new MemoryAuthStore());
+  const discovery = await requiredResponse(
+    app.fetch(new Request(ENTRY, { headers: { accept: "text/html" } })),
+  );
+  const discoveryHtml = await discovery.text();
+  const listForm = discoveryHtml.match(
+    /<section class="resource-operation" aria-labelledby="record-list-heading">[\s\S]*?<\/form>/,
+  )?.[0];
+  assert.ok(listForm);
+  assert.match(listForm, /action="\/storage\/record-protocol\/records"/);
+  assert.doesNotMatch(listForm, /name="cursor"/);
+
+  const firstPage = await requiredResponse(
+    app.fetch(
+      new Request(`${RECORDS}?collection=items&limit=100`, {
+        headers: { accept: "text/html" },
+      }),
+    ),
+  );
+  assert.equal(firstPage.status, 200);
+  assert.match(firstPage.headers.get("content-type") ?? "", /^text\/html/);
+  assert.match(
+    await firstPage.text(),
+    /No records found in <code>items<\/code>/,
+  );
+
+  const explicitEmptyCursor = await requiredResponse(
+    app.fetch(
+      new Request(`${RECORDS}?collection=items&limit=100&cursor=`, {
+        headers: { accept: ACCEPT },
+      }),
+    ),
+  );
+  await assertFixedError(explicitEmptyCursor, 400, "invalid_request");
+});
+
 test("bounded record routes enforce exact client CORS and feature availability", async () => {
   const fixture = await protocolFixture();
   const rejected = await requiredResponse(

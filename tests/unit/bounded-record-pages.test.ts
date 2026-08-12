@@ -54,6 +54,8 @@ test("discovery page exposes the exact contract and conditionally renders forms"
   assert.match(withForms, /name="collection"/);
   assert.match(withForms, /Read record/);
   assert.match(withForms, /List records/);
+  assert.match(withForms, /id="record-list-cursor" maxlength="2048"/);
+  assert.doesNotMatch(withForms, /id="record-list-cursor" name="cursor"/);
 
   const withoutForms = boundedRecordDiscoveryPage({
     document,
