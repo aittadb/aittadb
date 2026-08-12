@@ -23,9 +23,16 @@ export interface Operation {
   method: HttpMethod;
 }
 
+export interface ExecutableRouteSource {
+  fileName: string;
+  functionName: string;
+  source: string;
+}
+
 export interface StorageRouteSources {
   endpoint: string;
   browser: string;
+  delegated?: readonly ExecutableRouteSource[];
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -64,6 +71,109 @@ const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/events/{id}", "get", "200", HYPERMEDIA_HTML),
   response("/events", "post", "200", HYPERMEDIA_HTML),
   response("/events", "post", "201", HYPERMEDIA_HTML),
+  response("/storage/record-protocol", "get", "200", HYPERMEDIA_HTML),
+  response("/storage/record-protocol/records", "get", "200", HYPERMEDIA_HTML),
+  response("/storage/record-protocol/records", "get", "400", HYPERMEDIA_HTML),
+  response("/storage/record-protocol/records", "get", "401", HYPERMEDIA_HTML),
+  response("/storage/record-protocol/records", "get", "403", HYPERMEDIA_HTML),
+  response("/storage/record-protocol/records", "get", "429", HYPERMEDIA_HTML),
+  response("/storage/record-protocol/records", "get", "503", HYPERMEDIA_HTML),
+  response(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+    "200",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+    "400",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+    "401",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+    "403",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+    "404",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+    "429",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+    "503",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "200",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "400",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "401",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "403",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "409",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "412",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "429",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "503",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/storage/record-protocol/transactions",
+    "post",
+    "507",
+    HYPERMEDIA_HTML,
+  ),
   response("/storage/records", "get", "200", HYPERMEDIA_HTML),
   response("/storage/records", "post", "200", HYPERMEDIA_HTML),
   response("/storage/records/{key}", "get", "200", HYPERMEDIA_HTML),
@@ -114,6 +224,10 @@ const REQUEST_REQUIREMENTS: readonly RequestRequirement[] = [
   request("/oauth/introspect", "post", [FORM_MEDIA]),
   request("/userinfo", "post", [FORM_MEDIA]),
   request("/events", "post", [JSON_MEDIA, FORM_MEDIA]),
+  request("/storage/record-protocol/transactions", "post", [
+    JSON_MEDIA,
+    FORM_MEDIA,
+  ]),
   request("/storage/records", "post", [FORM_MEDIA]),
   request("/storage/records/{key}", "post", [FORM_MEDIA]),
   request("/storage/files", "post", [BINARY_MEDIA, MULTIPART_MEDIA]),
@@ -149,7 +263,10 @@ export function extractImplementedOperations(
         "Storage route delegation requires endpoint and browser dispatcher sources",
       );
     }
-    for (const delegated of extractDelegatedStorageOperations(storageSources)) {
+    for (const delegated of extractDelegatedStorageOperations(
+      storageSources,
+      handlerSource,
+    )) {
       addOperation(operations, delegated);
     }
   }
@@ -172,6 +289,7 @@ export function extractImplementedOperations(
 
 export function extractDelegatedStorageOperations(
   sources: StorageRouteSources,
+  handlerSource?: string,
 ): Operation[] {
   const endpoint = parseTypeScript(sources.endpoint, "src/storage.ts");
   const browser = parseTypeScript(sources.browser, "src/storage-browser.ts");
@@ -200,10 +318,36 @@ export function extractDelegatedStorageOperations(
     }
   }
 
+  for (const delegated of sources.delegated ?? []) {
+    if (!handlerSource) {
+      throw new Error(
+        `Executable route module ${delegated.fileName} requires handler source`,
+      );
+    }
+    if (!callsFunction(handlerSource, delegated.functionName)) {
+      throw new Error(
+        `Executable route module ${delegated.fileName} is not called by the handler`,
+      );
+    }
+    const moduleSource = parseTypeScript(delegated.source, delegated.fileName);
+    const routeFunction = requireFunction(moduleSource, delegated.functionName);
+    for (const candidate of exactRouteOperations(routeFunction)) {
+      addOperation(operations, candidate);
+    }
+    for (const candidate of keyedRouteOperations(routeFunction)) {
+      addOperation(operations, candidate);
+    }
+  }
+
   if (operations.size === 0) {
     throw new Error("Unable to derive delegated storage operations");
   }
   return [...operations.values()].sort(compareOperations);
+}
+
+function callsFunction(source: string, functionName: string): boolean {
+  const escaped = functionName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\s*\\(`).test(source);
 }
 
 function parseTypeScript(source: string, fileName: string): ts.SourceFile {
@@ -692,6 +836,7 @@ function run(): void {
       new URL("../src/storage-browser.ts", import.meta.url),
       "utf8",
     ),
+    delegated: readOptionalRouteSources(),
   };
   const errors = validateOpenApiSpec(
     openApiSpec,
@@ -703,6 +848,38 @@ function run(): void {
   }
   console.log(
     `OpenAPI ${openApiSpec.openapi} documents ${extractImplementedOperations(handlerSource, storageSources).length} implemented operations with representation parity.`,
+  );
+}
+
+function readOptionalRouteSources(): ExecutableRouteSource[] {
+  const candidates = [
+    {
+      fileName: "src/bounded-record-http.ts",
+      functionName: "boundedRecordHttpEndpoint",
+      url: new URL("../src/bounded-record-http.ts", import.meta.url),
+    },
+  ];
+  const sources: ExecutableRouteSource[] = [];
+  for (const candidate of candidates) {
+    try {
+      sources.push({
+        fileName: candidate.fileName,
+        functionName: candidate.functionName,
+        source: readFileSync(candidate.url, "utf8"),
+      });
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+  }
+  return sources;
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ENOENT"
   );
 }
 

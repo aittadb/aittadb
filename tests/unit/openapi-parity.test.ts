@@ -6,9 +6,15 @@ import {
   extractDelegatedStorageOperations,
   extractImplementedOperations,
   findLegacyLinksLocations,
+  type ExecutableRouteSource,
   type StorageRouteSources,
   validateOpenApiSpec,
 } from "../../scripts/check-openapi";
+import {
+  BOUNDED_RECORD_CAPABILITIES,
+  BOUNDED_RECORD_LIMITS,
+  BOUNDED_RECORD_PROTOCOL_VERSION,
+} from "../../src/bounded-record-protocol";
 import { oidcConfiguration, openApiSpec } from "../../src/openapi";
 
 test("OpenAPI guard derives exact and delegated executable operations", async () => {
@@ -47,6 +53,192 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
   ]) {
     assert.ok(operations.has(operation), `missing ${operation}`);
   }
+});
+
+test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () => {
+  const discovery = openApiOperation("/storage/record-protocol", "get");
+  assert.deepEqual(discovery.security, []);
+  assert.match(String(discovery.description), /exact eight capabilities/);
+  assert.match(String(discovery.description), /finite limits/);
+
+  const discoveryData = openApiSchema("BoundedRecordDiscoveryData");
+  const discoveryProperties = asObject(
+    discoveryData.properties,
+    "bounded discovery properties",
+  );
+  assert.equal(
+    asObject(discoveryProperties.protocol_version, "bounded protocol version")
+      .const,
+    BOUNDED_RECORD_PROTOCOL_VERSION,
+  );
+  assert.deepEqual(
+    asObject(discoveryProperties.capabilities, "bounded capabilities").const,
+    [...BOUNDED_RECORD_CAPABILITIES],
+  );
+  const limits = openApiSchema("BoundedRecordDiscoveryLimits");
+  const limitProperties = asObject(limits.properties, "bounded limits");
+  for (const name of [
+    "max_record_bytes",
+    "max_transaction_bytes",
+    "max_cursor_length",
+  ] as const) {
+    const schema = asObject(limitProperties[name], `bounded limit ${name}`);
+    assert.equal(schema.minimum, 1);
+    assert.equal(schema.maximum, BOUNDED_RECORD_LIMITS[name]);
+  }
+  for (const [name, value] of [
+    ["max_page_size", BOUNDED_RECORD_LIMITS.max_page_size],
+    [
+      "max_transaction_mutations",
+      BOUNDED_RECORD_LIMITS.max_transaction_mutations,
+    ],
+  ] as const) {
+    assert.equal(
+      asObject(limitProperties[name], `bounded limit ${name}`).const,
+      value,
+    );
+  }
+
+  const list = openApiOperation("/storage/record-protocol/records", "get");
+  assert.deepEqual(list.security, [{ bearer: [] }]);
+  assert.deepEqual(
+    (list.parameters as UnknownObject[]).map((parameter) => parameter.name),
+    ["collection", "limit", "cursor"],
+  );
+  assert.deepEqual(list["x-aittadb-required-scopes"], ["storage.read"]);
+
+  const read = openApiOperation(
+    "/storage/record-protocol/records/{collection}/{id}",
+    "get",
+  );
+  assert.deepEqual(read.security, [{ bearer: [] }]);
+  assert.deepEqual(read["x-aittadb-required-scopes"], ["storage.read"]);
+
+  const transaction = openApiOperation(
+    "/storage/record-protocol/transactions",
+    "post",
+  );
+  assert.deepEqual(transaction.security, [{ bearer: [] }]);
+  assert.deepEqual(transaction["x-aittadb-required-scopes"], [
+    "storage.read",
+    "storage.write",
+    "storage.delete",
+  ]);
+  const transactionBody = asObject(
+    transaction.requestBody,
+    "bounded transaction request body",
+  );
+  assert.deepEqual(
+    Object.keys(
+      asObject(transactionBody.content, "bounded transaction content"),
+    ),
+    ["application/json", "application/x-www-form-urlencoded"],
+  );
+  const command = openApiSchema("BoundedRecordTransactionCommand");
+  assert.deepEqual(command.required, ["transaction"]);
+  const commandProperties = asObject(
+    command.properties,
+    "bounded transaction command properties",
+  );
+  const transactionShape = asObject(
+    commandProperties.transaction,
+    "bounded transaction shape",
+  );
+  assert.deepEqual(transactionShape.required, ["operation_id", "mutations"]);
+  assert.equal(transactionShape.additionalProperties, false);
+  const mutationSchema = asObject(
+    asObject(transactionShape.properties, "bounded transaction properties")
+      .mutations,
+    "bounded mutations",
+  );
+  assert.equal(mutationSchema.minItems, 1);
+  assert.equal(mutationSchema.maxItems, 25);
+
+  for (const [path, method, statuses] of [
+    ["/storage/record-protocol", "get", ["200", "406", "503"]],
+    [
+      "/storage/record-protocol/records",
+      "get",
+      ["200", "400", "401", "403", "429", "503", "406"],
+    ],
+    [
+      "/storage/record-protocol/records/{collection}/{id}",
+      "get",
+      ["200", "400", "401", "403", "404", "429", "503", "406"],
+    ],
+    [
+      "/storage/record-protocol/transactions",
+      "post",
+      ["200", "400", "401", "403", "409", "412", "429", "503", "507", "406"],
+    ],
+  ] as const) {
+    const responses = operationResponses(path, method);
+    for (const status of statuses) {
+      assert.ok(
+        status in responses,
+        `${method.toUpperCase()} ${path} ${status}`,
+      );
+    }
+  }
+
+  const error = openApiSchema("BoundedRecordError");
+  const errorProperties = asObject(
+    error.properties,
+    "bounded error properties",
+  );
+  const errorData = asObject(errorProperties.data, "bounded error data");
+  assert.deepEqual(errorData.required, ["code", "message"]);
+  assert.deepEqual(errorProperties.type, { const: "bounded-storage-error" });
+});
+
+test("OpenAPI parity derives routes from an executable delegated module", async () => {
+  const { handlerSource, storageSources } = await routeSources();
+  const delegated: ExecutableRouteSource = {
+    fileName: "src/bounded-record-http.ts",
+    functionName: "boundedRecordHttpEndpoint",
+    source: `
+      export async function boundedRecordHttpEndpoint(request: Request, url: URL) {
+        if (url.pathname === "/storage/record-protocol" && request.method === "GET") return new Response();
+        if (url.pathname === "/storage/record-protocol/records" && request.method === "GET") return new Response();
+        if (url.pathname === "/storage/record-protocol/records/{collection}/{id}" && request.method === "GET") return new Response();
+        if (url.pathname === "/storage/record-protocol/transactions" && request.method === "POST") return new Response();
+      }
+    `,
+  };
+  const withDelegation = `${handlerSource}\nboundedRecordHttpEndpoint(request, url);`;
+  const operations = operationSet(
+    extractImplementedOperations(withDelegation, {
+      ...storageSources,
+      delegated: [delegated],
+    }),
+  );
+  assert.ok(operations.has("GET /storage/record-protocol"));
+  assert.ok(operations.has("GET /storage/record-protocol/records"));
+  assert.ok(operations.has("POST /storage/record-protocol/transactions"));
+  assert.deepEqual(
+    validateOpenApiSpec(openApiSpec, withDelegation, {
+      ...storageSources,
+      delegated: [delegated],
+    }),
+    [],
+  );
+
+  assert.throws(
+    () =>
+      extractImplementedOperations(handlerSource, {
+        ...storageSources,
+        delegated: [delegated],
+      }),
+    /is not called by the handler/,
+  );
+  assert.throws(
+    () =>
+      extractDelegatedStorageOperations({
+        ...storageSources,
+        delegated: [delegated],
+      }),
+    /requires handler source/,
+  );
 });
 
 test("OpenAPI documents the bounded isolated event publication contract", () => {

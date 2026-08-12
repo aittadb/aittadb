@@ -1,3 +1,13 @@
+import {
+  BOUNDED_RECORD_CAPABILITIES,
+  BOUNDED_RECORD_LIMITS,
+  BOUNDED_RECORD_MAX_CURSOR_LENGTH,
+  BOUNDED_RECORD_MAX_PAGE_SIZE,
+  BOUNDED_RECORD_MAX_RECORD_BYTES,
+  BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
+  BOUNDED_RECORD_MAX_TRANSACTION_ENTRIES,
+  BOUNDED_RECORD_PROTOCOL_VERSION,
+} from "./bounded-record-protocol";
 import { availableOAuthScopes } from "./oauth-scopes";
 import type { OAuthScope } from "./types";
 
@@ -63,6 +73,21 @@ const applicationEventIdParameter = {
 } as const;
 
 const hypermediaVendorType = "application/vnd.aittadb+json; version=0.1";
+
+const boundedRecordProtocolMediaType = hypermediaVendorType;
+
+const boundedRecordProtocolDescription =
+  "The bounded record-storage protocol is a versioned AittaDB primitive. It is scoped to the authenticated bearer token's local user and OAuth-client namespace; it never exposes deployment data, credentials, physical storage keys, or another namespace. Missing or denied records are intentionally non-disclosing. The operation targets are same-origin HTTPS resources returned by protocol discovery.";
+
+const boundedRecordAuthorization = {
+  bearer: {
+    requiredScopes: [
+      "storage.read",
+      "storage.write",
+      "storage.delete",
+    ] as const,
+  },
+} as const;
 
 function hypermediaContent(schema: string, includeHtml = true) {
   return {
@@ -309,6 +334,47 @@ const boundedFileTooLargeResponse = {
     "Canonical raw file bytes exceed 10 MiB. A valid declared overflow is rejected without reading the stream; missing, malformed, or undersized Content-Length values do not bypass the observed-byte limit, and overflow stops before R2 or D1 file-metadata mutation.",
   content: hypermediaContent("#/components/schemas/HypermediaError"),
 } as const;
+
+function boundedRecordErrorResponse(description: string) {
+  return {
+    description,
+    content: hypermediaContent("#/components/schemas/BoundedRecordError"),
+  };
+}
+
+function boundedRecordAuthErrorResponse(description: string) {
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: {
+          oneOf: [
+            { $ref: "#/components/schemas/OAuthError" },
+            { $ref: "#/components/schemas/BoundedRecordError" },
+          ],
+        },
+      },
+      [boundedRecordProtocolMediaType]: {
+        schema: { $ref: "#/components/schemas/BoundedRecordError" },
+      },
+      "text/html": { schema: { type: "string" } },
+    },
+  };
+}
+
+function boundedRecordRateLimitedResponse() {
+  return {
+    ...boundedRecordErrorResponse(
+      "The bounded record route rate limit was exceeded. Retry after Retry-After seconds.",
+    ),
+    headers: {
+      "Retry-After": {
+        description: "Seconds until this request family may be retried.",
+        schema: { type: "integer", minimum: 1 },
+      },
+    },
+  };
+}
 
 export const openApiSpec = {
   openapi: "3.1.0",
@@ -1157,6 +1223,211 @@ export const openApiSpec = {
           "406": notAcceptableResponse,
           "429": rateLimitedResponse(true),
           "503": eventsUnavailableResponse,
+        },
+      },
+    },
+    "/storage/record-protocol": {
+      get: {
+        summary: "Discover bounded record storage protocol 1.1",
+        description: `${boundedRecordProtocolDescription} This public resource advertises exactly the three protocol actions, the exact eight capabilities, and finite limits of the configured deployment. It performs no bearer authentication or private storage lookup. HTML and the versioned AittaDB hypermedia JSON representation describe the same discovery resource.`,
+        security: [],
+        responses: {
+          "200": {
+            description: "Public bounded record-storage protocol 1.1 discovery",
+            content: hypermediaContent(
+              "#/components/schemas/BoundedRecordDiscoveryDocument",
+            ),
+          },
+          "406": notAcceptableResponse,
+          "503": boundedRecordErrorResponse(
+            "The bounded record protocol is temporarily unavailable.",
+          ),
+        },
+      },
+    },
+    "/storage/record-protocol/records": {
+      get: {
+        summary: "List bounded records in one collection",
+        description: `${boundedRecordProtocolDescription} Requires storage.read. The collection and required finite limit are explicit query fields; cursor is an opaque continuation value returned by the preceding page. Results are ordered by stable record ID and reveal only records in the authenticated token namespace.`,
+        security: [{ bearer: [] }],
+        "x-aittadb-required-scopes": ["storage.read"],
+        parameters: [
+          {
+            name: "collection",
+            in: "query",
+            required: true,
+            schema: {
+              type: "string",
+              minLength: 1,
+              maxLength: 64,
+              pattern: "^[a-z][a-z0-9-]{0,63}$",
+            },
+            description: "The bounded record collection to enumerate.",
+          },
+          {
+            name: "limit",
+            in: "query",
+            required: true,
+            schema: {
+              type: "integer",
+              minimum: 1,
+              maximum: BOUNDED_RECORD_MAX_PAGE_SIZE,
+            },
+            description:
+              "Maximum records in this page. The protocol maximum is 100; a deployment may advertise a lower positive value.",
+          },
+          {
+            name: "cursor",
+            in: "query",
+            required: false,
+            schema: {
+              type: "string",
+              minLength: 1,
+              maxLength: BOUNDED_RECORD_MAX_CURSOR_LENGTH,
+            },
+            description:
+              "Opaque encrypted continuation cursor from the previous page; it is bound to this collection, page size, token namespace, and signing-key boundary.",
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "Bounded page of records with links and currently authorized actions",
+            content: hypermediaContent(
+              "#/components/schemas/BoundedRecordPageDocument",
+            ),
+          },
+          "400": boundedRecordErrorResponse(
+            "The collection, limit, or cursor is invalid.",
+          ),
+          "401": boundedRecordAuthErrorResponse(
+            "The bearer credential is missing, invalid, expired, revoked, disabled, or not an AittaDB access token.",
+          ),
+          "403": boundedRecordAuthErrorResponse(
+            "The authenticated bearer token does not include storage.read.",
+          ),
+          "429": boundedRecordRateLimitedResponse(),
+          "503": boundedRecordErrorResponse(
+            "The bounded record storage primitive is temporarily unavailable.",
+          ),
+          "406": notAcceptableResponse,
+        },
+      },
+    },
+    "/storage/record-protocol/records/{collection}/{id}": {
+      get: {
+        summary: "Read one bounded record",
+        description: `${boundedRecordProtocolDescription} Requires storage.read. A valid token that cannot read the record receives the same fixed not_found representation as an absent record; keys and values are never included in authorization errors.`,
+        security: [{ bearer: [] }],
+        "x-aittadb-required-scopes": ["storage.read"],
+        parameters: [
+          {
+            name: "collection",
+            in: "path",
+            required: true,
+            schema: {
+              type: "string",
+              minLength: 1,
+              maxLength: 64,
+              pattern: "^[a-z][a-z0-9-]{0,63}$",
+            },
+          },
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: {
+              type: "string",
+              minLength: 1,
+              maxLength: 128,
+              pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$",
+            },
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "One bounded record with links and currently authorized actions",
+            content: hypermediaContent(
+              "#/components/schemas/BoundedRecordDocument",
+            ),
+          },
+          "400": boundedRecordErrorResponse(
+            "The collection or record ID is invalid.",
+          ),
+          "401": boundedRecordAuthErrorResponse(
+            "The bearer credential is missing, invalid, expired, revoked, disabled, or not an AittaDB access token.",
+          ),
+          "403": boundedRecordAuthErrorResponse(
+            "The authenticated bearer token does not include storage.read.",
+          ),
+          "404": boundedRecordErrorResponse(
+            "The record is absent or unavailable to this authenticated namespace.",
+          ),
+          "429": boundedRecordRateLimitedResponse(),
+          "503": boundedRecordErrorResponse(
+            "The bounded record storage primitive is temporarily unavailable.",
+          ),
+          "406": notAcceptableResponse,
+        },
+      },
+    },
+    "/storage/record-protocol/transactions": {
+      post: {
+        summary: "Atomically transact bounded records",
+        description: `${boundedRecordProtocolDescription} The canonical API request is application/json and must contain the exact bounded transaction command. A browser form may submit the same command as JSON text in application/x-www-form-urlencoded with CSRF protection; that adapter does not change the transaction semantics. All preconditions and quota checks use one pre-transaction state. Record effects and the durable idempotency receipt commit together or neither commits.`,
+        security: [{ bearer: [] }],
+        "x-aittadb-required-scopes": [
+          ...boundedRecordAuthorization.bearer.requiredScopes,
+        ],
+        requestBody: {
+          required: true,
+          description:
+            "Canonical application/json bounded transaction command. Form input is an optional browser adapter and carries the same command as JSON text.",
+          content: {
+            "application/json": {
+              schema: {
+                $ref: "#/components/schemas/BoundedRecordTransactionCommand",
+              },
+            },
+            "application/x-www-form-urlencoded": {
+              schema: {
+                $ref: "#/components/schemas/BoundedRecordTransactionFormInput",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "Ordered transaction result. Exact retries return the same result with replayed true.",
+            content: hypermediaContent(
+              "#/components/schemas/BoundedRecordTransactionDocument",
+            ),
+          },
+          "400": boundedRecordErrorResponse(
+            "The transaction command is malformed, exceeds a finite bound, or contains duplicate keys or invalid revisions.",
+          ),
+          "401": boundedRecordAuthErrorResponse(
+            "The bearer credential is missing, invalid, expired, revoked, disabled, or not an AittaDB access token.",
+          ),
+          "403": boundedRecordAuthErrorResponse(
+            "The authenticated bearer token does not contain all of storage.read, storage.write, and storage.delete.",
+          ),
+          "409": boundedRecordErrorResponse(
+            "The operation ID was used for different work, or a create mutation conflicts with an existing record.",
+          ),
+          "412": boundedRecordErrorResponse(
+            "A positive revision or absence precondition does not match the one consistent pre-transaction state.",
+          ),
+          "429": boundedRecordRateLimitedResponse(),
+          "503": boundedRecordErrorResponse(
+            "The transaction could not be completed and no record or receipt effect was committed.",
+          ),
+          "507": boundedRecordErrorResponse(
+            "The complete post-transaction record or receipt state would exceed a finite quota; no effect was committed.",
+          ),
+          "406": notAcceptableResponse,
         },
       },
     },
@@ -2840,6 +3111,420 @@ export const openApiSpec = {
             },
           },
         ],
+      },
+      BoundedRecordKey: {
+        type: "object",
+        required: ["collection", "id"],
+        properties: {
+          collection: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            pattern: "^[a-z][a-z0-9-]{0,63}$",
+          },
+          id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$",
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedJsonValue: {
+        oneOf: [
+          { type: "null" },
+          { type: "boolean" },
+          { type: "number" },
+          { type: "string" },
+          {
+            type: "array",
+            items: { $ref: "#/components/schemas/BoundedJsonValue" },
+          },
+          {
+            type: "object",
+            additionalProperties: {
+              $ref: "#/components/schemas/BoundedJsonValue",
+            },
+          },
+        ],
+      },
+      BoundedRecordValue: {
+        type: "object",
+        additionalProperties: {
+          $ref: "#/components/schemas/BoundedJsonValue",
+        },
+        description:
+          "Finite JSON object value. Serialized record bytes are bounded by the advertised max_record_bytes limit.",
+      },
+      BoundedRecord: {
+        type: "object",
+        required: ["key", "revision", "value"],
+        properties: {
+          key: { $ref: "#/components/schemas/BoundedRecordKey" },
+          revision: { type: "integer", minimum: 1 },
+          value: { $ref: "#/components/schemas/BoundedRecordValue" },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordDiscoveryLimits: {
+        type: "object",
+        required: [
+          "max_record_bytes",
+          "max_page_size",
+          "max_transaction_mutations",
+          "max_transaction_bytes",
+          "max_cursor_length",
+        ],
+        properties: {
+          max_record_bytes: {
+            type: "integer",
+            minimum: 1,
+            maximum: BOUNDED_RECORD_MAX_RECORD_BYTES,
+          },
+          max_page_size: {
+            type: "integer",
+            const: BOUNDED_RECORD_LIMITS.max_page_size,
+            minimum: 1,
+          },
+          max_transaction_mutations: {
+            type: "integer",
+            const: BOUNDED_RECORD_LIMITS.max_transaction_mutations,
+            minimum: 1,
+          },
+          max_transaction_bytes: {
+            type: "integer",
+            minimum: 1,
+            maximum: BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
+          },
+          max_cursor_length: {
+            type: "integer",
+            minimum: 1,
+            maximum: BOUNDED_RECORD_MAX_CURSOR_LENGTH,
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordTransactionPut: {
+        type: "object",
+        required: ["type", "key", "expected_revision", "value"],
+        properties: {
+          type: { const: "put" },
+          key: { $ref: "#/components/schemas/BoundedRecordKey" },
+          expected_revision: {
+            oneOf: [{ type: "null" }, { type: "integer", minimum: 1 }],
+          },
+          value: { $ref: "#/components/schemas/BoundedRecordValue" },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordTransactionDelete: {
+        type: "object",
+        required: ["type", "key", "expected_revision"],
+        properties: {
+          type: { const: "delete" },
+          key: { $ref: "#/components/schemas/BoundedRecordKey" },
+          expected_revision: { type: "integer", minimum: 1 },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordTransactionCheck: {
+        type: "object",
+        required: ["type", "key", "expected_revision"],
+        properties: {
+          type: { const: "check" },
+          key: { $ref: "#/components/schemas/BoundedRecordKey" },
+          expected_revision: {
+            oneOf: [{ type: "null" }, { type: "integer", minimum: 1 }],
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordTransactionCommand: {
+        type: "object",
+        required: ["transaction"],
+        properties: {
+          transaction: {
+            type: "object",
+            required: ["operation_id", "mutations"],
+            properties: {
+              operation_id: {
+                type: "string",
+                minLength: 1,
+                maxLength: 128,
+                pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$",
+              },
+              mutations: {
+                type: "array",
+                minItems: 1,
+                maxItems: BOUNDED_RECORD_MAX_TRANSACTION_ENTRIES,
+                uniqueItems: true,
+                description:
+                  "Ordered unique-key mutations. Uniqueness is by the canonical collection/id key, not by complete object equality.",
+                items: {
+                  oneOf: [
+                    {
+                      $ref: "#/components/schemas/BoundedRecordTransactionPut",
+                    },
+                    {
+                      $ref: "#/components/schemas/BoundedRecordTransactionDelete",
+                    },
+                    {
+                      $ref: "#/components/schemas/BoundedRecordTransactionCheck",
+                    },
+                  ],
+                },
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordTransactionFormInput: {
+        type: "object",
+        required: ["ui", "csrf_token", "transaction"],
+        properties: {
+          ui: { type: "string", const: "1" },
+          csrf_token: { type: "string", minLength: 1 },
+          transaction: {
+            type: "string",
+            minLength: 2,
+            maxLength: BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
+            description:
+              "JSON serialization of the exact BoundedRecordTransactionCommand. The server validates the same bounded command after CSRF and body limits.",
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordDiscoveryData: {
+        type: "object",
+        required: [
+          "protocol",
+          "protocol_version",
+          "capabilities",
+          "limits",
+          "preconditions",
+          "idempotency",
+          "rollback",
+          "quota",
+          "authorization",
+          "pagination",
+          "transaction_shape",
+        ],
+        properties: {
+          protocol: { const: "bounded-record-storage" },
+          protocol_version: {
+            const: BOUNDED_RECORD_PROTOCOL_VERSION,
+          },
+          capabilities: {
+            type: "array",
+            minItems: BOUNDED_RECORD_CAPABILITIES.length,
+            maxItems: BOUNDED_RECORD_CAPABILITIES.length,
+            uniqueItems: true,
+            const: [...BOUNDED_RECORD_CAPABILITIES],
+            items: { type: "string" },
+          },
+          limits: { $ref: "#/components/schemas/BoundedRecordDiscoveryLimits" },
+          preconditions: { const: "compare-and-set-revision" },
+          idempotency: { const: "canonical-request-per-operation-id" },
+          rollback: { const: "all-mutations-and-operation-receipt" },
+          quota: { const: "reject-before-commit" },
+          authorization: { const: "missing-and-denied-are-not-found" },
+          pagination: { const: "opaque-cursor-with-next-link" },
+          transaction_shape: {
+            type: "object",
+            required: ["operation_id", "mutations", "results"],
+            properties: {
+              operation_id: {
+                type: "object",
+                required: ["format", "min_length", "max_length"],
+                properties: {
+                  format: { const: "stable-id" },
+                  min_length: { const: 1 },
+                  max_length: { const: 128 },
+                },
+                additionalProperties: false,
+              },
+              mutations: {
+                type: "object",
+                required: [
+                  "min_items",
+                  "max_items",
+                  "unique_keys",
+                  "order",
+                  "put",
+                  "delete",
+                  "check",
+                ],
+                properties: {
+                  min_items: { const: 1 },
+                  max_items: {
+                    const: BOUNDED_RECORD_MAX_TRANSACTION_ENTRIES,
+                  },
+                  unique_keys: { const: true },
+                  order: { const: "preserved" },
+                  put: { const: "null-creates-positive-revision-replaces" },
+                  delete: { const: "positive-revision-required" },
+                  check: {
+                    const:
+                      "null-requires-absence-positive-revision-preserves-record",
+                  },
+                },
+                additionalProperties: false,
+              },
+              results: { const: "ordered-record-or-null-per-mutation" },
+            },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordDiscoveryDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            required: ["type", "id", "data"],
+            properties: {
+              type: { const: "bounded-record-storage" },
+              id: { type: "string", format: "uri" },
+              data: { $ref: "#/components/schemas/BoundedRecordDiscoveryData" },
+            },
+          },
+        ],
+      },
+      BoundedRecordDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            required: ["type", "id", "data"],
+            properties: {
+              type: { const: "bounded-storage-record" },
+              id: { type: "string" },
+              data: { $ref: "#/components/schemas/BoundedRecord" },
+            },
+          },
+        ],
+      },
+      BoundedRecordPageData: {
+        type: "object",
+        required: ["collection", "page_size", "items", "next_cursor"],
+        properties: {
+          collection: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            pattern: "^[a-z][a-z0-9-]{0,63}$",
+          },
+          page_size: {
+            type: "integer",
+            minimum: 1,
+            maximum: BOUNDED_RECORD_MAX_PAGE_SIZE,
+          },
+          items: {
+            type: "array",
+            maxItems: BOUNDED_RECORD_MAX_PAGE_SIZE,
+            items: { $ref: "#/components/schemas/BoundedRecord" },
+          },
+          next_cursor: {
+            oneOf: [
+              { type: "null" },
+              {
+                type: "string",
+                minLength: 1,
+                maxLength: BOUNDED_RECORD_MAX_CURSOR_LENGTH,
+              },
+            ],
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordPageDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            required: ["type", "id", "data"],
+            properties: {
+              type: { const: "bounded-storage-records-page" },
+              id: { type: "string", format: "uri" },
+              data: { $ref: "#/components/schemas/BoundedRecordPageData" },
+            },
+          },
+        ],
+      },
+      BoundedRecordTransactionData: {
+        type: "object",
+        required: ["operation_id", "replayed", "records"],
+        properties: {
+          operation_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 128,
+            pattern: "^[A-Za-z0-9](?:[A-Za-z0-9._:-]*[A-Za-z0-9])?$",
+          },
+          replayed: { type: "boolean" },
+          records: {
+            type: "array",
+            minItems: 1,
+            maxItems: BOUNDED_RECORD_MAX_TRANSACTION_ENTRIES,
+            items: {
+              oneOf: [
+                { $ref: "#/components/schemas/BoundedRecord" },
+                { type: "null" },
+              ],
+            },
+          },
+        },
+        additionalProperties: false,
+      },
+      BoundedRecordTransactionDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            required: ["type", "id", "data"],
+            properties: {
+              type: { const: "bounded-storage-transaction" },
+              id: { type: "string", format: "uri-reference" },
+              data: {
+                $ref: "#/components/schemas/BoundedRecordTransactionData",
+              },
+            },
+          },
+        ],
+      },
+      BoundedRecordError: {
+        type: "object",
+        required: ["api_version", "type", "data", "links", "actions"],
+        properties: {
+          api_version: { const: "0.1" },
+          type: { const: "bounded-storage-error" },
+          data: {
+            type: "object",
+            required: ["code", "message"],
+            properties: {
+              code: {
+                type: "string",
+                enum: [
+                  "invalid_request",
+                  "not_found",
+                  "conflict",
+                  "precondition_failed",
+                  "quota_exceeded",
+                  "unavailable",
+                ],
+              },
+              message: { type: "string" },
+            },
+            additionalProperties: false,
+          },
+          links: { type: "array", maxItems: 0, items: false },
+          actions: { type: "array", maxItems: 0, items: false },
+        },
+        additionalProperties: false,
       },
       StorageRecordData: {
         type: "object",
