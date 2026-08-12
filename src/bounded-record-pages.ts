@@ -53,6 +53,7 @@ export interface BoundedRecordTransactionResultPageOptions {
 
 export interface BoundedRecordErrorPageOptions {
   readonly code: BoundedRecordErrorCode;
+  readonly status?: number;
   readonly actions: readonly PageAction[];
 }
 
@@ -197,7 +198,7 @@ export function boundedRecordErrorPage(
   options: BoundedRecordErrorPageOptions,
 ): string {
   const document = boundedRecordErrorDocument(options.code);
-  const status = boundedRecordErrorStatus(options.code);
+  const status = options.status ?? boundedRecordErrorStatus(options.code);
   const tone =
     status >= 500
       ? "danger"

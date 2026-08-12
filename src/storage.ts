@@ -35,9 +35,9 @@ export const MAX_RECORD_BYTES = 65_536;
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const R2_DELETE_ATTEMPTS = 2;
 
-type StorageScope = "storage.read" | "storage.write" | "storage.delete";
+export type StorageScope = "storage.read" | "storage.write" | "storage.delete";
 
-interface StoragePrincipal {
+export interface StoragePrincipal {
   userId: string;
   client: ClientView;
   scopes: string[];
@@ -766,6 +766,16 @@ async function requireStorageScope(
   store: AuthStore,
   requiredScope: StorageScope,
 ): Promise<StoragePrincipal | Response> {
+  return requireStorageScopes(request, config, store, [requiredScope], true);
+}
+
+export async function requireStorageScopes(
+  request: Request,
+  config: AppConfig,
+  store: AuthStore,
+  requiredScopes: readonly [StorageScope, ...StorageScope[]],
+  enforceWriteSwitch: boolean,
+): Promise<StoragePrincipal | Response> {
   const token = bearerToken(request);
   if (!token) return oauthError("invalid_token", "Bearer token required", 401);
   const audience = parseJwtAudience(token);
@@ -775,10 +785,13 @@ async function requireStorageScope(
     if (verified.claims.token_use !== "access")
       return oauthError("invalid_token", "Access token required", 401);
     const scopes = parseScopes(String(verified.claims.scope || ""));
-    if (!scopes.includes(requiredScope)) {
+    const missingScope = requiredScopes.find(
+      (requiredScope) => !scopes.includes(requiredScope),
+    );
+    if (missingScope) {
       return oauthError(
         "insufficient_scope",
-        `Required scope: ${requiredScope}`,
+        `Required scope: ${missingScope}`,
         403,
       );
     }
@@ -802,7 +815,11 @@ async function requireStorageScope(
       if (!user) return oauthError("invalid_token", "Invalid token", 401);
       userId = user.id;
     }
-    const rateKind = requiredScope === "storage.read" ? "read" : "write";
+    const rateKind = requiredScopes.every(
+      (requiredScope) => requiredScope === "storage.read",
+    )
+      ? "read"
+      : "write";
     const rateLimit =
       rateKind === "read"
         ? config.storageReadRateLimit
@@ -821,7 +838,8 @@ async function requireStorageScope(
       return response;
     }
     if (
-      requiredScope === "storage.write" &&
+      enforceWriteSwitch &&
+      requiredScopes.includes("storage.write") &&
       !config.storageLimits.writesEnabled
     ) {
       return oauthError(

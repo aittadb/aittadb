@@ -186,6 +186,17 @@ import {
   eventCollectionEndpoint,
   type EventWaitScheduler,
 } from "./event-collection";
+import {
+  BOUNDED_RECORD_ENTRY_PATH,
+  BOUNDED_RECORD_FORM_MAX_BYTES,
+  boundedRecordDiscoveryEndpoint,
+  boundedRecordHttpEndpoint,
+  boundedRecordProtocolErrorResponse,
+  isBoundedRecordDiscoveryRoute,
+  isBoundedRecordRoute,
+  isBoundedRecordTransactionRoute,
+} from "./bounded-record-http";
+import { BOUNDED_RECORD_MAX_TRANSACTION_BYTES } from "./bounded-record-protocol";
 
 export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
@@ -509,6 +520,9 @@ async function prebufferAcceptedRequestBody(
     const body = await readBoundedRequestBody(request, policy.maxBytes);
     return new Request(request, { body });
   } catch (error) {
+    if (isBoundedRecordTransactionRoute(url.pathname)) {
+      return boundedRecordProtocolErrorResponse(request, "invalid_request");
+    }
     if (error instanceof Error && error.message === "request_too_large") {
       return oauthError("invalid_request", policy.tooLargeDescription, 413);
     }
@@ -521,6 +535,26 @@ function acceptedRequestBodyPolicy(
   url: URL,
 ): RequestBodyPolicy | null {
   const contentType = (request.headers.get("content-type") ?? "").toLowerCase();
+  if (
+    request.method === "POST" &&
+    isBoundedRecordTransactionRoute(url.pathname) &&
+    contentType.includes("application/x-www-form-urlencoded")
+  ) {
+    return {
+      maxBytes: BOUNDED_RECORD_FORM_MAX_BYTES,
+      tooLargeDescription: "Record transaction request is too large",
+    };
+  }
+  if (
+    request.method === "POST" &&
+    isBoundedRecordTransactionRoute(url.pathname) &&
+    isJsonMediaType(contentType)
+  ) {
+    return {
+      maxBytes: BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
+      tooLargeDescription: "Record transaction request is too large",
+    };
+  }
   if (
     request.method === "POST" &&
     url.pathname === "/events" &&
@@ -666,6 +700,11 @@ async function route(
             link("storage-records", `${config.issuerUrl}/storage/records`, {
               type: HYPERMEDIA_MEDIA_TYPE,
             }),
+            link(
+              "bounded-record-storage",
+              `${config.issuerUrl}${BOUNDED_RECORD_ENTRY_PATH}`,
+              { type: HYPERMEDIA_MEDIA_TYPE },
+            ),
           ]
         : []),
       ...(config.features.files
@@ -757,6 +796,13 @@ async function route(
               "GET",
               `${config.issuerUrl}/storage/records`,
               { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+            action(
+              "open-bounded-record-storage",
+              "Open bounded record protocol",
+              "GET",
+              `${config.issuerUrl}${BOUNDED_RECORD_ENTRY_PATH}`,
+              { authorization: { scheme: "none" }, fields: [] },
             ),
           ]
         : []),
@@ -958,6 +1004,15 @@ async function route(
       config,
       identityProvider,
       ctx,
+    );
+  }
+
+  if (isBoundedRecordDiscoveryRoute(url.pathname)) {
+    return boundedRecordDiscoveryEndpoint(
+      request,
+      config,
+      identityProvider,
+      Boolean(store),
     );
   }
 
@@ -1409,6 +1464,14 @@ async function route(
       240,
     );
     if (limited) return limited;
+    const protocolResponse = await boundedRecordHttpEndpoint(
+      request,
+      url,
+      store,
+      config,
+      identityProvider,
+    );
+    if (protocolResponse) return protocolResponse;
     const browserResponse = await storageBrowserEndpoint(
       request,
       url,
@@ -3613,7 +3676,9 @@ export function isAittaDBRoute(pathname: string): boolean {
 
 function isRecordsRoute(pathname: string): boolean {
   return (
-    pathname === "/storage/records" || pathname.startsWith("/storage/records/")
+    pathname === "/storage/records" ||
+    pathname.startsWith("/storage/records/") ||
+    isBoundedRecordRoute(pathname)
   );
 }
 
@@ -3861,6 +3926,7 @@ function isClientCorsRoute(pathname: string): boolean {
 }
 
 function needsStore(pathname: string): boolean {
+  if (isBoundedRecordDiscoveryRoute(pathname)) return false;
   return ![
     "/",
     "/health",

@@ -38,6 +38,47 @@ transaction-byte, and cursor-character limits no larger than 262,144 bytes,
 1,048,576 bytes, and 2,048 characters respectively. AittaDB's initial record
 limit is 65,536 bytes.
 
+## HTTP resources
+
+The current AittaDB route map is:
+
+| Resource                                             | Method | Purpose                      |
+| ---------------------------------------------------- | ------ | ---------------------------- |
+| `/storage/record-protocol`                           | `GET`  | Public protocol discovery    |
+| `/storage/record-protocol/records/{collection}/{id}` | `GET`  | Read one record              |
+| `/storage/record-protocol/records`                   | `GET`  | Read one cursor page         |
+| `/storage/record-protocol/transactions`              | `POST` | Apply one atomic transaction |
+
+Clients configure only the discovery URL and follow its same-origin action
+targets. The discovery representation is public and does not query D1. Record
+operations require an active AittaDB access token with the advertised scopes;
+service clients can renew short-lived tokens with the Client Credentials Grant.
+
+`Accept: application/vnd.aittadb+json; version=0.1` selects the versioned JSON
+contract. `application/json` is the compatibility representation and
+`text/html` renders the same resource for a person. On ChatGPT Sites, signed-in
+HTML reads and the CSRF-protected transaction form use the reserved browser
+namespace through a short-lived internal AittaDB token that is never rendered,
+returned, logged, or persisted. Canonical JSON transactions remain bearer-only.
+
+For example, discover the contract and apply one create through its advertised
+transaction target:
+
+```sh
+curl -s "$ISSUER_URL/storage/record-protocol" \
+  -H 'Accept: application/vnd.aittadb+json; version=0.1'
+
+curl -s -X POST "$TRANSACT_RECORDS_URL" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Accept: application/vnd.aittadb+json; version=0.1' \
+  -H 'Content-Type: application/json' \
+  --data '{"transaction":{"operation_id":"settings:create","mutations":[{"type":"put","key":{"collection":"settings","id":"display"},"expected_revision":null,"value":{"theme":"dark"}}]}}'
+```
+
+Read and page only through the discovered targets. A page request must include
+`collection` and `limit`; follow its `next` link without decoding or rebuilding
+the cursor.
+
 ## Keys and revisions
 
 A record key has a collection matching `^[a-z][a-z0-9-]{0,63}$` and a separate
@@ -104,6 +145,18 @@ Protocol errors use type `bounded-storage-error`, empty `links` and `actions`,
 and only a fixed `code` and message. Supported codes are `invalid_request`,
 `not_found`, `conflict`, `precondition_failed`, `quota_exceeded`, and
 `unavailable`.
+
+| HTTP | Code                  |
+| ---: | --------------------- |
+|  400 | `invalid_request`     |
+|  404 | `not_found`           |
+|  409 | `conflict`            |
+|  412 | `precondition_failed` |
+|  507 | `quota_exceeded`      |
+|  503 | `unavailable`         |
+
+Bearer authentication, insufficient scope, CORS, and rate admission remain
+their existing AittaDB HTTP/OAuth boundaries and reveal no record existence.
 
 Record authorization is non-disclosing. Once bearer authentication succeeds,
 denied and absent record operations have equivalent fixed `404 not_found`

@@ -106,6 +106,7 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
     ["collection", "limit", "cursor"],
   );
   assert.deepEqual(list["x-aittadb-required-scopes"], ["storage.read"]);
+  assert.equal(list["x-aittadb-sites-session-supported"], true);
 
   const read = openApiOperation(
     "/storage/record-protocol/records/{collection}/{id}",
@@ -113,6 +114,7 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
   );
   assert.deepEqual(read.security, [{ bearer: [] }]);
   assert.deepEqual(read["x-aittadb-required-scopes"], ["storage.read"]);
+  assert.equal(read["x-aittadb-sites-session-supported"], true);
 
   const transaction = openApiOperation(
     "/storage/record-protocol/transactions",
@@ -124,6 +126,7 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
     "storage.write",
     "storage.delete",
   ]);
+  assert.equal(transaction["x-aittadb-sites-session-supported"], true);
   const transactionBody = asObject(
     transaction.requestBody,
     "bounded transaction request body",
@@ -134,6 +137,9 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
     ),
     ["application/json", "application/x-www-form-urlencoded"],
   );
+  const formInput = openApiSchema("BoundedRecordTransactionFormInput");
+  assert.deepEqual(formInput.required, ["csrf_token", "transaction"]);
+  assert.equal(formInput.additionalProperties, false);
   const command = openApiSchema("BoundedRecordTransactionCommand");
   assert.deepEqual(command.required, ["transaction"]);
   const commandProperties = asObject(
@@ -200,32 +206,39 @@ test("OpenAPI parity derives routes from an executable delegated module", async 
       export async function boundedRecordHttpEndpoint(request: Request, url: URL) {
         if (url.pathname === "/storage/record-protocol" && request.method === "GET") return new Response();
         if (url.pathname === "/storage/record-protocol/records" && request.method === "GET") return new Response();
-        if (url.pathname === "/storage/record-protocol/records/{collection}/{id}" && request.method === "GET") return new Response();
+        if (url.pathname.startsWith("/storage/record-protocol/records/") && request.method === "GET") return new Response();
         if (url.pathname === "/storage/record-protocol/transactions" && request.method === "POST") return new Response();
       }
     `,
   };
-  const withDelegation = `${handlerSource}\nboundedRecordHttpEndpoint(request, url);`;
   const operations = operationSet(
-    extractImplementedOperations(withDelegation, {
+    extractImplementedOperations(handlerSource, {
       ...storageSources,
       delegated: [delegated],
     }),
   );
   assert.ok(operations.has("GET /storage/record-protocol"));
   assert.ok(operations.has("GET /storage/record-protocol/records"));
+  assert.ok(
+    operations.has("GET /storage/record-protocol/records/{collection}/{id}"),
+  );
   assert.ok(operations.has("POST /storage/record-protocol/transactions"));
   assert.deepEqual(
-    validateOpenApiSpec(openApiSpec, withDelegation, {
+    validateOpenApiSpec(openApiSpec, handlerSource, {
       ...storageSources,
       delegated: [delegated],
     }),
     [],
   );
 
+  const withoutDelegation = handlerSource.replace(
+    "boundedRecordHttpEndpoint(",
+    "missingBoundedRecordHttpEndpoint(",
+  );
+  assert.notEqual(withoutDelegation, handlerSource);
   assert.throws(
     () =>
-      extractImplementedOperations(handlerSource, {
+      extractImplementedOperations(withoutDelegation, {
         ...storageSources,
         delegated: [delegated],
       }),

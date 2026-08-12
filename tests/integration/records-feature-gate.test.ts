@@ -21,6 +21,17 @@ test("disabled JSON Records rejects every route before repository work", async (
   );
 
   const requests = [
+    request("GET", "/storage/record-protocol"),
+    request(
+      "GET",
+      "/storage/record-protocol/records?collection=settings&limit=100",
+    ),
+    request("GET", "/storage/record-protocol/records/settings/example"),
+    request(
+      "POST",
+      "/storage/record-protocol/transactions",
+      "transaction=%7B%7D",
+    ),
     request("GET", "/storage/records"),
     request("POST", "/storage/records", "ui=1&_method=GET"),
     request("GET", "/storage/records/app%2Fsettings"),
@@ -162,7 +173,11 @@ test("enabled JSON Records preserves route and discovery behavior", async () => 
   )?.json()) as ResourceDocument;
   assert.equal((root.data.features as { records: boolean }).records, true);
   assertHasRelation(root, "storage-records");
+  assertHasRelation(root, "bounded-record-storage");
   assert.ok(root.actions.some((item) => item.name === "open-records"));
+  assert.ok(
+    root.actions.some((item) => item.name === "open-bounded-record-storage"),
+  );
 
   const recordsResponse = await app.fetch(apiRequest("/storage/records"));
   assert.equal(recordsResponse?.status, 200);
@@ -173,6 +188,10 @@ test("enabled JSON Records preserves route and discovery behavior", async () => 
   const recordsHtml = await fetchHtml(app, "/storage/records");
   assert.match(recordsHtml, /JSON record storage/);
   assert.match(recordsHtml, /List records/);
+
+  const protocolHtml = await fetchHtml(app, "/storage/record-protocol");
+  assert.match(protocolHtml, /Bounded record storage/);
+  assert.match(protocolHtml, /Run transaction/);
 });
 
 interface ResourceDocument {
@@ -228,14 +247,17 @@ function assertMissingRecordsControls(document: ResourceDocument): void {
     document.links.every(
       (item) =>
         !item.rel.includes("storage-records") &&
-        !item.href.includes("/storage/records"),
+        !item.rel.includes("bounded-record-storage") &&
+        !item.href.includes("/storage/records") &&
+        !item.href.includes("/storage/record-protocol"),
     ),
   );
   assert.ok(
     document.actions.every(
       (item) =>
         !item.name.includes("record") &&
-        !item.href.includes("/storage/records"),
+        !item.href.includes("/storage/records") &&
+        !item.href.includes("/storage/record-protocol"),
     ),
   );
 }

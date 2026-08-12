@@ -167,7 +167,34 @@ Request `/admin/clients` with `Accept: text/html` for the human interface or `Ac
 
 Register a client that is allowed to request `storage.read`, `storage.write`, and `storage.delete`. After the user approves those local scopes, use the returned access token with the storage API.
 
-For a browser-operated check, sign in and open `/storage/records` or `/storage/files`. Current-session mode works immediately and stores data under the local user's reserved browser-client namespace. Access-token mode submits a token in a CSRF-protected same-origin body and operates on that token's separate OAuth-client namespace. Both call the same operations as the curl examples. Collection pages show a list or explicit empty state. The file collection includes an accessible upload form; drag and drop selects the native file input, and the user still submits explicitly. Item pages show readable details plus only the valid read/download, update, and delete operations. Explicit tokens are not kept between responses, so enter one again for each deliberate token-mode operation.
+### Atomic bounded records
+
+Configure the public discovery resource rather than hard-coding operation
+targets:
+
+```sh
+curl -s "$ISSUER_URL/storage/record-protocol" \
+  -H 'accept: application/vnd.aittadb+json; version=0.1'
+```
+
+Follow its `transact-records` action to create, replace, delete, or check up to
+25 unique record keys atomically. This example creates one record:
+
+```sh
+curl -s -X POST "$TRANSACT_RECORDS_URL" \
+  -H "authorization: Bearer $ACCESS_TOKEN" \
+  -H 'accept: application/vnd.aittadb+json; version=0.1' \
+  -H 'content-type: application/json' \
+  --data '{"transaction":{"operation_id":"settings:create","mutations":[{"type":"put","key":{"collection":"settings","id":"display"},"expected_revision":null,"value":{"theme":"midnight"}}]}}'
+```
+
+An exact retry returns the original ordered result with `replayed: true`;
+changed work under that operation ID returns fixed `409 conflict`. Follow the
+discovered `read-record` target for one revisioned record and the
+`list-records` target for a finite page. Preserve its opaque `next` cursor.
+See [the complete protocol contract](bounded-record-storage-protocol.md).
+
+For a browser-operated check, sign in and open `/storage/records`, `/storage/record-protocol`, or `/storage/files`. Current-session mode works immediately and stores data under the local user's reserved browser-client namespace. The bounded protocol page offers real read/list forms and a CSRF-protected transaction form without exposing its internal token. Legacy explicit-token mode submits a token in a CSRF-protected same-origin body and operates on that token's separate OAuth-client namespace. All views call the same canonical validators as the curl examples. Collection pages show a list or explicit empty state. The file collection includes an accessible upload form; drag and drop selects the native file input, and the user still submits explicitly. Item pages show readable details plus only valid operations. Explicit tokens are not kept between responses, so enter one again for each deliberate token-mode operation.
 
 Open `/userinfo` to read the current signed-in session's local claims through the production UserInfo validator, or choose access-token mode to inspect a third-party application's granted claims. Device approval, Authorization Code consent, and allowlisted client administration also use the current signed-in identity, but sign-in never substitutes for registered client details, PKCE, client authentication, grants, or scopes.
 

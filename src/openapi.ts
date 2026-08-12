@@ -345,33 +345,45 @@ function boundedRecordErrorResponse(description: string) {
 function boundedRecordAuthErrorResponse(description: string) {
   return {
     description,
-    content: {
-      "application/json": {
-        schema: {
-          oneOf: [
-            { $ref: "#/components/schemas/OAuthError" },
-            { $ref: "#/components/schemas/BoundedRecordError" },
-          ],
-        },
-      },
-      [boundedRecordProtocolMediaType]: {
-        schema: { $ref: "#/components/schemas/BoundedRecordError" },
-      },
-      "text/html": { schema: { type: "string" } },
-    },
+    content: hypermediaContent("#/components/schemas/HypermediaError"),
   };
 }
 
 function boundedRecordRateLimitedResponse() {
   return {
-    ...boundedRecordErrorResponse(
+    description:
       "The bounded record route rate limit was exceeded. Retry after Retry-After seconds.",
-    ),
     headers: {
       "Retry-After": {
         description: "Seconds until this request family may be retried.",
         schema: { type: "integer", minimum: 1 },
       },
+    },
+    content: hypermediaContent("#/components/schemas/HypermediaError"),
+  };
+}
+
+function boundedRecordUnavailableResponse(description: string) {
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: {
+          oneOf: [
+            { $ref: "#/components/schemas/BoundedRecordError" },
+            { $ref: "#/components/schemas/HypermediaError" },
+          ],
+        },
+      },
+      [boundedRecordProtocolMediaType]: {
+        schema: {
+          oneOf: [
+            { $ref: "#/components/schemas/BoundedRecordError" },
+            { $ref: "#/components/schemas/HypermediaError" },
+          ],
+        },
+      },
+      "text/html": { schema: { type: "string" } },
     },
   };
 }
@@ -1239,9 +1251,7 @@ export const openApiSpec = {
             ),
           },
           "406": notAcceptableResponse,
-          "503": boundedRecordErrorResponse(
-            "The bounded record protocol is temporarily unavailable.",
-          ),
+          "503": recordsUnavailableResponse,
         },
       },
     },
@@ -1250,6 +1260,7 @@ export const openApiSpec = {
         summary: "List bounded records in one collection",
         description: `${boundedRecordProtocolDescription} Requires storage.read. The collection and required finite limit are explicit query fields; cursor is an opaque continuation value returned by the preceding page. Results are ordered by stable record ID and reveal only records in the authenticated token namespace.`,
         security: [{ bearer: [] }],
+        "x-aittadb-sites-session-supported": true,
         "x-aittadb-required-scopes": ["storage.read"],
         parameters: [
           {
@@ -1274,7 +1285,7 @@ export const openApiSpec = {
               maximum: BOUNDED_RECORD_MAX_PAGE_SIZE,
             },
             description:
-              "Maximum records in this page. The protocol maximum is 100; a deployment may advertise a lower positive value.",
+              "Maximum records in this page. Bounded record-storage protocol 1.1 advertises and accepts values through the fixed maximum of 100.",
           },
           {
             name: "cursor",
@@ -1307,7 +1318,7 @@ export const openApiSpec = {
             "The authenticated bearer token does not include storage.read.",
           ),
           "429": boundedRecordRateLimitedResponse(),
-          "503": boundedRecordErrorResponse(
+          "503": boundedRecordUnavailableResponse(
             "The bounded record storage primitive is temporarily unavailable.",
           ),
           "406": notAcceptableResponse,
@@ -1319,6 +1330,7 @@ export const openApiSpec = {
         summary: "Read one bounded record",
         description: `${boundedRecordProtocolDescription} Requires storage.read. A valid token that cannot read the record receives the same fixed not_found representation as an absent record; keys and values are never included in authorization errors.`,
         security: [{ bearer: [] }],
+        "x-aittadb-sites-session-supported": true,
         "x-aittadb-required-scopes": ["storage.read"],
         parameters: [
           {
@@ -1365,7 +1377,7 @@ export const openApiSpec = {
             "The record is absent or unavailable to this authenticated namespace.",
           ),
           "429": boundedRecordRateLimitedResponse(),
-          "503": boundedRecordErrorResponse(
+          "503": boundedRecordUnavailableResponse(
             "The bounded record storage primitive is temporarily unavailable.",
           ),
           "406": notAcceptableResponse,
@@ -1377,6 +1389,7 @@ export const openApiSpec = {
         summary: "Atomically transact bounded records",
         description: `${boundedRecordProtocolDescription} The canonical API request is application/json and must contain the exact bounded transaction command. A browser form may submit the same command as JSON text in application/x-www-form-urlencoded with CSRF protection; that adapter does not change the transaction semantics. All preconditions and quota checks use one pre-transaction state. Record effects and the durable idempotency receipt commit together or neither commits.`,
         security: [{ bearer: [] }],
+        "x-aittadb-sites-session-supported": true,
         "x-aittadb-required-scopes": [
           ...boundedRecordAuthorization.bearer.requiredScopes,
         ],
@@ -1421,7 +1434,7 @@ export const openApiSpec = {
             "A positive revision or absence precondition does not match the one consistent pre-transaction state.",
           ),
           "429": boundedRecordRateLimitedResponse(),
-          "503": boundedRecordErrorResponse(
+          "503": boundedRecordUnavailableResponse(
             "The transaction could not be completed and no record or receipt effect was committed.",
           ),
           "507": boundedRecordErrorResponse(
@@ -3283,9 +3296,8 @@ export const openApiSpec = {
       },
       BoundedRecordTransactionFormInput: {
         type: "object",
-        required: ["ui", "csrf_token", "transaction"],
+        required: ["csrf_token", "transaction"],
         properties: {
-          ui: { type: "string", const: "1" },
           csrf_token: { type: "string", minLength: 1 },
           transaction: {
             type: "string",

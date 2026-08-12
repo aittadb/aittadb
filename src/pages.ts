@@ -81,7 +81,7 @@ export function serviceHomePage(
     ? `View your AittaDB identity and open your private ${privateResources}.`
     : `Sign in to view your AittaDB identity and reach your private ${privateResources}.`;
   const recordOperation = metadata.features.records
-    ? `<a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a>`
+    ? `<a href="/storage/records"><strong>JSON records</strong><span>Create, read, list, and delete persistent D1-backed values.</span></a><a href="/storage/record-protocol"><strong>Atomic record protocol</strong><span>Discover bounded reads, cursor pages, and revision-checked transactions.</span></a>`
     : "";
   const fileOperation = metadata.features.files
     ? `<a href="/storage/files"><strong>File storage</strong><span>Upload, list, download, and delete files stored through D1 and R2.</span></a>`
@@ -177,7 +177,7 @@ export function sessionPage(
   },
 ): string {
   const recordOperation = recordsEnabled
-    ? `<a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a>`
+    ? `<a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/record-protocol"><strong>Atomic record protocol</strong><span>Use bounded reads and revision-checked transactions in this identity's isolated namespace.</span></a>`
     : "";
   const fileOperation = filesEnabled
     ? `<a href="/storage/files"><strong>My files</strong><span>Use this identity's isolated R2 files, or test an explicit client token.</span></a>`

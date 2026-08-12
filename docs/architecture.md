@@ -21,6 +21,7 @@ System units:
 - `src/storage.ts`: AittaDB application-storage endpoints and scope enforcement.
 - `src/storage-cursor.ts`: encrypted collection cursors bound to storage kind, local user, and OAuth client.
 - `src/bounded-record-protocol.ts`: strict vendor-neutral bounded record-storage protocol 1.1 documents, limits, and command decoding.
+- `src/bounded-record-http.ts`: content-negotiated discovery, scoped reads/pages, and atomic transaction transport.
 - `src/bounded-record-cursor.ts`: protocol-specific encrypted list position bound to principal, client, collection, and page size.
 - `src/event-collection.ts`: bounded event collection reads, cursor traversal, and namespace authorization.
 - `src/events.ts`: immutable event item representation and scoped `events.read` authorization.

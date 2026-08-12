@@ -391,6 +391,10 @@ function exactRouteOperations(
       (candidate) => propertyAccess(candidate, "url", "pathname"),
       false,
     ).filter(isStoragePath);
+    for (const prefix of startedPathPrefixes(node.expression)) {
+      const template = itemTemplate(prefix);
+      if (template) paths.push(template);
+    }
     const methods = comparedMethods(node.expression, false);
     for (const path of paths) {
       for (const method of methods) operations.push({ path, method });
@@ -482,6 +486,29 @@ function comparedMethods(
   return [...methods].sort();
 }
 
+function startedPathPrefixes(node: ts.Node): string[] {
+  const prefixes = new Set<string>();
+  forEachNode(node, (candidate) => {
+    if (
+      !ts.isCallExpression(candidate) ||
+      candidate.arguments.length !== 1 ||
+      !ts.isStringLiteralLike(candidate.arguments[0]!)
+    ) {
+      return;
+    }
+    const expression = candidate.expression;
+    if (
+      !ts.isPropertyAccessExpression(expression) ||
+      expression.name.text !== "startsWith" ||
+      !propertyAccess(expression.expression, "url", "pathname")
+    ) {
+      return;
+    }
+    prefixes.add(candidate.arguments[0]!.text);
+  });
+  return [...prefixes];
+}
+
 function comparedStrings(
   node: ts.Node,
   matches: (candidate: ts.Expression) => boolean,
@@ -541,9 +568,10 @@ function guardedIdentifier(expression: ts.Expression): string | null {
 }
 
 function itemTemplate(prefix: string): string | null {
-  return prefix.startsWith("/storage/") && prefix.endsWith("/")
-    ? `${prefix}{key}`
-    : null;
+  if (!prefix.startsWith("/storage/") || !prefix.endsWith("/")) return null;
+  return prefix === "/storage/record-protocol/records/"
+    ? `${prefix}{collection}/{id}`
+    : `${prefix}{key}`;
 }
 
 function isStoragePath(path: string): boolean {
