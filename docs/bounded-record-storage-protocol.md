@@ -75,10 +75,28 @@ durable operation receipt commit together, or none commit. Deletes can free
 capacity for puts in the same transaction because quotas use the complete
 candidate state.
 
+The D1 repository executes one bounded atomic batch. It first stores a pending
+receipt only after preflight succeeds, applies at most 25 guarded unique-key
+mutations, verifies every resulting revision/value/absence, and transitions the
+receipt to committed. A failed guard deliberately aborts the D1 batch, so no
+partial record or pending receipt survives. The in-memory test adapter performs
+the same transition without yielding between its final precondition and state
+replacement.
+
 An exact retry in the same credential namespace returns the original ordered
 result with `replayed: true`, including after runtime reconstruction. Reusing
 the operation ID for changed work returns a fixed conflict. Failed operations
 retain no receipt.
+
+Only SHA-256 hashes of operation IDs and canonical requests are persisted.
+Committed receipts retain the bounded ordered result required for exact replay;
+they are internal, have no list/read API, and do not count as application
+records. Separate deployment, subject, and namespace receipt count/byte
+ceilings reuse the configured finite storage-limit values so check-only traffic
+cannot create unbounded internal state. Exceeding either application-record or
+receipt admission returns the same fixed `quota_exceeded` result without
+disclosing which ceiling was reached. Account deletion removes receipts before
+record rows and refuses finalization while either remains.
 
 ## Fixed failures
 

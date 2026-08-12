@@ -53,7 +53,16 @@ import {
   boundedRecordDocument,
   decodeBoundedRecordKey,
 } from "../bounded-record-protocol";
-import type { BoundedRecordValue } from "../bounded-record-protocol";
+import type {
+  BoundedRecordMutation,
+  BoundedRecordTransactionCommand,
+  BoundedRecordValue,
+} from "../bounded-record-protocol";
+import {
+  parseBoundedStorageTransactionResult,
+  prepareBoundedStorageTransaction,
+} from "../bounded-record-transaction";
+import type { PreparedBoundedStorageTransaction } from "../bounded-record-transaction";
 import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
@@ -78,6 +87,7 @@ import type {
   RefreshTokenRecord,
   BoundedStorageRecord,
   BoundedStorageRecordPage,
+  BoundedStorageTransactionResult,
   StorageFileMetadata,
   StorageFileOrphanRepair,
   StorageFileOrphanRepairDisposition,
@@ -232,6 +242,7 @@ WHERE id = ?1
   AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM bounded_storage_transaction_receipts WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
@@ -253,6 +264,7 @@ WHERE subject = ?1 AND state = 'running' AND attempt = ?2 AND available_at > ?3
   AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM bounded_storage_transaction_receipts WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
@@ -273,6 +285,7 @@ WHERE subject = ?1 AND state = 'completed' AND attempt = ?2
   AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM bounded_storage_transaction_receipts WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
@@ -371,6 +384,268 @@ ON CONFLICT(user_id, client_id, key) DO UPDATE SET
   sha256 = excluded.sha256,
   updated_at = excluded.updated_at
 WHERE storage_files.r2_key = ?10`;
+
+const BOUNDED_TRANSACTION_STATE = `
+WITH mutations AS (
+  SELECT
+    CAST(entry.key AS INTEGER) AS ordinal,
+    json_extract(entry.value, '$.type') AS mutation_type,
+    json_extract(entry.value, '$.key.collection') AS collection,
+    json_extract(entry.value, '$.key.id') AS record_id,
+    CASE
+      WHEN json_type(entry.value, '$.expected_revision') = 'null' THEN NULL
+      ELSE CAST(json_extract(entry.value, '$.expected_revision') AS INTEGER)
+    END AS expected_revision,
+    CASE
+      WHEN json_extract(entry.value, '$.type') = 'put'
+      THEN json(json_extract(entry.value, '$.value'))
+      ELSE NULL
+    END AS value_json
+  FROM json_each(?6) AS entry
+), current_state AS (
+  SELECT
+    mutation.*,
+    record.value_json AS current_value_json,
+    record.value_bytes AS current_value_bytes,
+    record.revision AS current_revision,
+    record.created_at AS current_created_at
+  FROM mutations AS mutation
+  LEFT JOIN bounded_storage_records AS record
+    ON record.user_id = ?1
+   AND record.client_id = ?2
+   AND record.collection = mutation.collection
+   AND record.record_id = mutation.record_id
+), evaluated AS (
+  SELECT
+    state.*,
+    CASE
+      WHEN state.mutation_type = 'put'
+       AND state.expected_revision IS NULL
+       AND state.current_revision IS NOT NULL
+      THEN 'conflict'
+      WHEN state.mutation_type = 'check'
+       AND state.expected_revision IS NULL
+       AND state.current_revision IS NOT NULL
+      THEN 'precondition_failed'
+      WHEN state.expected_revision IS NOT NULL
+       AND (state.current_revision IS NULL OR state.current_revision <> state.expected_revision)
+      THEN 'precondition_failed'
+      WHEN state.mutation_type = 'put'
+       AND state.current_revision >= 9007199254740991
+      THEN 'unavailable'
+      ELSE NULL
+    END AS failure,
+    CASE
+      WHEN state.mutation_type = 'put' AND state.current_revision IS NULL THEN 1
+      WHEN state.mutation_type = 'delete' THEN -1
+      ELSE 0
+    END AS item_delta,
+    CASE
+      WHEN state.mutation_type = 'put'
+      THEN length(CAST(state.value_json AS BLOB)) - COALESCE(state.current_value_bytes, 0)
+      WHEN state.mutation_type = 'delete'
+      THEN -COALESCE(state.current_value_bytes, 0)
+      ELSE 0
+    END AS byte_delta,
+    CASE
+      WHEN state.mutation_type = 'put' THEN json_object(
+        'key', json_object('collection', state.collection, 'id', state.record_id),
+        'revision', COALESCE(state.current_revision, 0) + 1,
+        'value', json(state.value_json)
+      )
+      WHEN state.mutation_type = 'check' AND state.expected_revision IS NOT NULL THEN json_object(
+        'key', json_object('collection', state.collection, 'id', state.record_id),
+        'revision', state.current_revision,
+        'value', json(state.current_value_json)
+      )
+      ELSE 'null'
+    END AS result_json
+  FROM current_state AS state
+), summary AS (
+  SELECT
+    COUNT(*) AS mutation_count,
+    COALESCE(SUM(failure = 'conflict'), 0) AS conflict_count,
+    COALESCE(SUM(failure = 'precondition_failed'), 0) AS precondition_count,
+    COALESCE(SUM(failure = 'unavailable'), 0) AS unavailable_count,
+    COALESCE(SUM(mutation_type = 'put'), 0) AS put_count,
+    COALESCE(SUM(item_delta), 0) AS item_delta,
+    COALESCE(SUM(byte_delta), 0) AS byte_delta,
+    '[' || COALESCE(group_concat(result_json, ','), '') || ']' AS result_json
+  FROM (
+    SELECT * FROM evaluated ORDER BY ordinal ASC LIMIT 25
+  )
+), candidate AS (
+  SELECT
+    summary.*,
+    length(CAST(summary.result_json AS BLOB)) AS result_bytes,
+    EXISTS (SELECT 1 FROM users WHERE id = ?1) AS subject_active,
+    EXISTS (
+      SELECT 1 FROM oauth_clients WHERE id = ?2 AND disabled_at IS NULL
+    ) AS client_active,
+    NOT EXISTS (
+      SELECT 1 FROM account_deletion_jobs WHERE subject = ?1
+    ) AS deletion_inactive,
+    (
+      (SELECT COUNT(*) FROM storage_records) +
+      (SELECT COUNT(*) FROM bounded_storage_records) +
+      (SELECT COUNT(*) FROM storage_files) + summary.item_delta <= ?11
+      AND
+      (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records) +
+      (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records) +
+      (SELECT COALESCE(SUM(size), 0) FROM storage_files) + summary.byte_delta <= ?12
+      AND
+      (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1) +
+      (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1) +
+      (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1) + summary.item_delta <= ?13
+      AND
+      (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1) +
+      (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1) +
+      (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1) + summary.byte_delta <= ?14
+      AND
+      (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+      (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) +
+      (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) + summary.item_delta <= ?15
+      AND
+      (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+      (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) +
+      (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) + summary.byte_delta <= ?16
+    ) AS record_quota_ok,
+    (
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts) + 1 <= ?17
+      AND
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts) +
+        length(CAST(summary.result_json AS BLOB)) <= ?18
+      AND
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE user_id = ?1) + 1 <= ?19
+      AND
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE user_id = ?1) +
+        length(CAST(summary.result_json AS BLOB)) <= ?20
+      AND
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE user_id = ?1 AND client_id = ?2) + 1 <= ?21
+      AND
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE user_id = ?1 AND client_id = ?2) +
+        length(CAST(summary.result_json AS BLOB)) <= ?22
+    ) AS receipt_quota_ok
+  FROM summary
+)`;
+
+const BOUNDED_TRANSACTION_PREFLIGHT = `${BOUNDED_TRANSACTION_STATE}
+SELECT
+  CASE
+    WHEN candidate.subject_active = 0
+      OR candidate.client_active = 0
+      OR candidate.deletion_inactive = 0
+      OR (?10 = 0 AND candidate.put_count > 0)
+    THEN 'unavailable'
+    WHEN EXISTS (
+      SELECT 1 FROM bounded_storage_transaction_receipts
+      WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
+        AND request_hash <> ?4
+    ) THEN 'conflict'
+    WHEN EXISTS (
+      SELECT 1 FROM bounded_storage_transaction_receipts
+      WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
+        AND request_hash = ?4 AND status = 'committed'
+    ) THEN 'replayed'
+    WHEN EXISTS (
+      SELECT 1 FROM bounded_storage_transaction_receipts
+      WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
+    ) THEN 'unavailable'
+    WHEN candidate.conflict_count > 0 THEN 'conflict'
+    WHEN candidate.precondition_count > 0 THEN 'precondition_failed'
+    WHEN candidate.unavailable_count > 0 THEN 'unavailable'
+    WHEN candidate.mutation_count <> ?7
+      OR candidate.result_bytes > ?9
+      OR candidate.record_quota_ok = 0
+      OR candidate.receipt_quota_ok = 0
+    THEN 'quota_exceeded'
+    ELSE 'created'
+  END AS outcome,
+  CASE
+    WHEN EXISTS (
+      SELECT 1 FROM bounded_storage_transaction_receipts
+      WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
+        AND request_hash = ?4 AND status = 'committed'
+    ) THEN (
+      SELECT result_json FROM bounded_storage_transaction_receipts
+      WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
+    )
+    ELSE candidate.result_json
+  END AS result_json
+FROM candidate`;
+
+const BOUNDED_TRANSACTION_INSERT_RECEIPT = `${BOUNDED_TRANSACTION_STATE}
+INSERT INTO bounded_storage_transaction_receipts (
+  user_id, client_id, operation_id_hash, request_hash, attempt_hash,
+  mutation_count, result_json, result_bytes, status, created_at, committed_at
+)
+SELECT
+  ?1, ?2, ?3, ?4, ?5, candidate.mutation_count,
+  candidate.result_json, candidate.result_bytes, 'pending', ?8, NULL
+FROM candidate
+WHERE candidate.subject_active = 1
+  AND candidate.client_active = 1
+  AND candidate.deletion_inactive = 1
+  AND (?10 = 1 OR candidate.put_count = 0)
+  AND candidate.conflict_count = 0
+  AND candidate.precondition_count = 0
+  AND candidate.unavailable_count = 0
+  AND candidate.mutation_count = ?7
+  AND candidate.result_bytes <= ?9
+  AND candidate.record_quota_ok = 1
+  AND candidate.receipt_quota_ok = 1
+ON CONFLICT(user_id, client_id, operation_id_hash) DO NOTHING`;
+
+const BOUNDED_TRANSACTION_PUT = `
+INSERT INTO bounded_storage_records (
+  user_id, client_id, collection, record_id, value_json, value_bytes,
+  revision, created_at, updated_at
+)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7
+WHERE EXISTS (
+  SELECT 1 FROM bounded_storage_transaction_receipts
+  WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?8
+    AND request_hash = ?9 AND attempt_hash = ?10 AND status = 'pending'
+)
+AND (
+  (?11 IS NULL AND NOT EXISTS (
+    SELECT 1 FROM bounded_storage_records
+    WHERE user_id = ?1 AND client_id = ?2 AND collection = ?3 AND record_id = ?4
+  ))
+  OR
+  (?11 IS NOT NULL AND EXISTS (
+    SELECT 1 FROM bounded_storage_records
+    WHERE user_id = ?1 AND client_id = ?2 AND collection = ?3 AND record_id = ?4
+      AND revision = ?11
+  ))
+)
+ON CONFLICT(user_id, client_id, collection, record_id) DO UPDATE SET
+  value_json = excluded.value_json,
+  value_bytes = excluded.value_bytes,
+  revision = bounded_storage_records.revision + 1,
+  updated_at = excluded.updated_at
+WHERE ?11 IS NOT NULL AND bounded_storage_records.revision = ?11`;
+
+const BOUNDED_TRANSACTION_DELETE = `
+DELETE FROM bounded_storage_records
+WHERE user_id = ?1 AND client_id = ?2 AND collection = ?3 AND record_id = ?4
+  AND revision = ?5
+  AND EXISTS (
+    SELECT 1 FROM bounded_storage_transaction_receipts
+    WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?6
+      AND request_hash = ?7 AND attempt_hash = ?8 AND status = 'pending'
+  )`;
+
+const BOUNDED_TRANSACTION_ABORT_PENDING = `
+UPDATE bounded_storage_transaction_receipts
+SET status = 'committed', committed_at = -1
+WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
+  AND request_hash = ?4 AND attempt_hash = ?5 AND status = 'pending'`;
+
+const BOUNDED_TRANSACTION_SELECT_RECEIPT = `
+SELECT request_hash, attempt_hash, status, result_json
+FROM bounded_storage_transaction_receipts
+WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3`;
 
 export class D1AuthStore implements AuthStore {
   constructor(private readonly db: D1Database) {}
@@ -760,22 +1035,45 @@ export class D1AuthStore implements AuthStore {
     }
     if (!this.db.batch) throw new Error("account_record_purge_failed");
 
-    const countRow = await this.db
+    const receiptCountRow = await this.db
       .prepare(
-        "SELECT MIN(COUNT(*), ?) AS selected FROM bounded_storage_records WHERE user_id = ?",
+        "SELECT MIN(COUNT(*), ?) AS selected FROM bounded_storage_transaction_receipts WHERE user_id = ?",
       )
       .bind(limit, subject)
       .first<Row>();
-    const boundedLimit = Number(countRow?.selected ?? 0);
+    const receiptLimit = Number(receiptCountRow?.selected ?? 0);
     if (
-      !Number.isSafeInteger(boundedLimit) ||
-      boundedLimit < 0 ||
-      boundedLimit > limit
+      !Number.isSafeInteger(receiptLimit) ||
+      receiptLimit < 0 ||
+      receiptLimit > limit
     ) {
       throw new Error("account_record_purge_failed");
     }
-    const legacyLimit = limit - boundedLimit;
+    const boundedCountRow = await this.db
+      .prepare(
+        "SELECT MIN(COUNT(*), ?) AS selected FROM bounded_storage_records WHERE user_id = ?",
+      )
+      .bind(limit - receiptLimit, subject)
+      .first<Row>();
+    const boundedLimit = Number(boundedCountRow?.selected ?? 0);
+    if (
+      !Number.isSafeInteger(boundedLimit) ||
+      boundedLimit < 0 ||
+      boundedLimit > limit - receiptLimit
+    ) {
+      throw new Error("account_record_purge_failed");
+    }
+    const legacyLimit = limit - receiptLimit - boundedLimit;
     const statements: D1PreparedStatement[] = [];
+    if (receiptLimit > 0) {
+      statements.push(
+        this.db
+          .prepare(
+            "DELETE FROM bounded_storage_transaction_receipts WHERE (user_id, client_id, operation_id_hash) IN (SELECT user_id, client_id, operation_id_hash FROM bounded_storage_transaction_receipts WHERE user_id = ? ORDER BY client_id ASC, created_at ASC, operation_id_hash ASC LIMIT ?)",
+          )
+          .bind(subject, receiptLimit),
+      );
+    }
     if (boundedLimit > 0) {
       statements.push(
         this.db
@@ -809,7 +1107,7 @@ export class D1AuthStore implements AuthStore {
     if (deletedCount < limit) {
       const remaining = await this.db
         .prepare(
-          "SELECT 1 AS remaining WHERE EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1) OR EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)",
+          "SELECT 1 AS remaining WHERE EXISTS (SELECT 1 FROM bounded_storage_transaction_receipts WHERE user_id = ?1) OR EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1) OR EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)",
         )
         .bind(subject)
         .first<Row>();
@@ -1751,6 +2049,167 @@ export class D1AuthStore implements AuthStore {
     return { items: items.slice(0, limit), hasMore: items.length > limit };
   }
 
+  async transactBoundedStorageRecords(
+    userId: string,
+    clientId: string,
+    command: Readonly<BoundedRecordTransactionCommand>,
+    limits: Readonly<StorageLimits>,
+    now: number,
+  ): Promise<BoundedStorageTransactionResult> {
+    const prepared = await prepareBoundedStorageTransaction({
+      userId,
+      clientId,
+      command,
+      limits,
+      now,
+    });
+    if (!this.db.batch) return { status: "unavailable" };
+
+    const commonBindings = boundedTransactionBindings(prepared, limits);
+    const statements: D1PreparedStatement[] = [
+      this.db.prepare(BOUNDED_TRANSACTION_PREFLIGHT).bind(...commonBindings),
+      this.db
+        .prepare(BOUNDED_TRANSACTION_INSERT_RECEIPT)
+        .bind(...commonBindings),
+    ];
+    const mutationIndexes: number[] = [];
+    for (const mutation of prepared.command.transaction.mutations) {
+      const statement = boundedTransactionMutationStatement(
+        this.db,
+        prepared,
+        mutation,
+      );
+      if (statement) {
+        mutationIndexes.push(statements.length);
+        statements.push(statement);
+      }
+    }
+    const commitIndex = statements.length;
+    statements.push(
+      boundedTransactionCommitStatement(
+        this.db,
+        prepared,
+        prepared.command.transaction.mutations,
+      ),
+    );
+    const abortIndex = statements.length;
+    statements.push(
+      this.db
+        .prepare(BOUNDED_TRANSACTION_ABORT_PENDING)
+        .bind(
+          prepared.userId,
+          prepared.clientId,
+          prepared.operationIdHash,
+          prepared.requestHash,
+          prepared.attemptHash,
+        ),
+    );
+    const receiptIndex = statements.length;
+    statements.push(
+      this.db
+        .prepare(BOUNDED_TRANSACTION_SELECT_RECEIPT)
+        .bind(prepared.userId, prepared.clientId, prepared.operationIdHash),
+    );
+
+    let results: D1Result[];
+    try {
+      results = await this.db.batch(statements);
+    } catch {
+      return { status: "unavailable" };
+    }
+    if (
+      results.length !== statements.length ||
+      results.some((result) => result.success !== true)
+    ) {
+      return { status: "unavailable" };
+    }
+
+    const preflight = firstBatchRow(results[0]!);
+    const outcome = preflight?.outcome;
+    if (
+      outcome !== "created" &&
+      outcome !== "replayed" &&
+      outcome !== "conflict" &&
+      outcome !== "precondition_failed" &&
+      outcome !== "quota_exceeded" &&
+      outcome !== "unavailable"
+    ) {
+      return { status: "unavailable" };
+    }
+    const receipt = firstBatchRow(results[receiptIndex]!);
+    const inserted = mutationChanges(results[1]!);
+    const committed = mutationChanges(results[commitIndex]!);
+    const aborted = mutationChanges(results[abortIndex]!);
+    const changedRecords = mutationIndexes.map((index) =>
+      mutationChanges(results[index]!),
+    );
+
+    if (outcome === "created") {
+      if (
+        inserted !== 1 ||
+        committed !== 1 ||
+        aborted !== 0 ||
+        changedRecords.some((changes) => changes !== 1) ||
+        !isCommittedBoundedTransactionReceipt(
+          receipt,
+          prepared.requestHash,
+          prepared.attemptHash,
+        )
+      ) {
+        return { status: "unavailable" };
+      }
+      try {
+        return {
+          status: "created",
+          records: parseBoundedStorageTransactionResult(
+            String(receipt.result_json),
+            prepared.command,
+          ),
+        };
+      } catch {
+        return { status: "unavailable" };
+      }
+    }
+
+    if (outcome === "replayed") {
+      if (
+        inserted !== 0 ||
+        committed !== 0 ||
+        aborted !== 0 ||
+        changedRecords.some((changes) => changes !== 0) ||
+        !isCommittedBoundedTransactionReceipt(
+          receipt,
+          prepared.requestHash,
+          null,
+        ) ||
+        receipt.attempt_hash === prepared.attemptHash
+      ) {
+        return { status: "unavailable" };
+      }
+      try {
+        return {
+          status: "replayed",
+          records: parseBoundedStorageTransactionResult(
+            String(receipt.result_json),
+            prepared.command,
+          ),
+        };
+      } catch {
+        return { status: "unavailable" };
+      }
+    }
+
+    if (
+      inserted !== 0 ||
+      committed !== 0 ||
+      aborted !== 0 ||
+      changedRecords.some((changes) => changes !== 0)
+    ) {
+      return { status: "unavailable" };
+    }
+    return { status: outcome };
+  }
+
   async listStorageFiles(
     userId: string,
     clientId: string,
@@ -2084,6 +2543,190 @@ export class D1AuthStore implements AuthStore {
       createdAt: Number(row.created_at),
     };
   }
+}
+
+function boundedTransactionBindings(
+  prepared: Readonly<PreparedBoundedStorageTransaction>,
+  limits: Readonly<StorageLimits>,
+): (string | number)[] {
+  return [
+    prepared.userId,
+    prepared.clientId,
+    prepared.operationIdHash,
+    prepared.requestHash,
+    prepared.attemptHash,
+    prepared.mutationsJson,
+    prepared.command.transaction.mutations.length,
+    prepared.now,
+    prepared.maxResultBytes,
+    limits.writesEnabled ? 1 : 0,
+    limits.globalMaxItems,
+    limits.globalMaxBytes,
+    limits.userMaxItems,
+    limits.userMaxBytes,
+    limits.namespaceMaxItems,
+    limits.namespaceMaxBytes,
+    limits.globalMaxItems,
+    limits.globalMaxBytes,
+    limits.userMaxItems,
+    limits.userMaxBytes,
+    limits.namespaceMaxItems,
+    limits.namespaceMaxBytes,
+  ];
+}
+
+function boundedTransactionMutationStatement(
+  db: D1Database,
+  prepared: Readonly<PreparedBoundedStorageTransaction>,
+  mutation: Readonly<BoundedRecordMutation>,
+): D1PreparedStatement | null {
+  if (mutation.type === "check") return null;
+  if (mutation.type === "delete") {
+    return db
+      .prepare(BOUNDED_TRANSACTION_DELETE)
+      .bind(
+        prepared.userId,
+        prepared.clientId,
+        mutation.key.collection,
+        mutation.key.id,
+        mutation.expected_revision,
+        prepared.operationIdHash,
+        prepared.requestHash,
+        prepared.attemptHash,
+      );
+  }
+  const valueJson = JSON.stringify(mutation.value);
+  return db
+    .prepare(BOUNDED_TRANSACTION_PUT)
+    .bind(
+      prepared.userId,
+      prepared.clientId,
+      mutation.key.collection,
+      mutation.key.id,
+      valueJson,
+      new TextEncoder().encode(valueJson).byteLength,
+      prepared.now,
+      prepared.operationIdHash,
+      prepared.requestHash,
+      prepared.attemptHash,
+      mutation.expected_revision,
+    );
+}
+
+function boundedTransactionCommitStatement(
+  db: D1Database,
+  prepared: Readonly<PreparedBoundedStorageTransaction>,
+  mutations: readonly Readonly<BoundedRecordMutation>[],
+): D1PreparedStatement {
+  let sql = `
+UPDATE bounded_storage_transaction_receipts
+SET status = 'committed', committed_at = ?
+WHERE user_id = ? AND client_id = ? AND operation_id_hash = ?
+  AND request_hash = ? AND attempt_hash = ? AND status = 'pending'`;
+  const bindings: (string | number)[] = [
+    prepared.now,
+    prepared.userId,
+    prepared.clientId,
+    prepared.operationIdHash,
+    prepared.requestHash,
+    prepared.attemptHash,
+  ];
+
+  for (const mutation of mutations) {
+    if (mutation.type === "delete") {
+      sql += `
+  AND NOT EXISTS (
+    SELECT 1 FROM bounded_storage_records
+    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
+  )`;
+      bindings.push(
+        prepared.userId,
+        prepared.clientId,
+        mutation.key.collection,
+        mutation.key.id,
+      );
+      continue;
+    }
+    if (mutation.type === "check" && mutation.expected_revision === null) {
+      sql += `
+  AND NOT EXISTS (
+    SELECT 1 FROM bounded_storage_records
+    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
+  )`;
+      bindings.push(
+        prepared.userId,
+        prepared.clientId,
+        mutation.key.collection,
+        mutation.key.id,
+      );
+      continue;
+    }
+    if (mutation.type === "check") {
+      const expectedRevision = mutation.expected_revision;
+      if (expectedRevision === null) {
+        throw new Error("bounded_storage_transaction_command_invalid");
+      }
+      sql += `
+  AND EXISTS (
+    SELECT 1 FROM bounded_storage_records
+    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
+      AND revision = ?
+  )`;
+      bindings.push(
+        prepared.userId,
+        prepared.clientId,
+        mutation.key.collection,
+        mutation.key.id,
+        expectedRevision,
+      );
+      continue;
+    }
+
+    const valueJson = JSON.stringify(mutation.value);
+    sql += `
+  AND EXISTS (
+    SELECT 1 FROM bounded_storage_records
+    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
+      AND revision = ? AND value_json = ? AND value_bytes = ?
+  )`;
+    bindings.push(
+      prepared.userId,
+      prepared.clientId,
+      mutation.key.collection,
+      mutation.key.id,
+      (mutation.expected_revision ?? 0) + 1,
+      valueJson,
+      new TextEncoder().encode(valueJson).byteLength,
+    );
+  }
+  return db.prepare(sql).bind(...bindings);
+}
+
+function firstBatchRow(result: D1Result): Row | null {
+  const rows = (result as D1Result<Row>).results;
+  if (!Array.isArray(rows) || rows.length !== 1) return null;
+  const row = rows[0];
+  return typeof row === "object" && row !== null ? row : null;
+}
+
+function isCommittedBoundedTransactionReceipt(
+  row: Row | null,
+  requestHash: string,
+  attemptHash: string | null,
+): row is Row & {
+  request_hash: string;
+  attempt_hash: string;
+  status: "committed";
+  result_json: string;
+} {
+  return (
+    row !== null &&
+    row.request_hash === requestHash &&
+    typeof row.attempt_hash === "string" &&
+    (attemptHash === null || row.attempt_hash === attemptHash) &&
+    row.status === "committed" &&
+    typeof row.result_json === "string"
+  );
 }
 
 async function listColumn(

@@ -52,6 +52,14 @@ import {
   BOUNDED_RECORD_MAX_PAGE_SIZE,
   decodeBoundedRecordKey,
 } from "../bounded-record-protocol";
+import type { BoundedRecordTransactionCommand } from "../bounded-record-protocol";
+import {
+  boundedStorageRecordResult,
+  parseBoundedStorageTransactionResult,
+  prepareBoundedStorageTransaction,
+  serializeBoundedStorageTransactionResult,
+} from "../bounded-record-transaction";
+import type { BoundedStorageTransactionReceipt } from "../bounded-record-transaction";
 import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
@@ -68,6 +76,7 @@ import type {
   AuthStore,
   BoundedStorageRecord,
   BoundedStorageRecordPage,
+  BoundedStorageTransactionResult,
   AuthorizationCode,
   AuthorizationRequest,
   ClientRegistrationInput,
@@ -108,6 +117,10 @@ export class MemoryAuthStore implements AuthStore {
   applicationEvents = new Map<string, ApplicationEvent>();
   storageRecords = new Map<string, StorageRecord>();
   boundedStorageRecords = new Map<string, BoundedStorageRecord>();
+  boundedStorageTransactionReceipts = new Map<
+    string,
+    BoundedStorageTransactionReceipt
+  >();
   storageFiles = new Map<string, StorageFileMetadata>();
   storageFileWriteFences = new Map<string, StorageFileWriteFence>();
   storageFileOrphanRepairs = new Map<string, StorageFileOrphanRepair>();
@@ -594,6 +607,23 @@ export class MemoryAuthStore implements AuthStore {
     if (!this.accountDeletionJobs.has(subject)) {
       throw accountRecordPurgeUnavailable();
     }
+    const receiptKeys = Array.from(
+      this.boundedStorageTransactionReceipts.entries(),
+    )
+      .filter(([, receipt]) => receipt.userId === subject)
+      .sort(
+        ([, left], [, right]) =>
+          compareText(left.clientId, right.clientId) ||
+          left.createdAt - right.createdAt ||
+          compareText(left.operationIdHash, right.operationIdHash),
+      )
+      .slice(0, limit)
+      .map(([key]) => key);
+    for (const key of receiptKeys) {
+      this.boundedStorageTransactionReceipts.delete(key);
+    }
+
+    const boundedLimit = limit - receiptKeys.length;
     const boundedKeys = Array.from(this.boundedStorageRecords.entries())
       .filter(([, record]) => record.userId === subject)
       .sort(
@@ -602,11 +632,11 @@ export class MemoryAuthStore implements AuthStore {
           compareText(left.collection, right.collection) ||
           compareText(left.id, right.id),
       )
-      .slice(0, limit)
+      .slice(0, boundedLimit)
       .map(([key]) => key);
     for (const key of boundedKeys) this.boundedStorageRecords.delete(key);
 
-    const legacyLimit = limit - boundedKeys.length;
+    const legacyLimit = boundedLimit - boundedKeys.length;
     const keys = Array.from(this.storageRecords.entries())
       .filter(([, record]) => record.userId === subject)
       .sort(
@@ -617,7 +647,10 @@ export class MemoryAuthStore implements AuthStore {
       .slice(0, legacyLimit)
       .map(([key]) => key);
     for (const key of keys) this.storageRecords.delete(key);
-    return accountRecordPurgeBatch(boundedKeys.length + keys.length, limit);
+    return accountRecordPurgeBatch(
+      receiptKeys.length + boundedKeys.length + keys.length,
+      limit,
+    );
   }
 
   async purgeAccountEvents(
@@ -1288,6 +1321,159 @@ export class MemoryAuthStore implements AuthStore {
     return { items: items.slice(0, limit), hasMore: items.length > limit };
   }
 
+  async transactBoundedStorageRecords(
+    userId: string,
+    clientId: string,
+    command: Readonly<BoundedRecordTransactionCommand>,
+    limits: Readonly<StorageLimits>,
+    now: number,
+  ): Promise<BoundedStorageTransactionResult> {
+    const prepared = await prepareBoundedStorageTransaction({
+      userId,
+      clientId,
+      command,
+      limits,
+      now,
+    });
+    const hasPut = prepared.command.transaction.mutations.some(
+      (mutation) => mutation.type === "put",
+    );
+    if (
+      (!this.users.has(userId) && !this.servicePrincipals.has(userId)) ||
+      this.clients.get(clientId)?.disabledAt !== null ||
+      this.accountDeletionJobs.has(userId) ||
+      (hasPut && !limits.writesEnabled)
+    ) {
+      return { status: "unavailable" };
+    }
+
+    const receiptKey = boundedStorageReceiptKey(
+      userId,
+      clientId,
+      prepared.operationIdHash,
+    );
+    const prior = this.boundedStorageTransactionReceipts.get(receiptKey);
+    if (prior) {
+      if (prior.requestHash !== prepared.requestHash) {
+        return { status: "conflict" };
+      }
+      try {
+        return {
+          status: "replayed",
+          records: parseBoundedStorageTransactionResult(
+            prior.resultJson,
+            prepared.command,
+          ),
+        };
+      } catch {
+        return { status: "unavailable" };
+      }
+    }
+
+    const next = new Map(this.boundedStorageRecords);
+    const records = [] as (ReturnType<
+      typeof boundedStorageRecordResult
+    > | null)[];
+    let itemDelta = 0;
+    let byteDelta = 0;
+    for (const mutation of prepared.command.transaction.mutations) {
+      const key = boundedStorageKey(
+        userId,
+        clientId,
+        mutation.key.collection,
+        mutation.key.id,
+      );
+      const current = next.get(key);
+      if (mutation.type === "check") {
+        if (
+          mutation.expected_revision === null
+            ? current !== undefined
+            : current?.revision !== mutation.expected_revision
+        ) {
+          return { status: "precondition_failed" };
+        }
+        records.push(current ? boundedStorageRecordResult(current) : null);
+        continue;
+      }
+      if (mutation.expected_revision === null) {
+        if (current) return { status: "conflict" };
+      } else if (
+        current === undefined ||
+        current.revision !== mutation.expected_revision
+      ) {
+        return { status: "precondition_failed" };
+      }
+      if (mutation.type === "delete") {
+        next.delete(key);
+        itemDelta -= 1;
+        byteDelta -= current!.valueBytes;
+        records.push(null);
+        continue;
+      }
+
+      if ((current?.revision ?? 0) >= Number.MAX_SAFE_INTEGER) {
+        return { status: "unavailable" };
+      }
+
+      const valueJson = JSON.stringify(mutation.value);
+      const valueBytes = utf8Bytes(valueJson);
+      const nextRecord: BoundedStorageRecord = {
+        userId,
+        clientId,
+        collection: mutation.key.collection,
+        id: mutation.key.id,
+        valueJson,
+        valueBytes,
+        revision: (current?.revision ?? 0) + 1,
+        createdAt: current?.createdAt ?? now,
+        updatedAt: now,
+      };
+      next.set(key, nextRecord);
+      itemDelta += current ? 0 : 1;
+      byteDelta += valueBytes - (current?.valueBytes ?? 0);
+      records.push(boundedStorageRecordResult(nextRecord));
+    }
+
+    const receipt = serializeBoundedStorageTransactionResult(records);
+    if (
+      receipt.resultBytes > prepared.maxResultBytes ||
+      !fitsStorageLimits(
+        this,
+        userId,
+        clientId,
+        itemDelta,
+        byteDelta,
+        limits,
+      ) ||
+      !fitsBoundedReceiptLimits(
+        this,
+        userId,
+        clientId,
+        receipt.resultBytes,
+        limits,
+      )
+    ) {
+      return { status: "quota_exceeded" };
+    }
+
+    this.boundedStorageRecords = next;
+    this.boundedStorageTransactionReceipts.set(receiptKey, {
+      userId,
+      clientId,
+      operationIdHash: prepared.operationIdHash,
+      requestHash: prepared.requestHash,
+      ...receipt,
+      createdAt: now,
+    });
+    return {
+      status: "created",
+      records: parseBoundedStorageTransactionResult(
+        receipt.resultJson,
+        prepared.command,
+      ),
+    };
+  }
+
   async listStorageFiles(
     userId: string,
     clientId: string,
@@ -1536,6 +1722,9 @@ export class MemoryAuthStore implements AuthStore {
       Array.from(this.boundedStorageRecords.values()).some(
         (record) => record.userId === subject,
       ) ||
+      Array.from(this.boundedStorageTransactionReceipts.entries()).some(
+        ([, receipt]) => receipt.userId === subject,
+      ) ||
       Array.from(this.storageFiles.values()).some(
         (file) => file.userId === subject,
       ) ||
@@ -1709,6 +1898,50 @@ function usageFor(
     if (clientId && file.clientId !== clientId) continue;
     itemCount += 1;
     byteCount += file.size;
+  }
+  return { itemCount, byteCount };
+}
+
+function boundedStorageReceiptKey(
+  userId: string,
+  clientId: string,
+  operationIdHash: string,
+): string {
+  return `${userId}\u0000${clientId}\u0000${operationIdHash}`;
+}
+
+function fitsBoundedReceiptLimits(
+  store: MemoryAuthStore,
+  userId: string,
+  clientId: string,
+  resultBytes: number,
+  limits: StorageLimits,
+): boolean {
+  const global = boundedReceiptUsageFor(store);
+  const user = boundedReceiptUsageFor(store, userId);
+  const namespace = boundedReceiptUsageFor(store, userId, clientId);
+  return (
+    global.itemCount + 1 <= limits.globalMaxItems &&
+    global.byteCount + resultBytes <= limits.globalMaxBytes &&
+    user.itemCount + 1 <= limits.userMaxItems &&
+    user.byteCount + resultBytes <= limits.userMaxBytes &&
+    namespace.itemCount + 1 <= limits.namespaceMaxItems &&
+    namespace.byteCount + resultBytes <= limits.namespaceMaxBytes
+  );
+}
+
+function boundedReceiptUsageFor(
+  store: MemoryAuthStore,
+  userId?: string,
+  clientId?: string,
+): StorageUsage {
+  let itemCount = 0;
+  let byteCount = 0;
+  for (const receipt of store.boundedStorageTransactionReceipts.values()) {
+    if (userId && receipt.userId !== userId) continue;
+    if (clientId && receipt.clientId !== clientId) continue;
+    itemCount += 1;
+    byteCount += receipt.resultBytes;
   }
   return { itemCount, byteCount };
 }

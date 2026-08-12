@@ -1,4 +1,8 @@
 import type { CleanupReport } from "./store/cleanup";
+import type {
+  BoundedRecord,
+  BoundedRecordTransactionCommand,
+} from "./bounded-record-protocol";
 
 export type OAuthScope =
   | "openid"
@@ -283,6 +287,19 @@ export interface BoundedStorageRecordPage {
   items: BoundedStorageRecord[];
   hasMore: boolean;
 }
+
+export type BoundedStorageTransactionResult =
+  | Readonly<{
+      status: "created" | "replayed";
+      records: readonly (Readonly<BoundedRecord> | null)[];
+    }>
+  | Readonly<{
+      status:
+        | "conflict"
+        | "precondition_failed"
+        | "quota_exceeded"
+        | "unavailable";
+    }>;
 
 export interface StorageFileMetadata {
   userId: string;
@@ -647,6 +664,13 @@ export interface AuthStore
     afterId: string | null,
     limit: number,
   ): Promise<BoundedStorageRecordPage>;
+  transactBoundedStorageRecords(
+    userId: string,
+    clientId: string,
+    command: Readonly<BoundedRecordTransactionCommand>,
+    limits: Readonly<StorageLimits>,
+    now: number,
+  ): Promise<BoundedStorageTransactionResult>;
 
   listStorageFiles(
     userId: string,
