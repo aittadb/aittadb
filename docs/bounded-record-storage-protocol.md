@@ -127,7 +127,9 @@ replacement.
 An exact retry in the same credential namespace returns the original ordered
 result with `replayed: true`, including after runtime reconstruction. Reusing
 the operation ID for changed work returns a fixed conflict. Failed operations
-retain no receipt.
+retain no receipt. A committed receipt is classified before the record-write
+kill switch, so disabling new puts does not change an exact replay into a
+failure or hide changed operation-ID reuse; fresh puts remain unavailable.
 
 Only SHA-256 hashes of operation IDs and canonical requests are persisted.
 Committed receipts retain the bounded ordered result required for exact replay;

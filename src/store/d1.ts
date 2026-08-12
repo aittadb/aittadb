@@ -535,7 +535,6 @@ SELECT
     WHEN candidate.subject_active = 0
       OR candidate.client_active = 0
       OR candidate.deletion_inactive = 0
-      OR (?10 = 0 AND candidate.put_count > 0)
     THEN 'unavailable'
     WHEN EXISTS (
       SELECT 1 FROM bounded_storage_transaction_receipts
@@ -551,6 +550,7 @@ SELECT
       SELECT 1 FROM bounded_storage_transaction_receipts
       WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
     ) THEN 'unavailable'
+    WHEN ?10 = 0 AND candidate.put_count > 0 THEN 'unavailable'
     WHEN candidate.conflict_count > 0 THEN 'conflict'
     WHEN candidate.precondition_count > 0 THEN 'precondition_failed'
     WHEN candidate.unavailable_count > 0 THEN 'unavailable'

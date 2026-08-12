@@ -1341,8 +1341,7 @@ export class MemoryAuthStore implements AuthStore {
     if (
       (!this.users.has(userId) && !this.servicePrincipals.has(userId)) ||
       this.clients.get(clientId)?.disabledAt !== null ||
-      this.accountDeletionJobs.has(userId) ||
-      (hasPut && !limits.writesEnabled)
+      this.accountDeletionJobs.has(userId)
     ) {
       return { status: "unavailable" };
     }
@@ -1368,6 +1367,9 @@ export class MemoryAuthStore implements AuthStore {
       } catch {
         return { status: "unavailable" };
       }
+    }
+    if (hasPut && !limits.writesEnabled) {
+      return { status: "unavailable" };
     }
 
     const next = new Map(this.boundedStorageRecords);

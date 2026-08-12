@@ -339,6 +339,77 @@ test("bounded transactions enforce active namespaces, write switch, and receipt 
   }
 });
 
+test("committed idempotency receipts outrank write disablement", async (t) => {
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const owner = await createSubject(
+          fixture.store,
+          `${adapter.name}-write-switch-replay`,
+        );
+        const client = await createClient(
+          fixture.store,
+          `${adapter.name}-write-switch-replay`,
+        );
+        const original = command("write-switch-replay", [
+          put("items", "record", null, { durable: true }),
+        ]);
+        const created = await fixture.store.transactBoundedStorageRecords(
+          owner,
+          client.id,
+          original,
+          OPEN_LIMITS,
+          35,
+        );
+        assert.equal(created.status, "created");
+
+        const disabled = { ...OPEN_LIMITS, writesEnabled: false };
+        const replayed = await fixture
+          .reconstruct()
+          .transactBoundedStorageRecords(
+            owner,
+            client.id,
+            original,
+            disabled,
+            36,
+          );
+        assert.equal(replayed.status, "replayed");
+        if (created.status === "created" && replayed.status === "replayed") {
+          assert.deepEqual(replayed.records, created.records);
+        }
+        assert.deepEqual(
+          await fixture.store.transactBoundedStorageRecords(
+            owner,
+            client.id,
+            command("write-switch-replay", [
+              put("items", "different", null, { durable: false }),
+            ]),
+            disabled,
+            37,
+          ),
+          { status: "conflict" },
+        );
+        assert.deepEqual(
+          await fixture.store.transactBoundedStorageRecords(
+            owner,
+            client.id,
+            command("write-switch-new", [
+              put("items", "new", null, { durable: false }),
+            ]),
+            disabled,
+            38,
+          ),
+          { status: "unavailable" },
+        );
+        assert.equal(await fixture.receiptCount(owner), 1);
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
 test("concurrent exact requests have one durable winner", async (t) => {
   for (const adapter of adapters()) {
     await t.test(adapter.name, async () => {
