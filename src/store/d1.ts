@@ -59,6 +59,7 @@ import type {
   BoundedRecordValue,
 } from "../bounded-record-protocol";
 import {
+  BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
   parseBoundedStorageTransactionResult,
   prepareBoundedStorageTransaction,
 } from "../bounded-record-transaction";
@@ -79,6 +80,7 @@ import type {
   AuthStore,
   AuthorizationCode,
   AuthorizationRequest,
+  BoundedStorageTransactionOptions,
   ClientRegistrationInput,
   ClientView,
   DeviceGrant,
@@ -525,7 +527,8 @@ WITH mutations AS (
       AND
       (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE user_id = ?1 AND client_id = ?2) +
         length(CAST(summary.result_json AS BLOB)) <= ?22
-    ) AS receipt_quota_ok
+    ) AS receipt_quota_ok,
+    ?23 AS receipt_expires_at
   FROM summary
 )`;
 
@@ -577,11 +580,13 @@ FROM candidate`;
 const BOUNDED_TRANSACTION_INSERT_RECEIPT = `${BOUNDED_TRANSACTION_STATE}
 INSERT INTO bounded_storage_transaction_receipts (
   user_id, client_id, operation_id_hash, request_hash, attempt_hash,
-  mutation_count, result_json, result_bytes, status, created_at, committed_at
+  mutation_count, result_json, result_bytes, status, created_at, committed_at,
+  expires_at
 )
 SELECT
   ?1, ?2, ?3, ?4, ?5, candidate.mutation_count,
-  candidate.result_json, candidate.result_bytes, 'pending', ?8, NULL
+  candidate.result_json, candidate.result_bytes, 'pending', ?8, NULL,
+  candidate.receipt_expires_at
 FROM candidate
 WHERE candidate.subject_active = 1
   AND candidate.client_active = 1
@@ -670,6 +675,7 @@ export class D1AuthStore implements AuthStore {
         "file-write-fences",
       ),
       "application-events": null,
+      "bounded-transaction-receipts": null,
       "authorization-codes": null,
       "authorization-requests": null,
       "device-grants": null,
@@ -686,6 +692,12 @@ export class D1AuthStore implements AuthStore {
         "DELETE FROM application_events WHERE sequence IN (SELECT sequence FROM application_events WHERE expires_at <= ? ORDER BY expires_at ASC, sequence ASC LIMIT ?)",
         now,
         APPLICATION_EVENT_CLEANUP_BATCH_SIZE,
+      ],
+      [
+        "bounded-transaction-receipts",
+        "DELETE FROM bounded_storage_transaction_receipts WHERE (user_id, client_id, operation_id_hash) IN (SELECT user_id, client_id, operation_id_hash FROM bounded_storage_transaction_receipts WHERE expires_at <= ? ORDER BY expires_at ASC, created_at ASC, user_id ASC, client_id ASC, operation_id_hash ASC LIMIT ?)",
+        now,
+        CLEANUP_BATCH_SIZE,
       ],
       [
         "authorization-codes",
@@ -2055,12 +2067,16 @@ export class D1AuthStore implements AuthStore {
     command: Readonly<BoundedRecordTransactionCommand>,
     limits: Readonly<StorageLimits>,
     now: number,
+    options?: Readonly<BoundedStorageTransactionOptions>,
   ): Promise<BoundedStorageTransactionResult> {
     const prepared = await prepareBoundedStorageTransaction({
       userId,
       clientId,
       command,
       limits,
+      receiptRetentionSeconds:
+        options?.receiptRetentionSeconds ??
+        BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
       now,
     });
     if (!this.db.batch) return { status: "unavailable" };
@@ -2572,6 +2588,7 @@ function boundedTransactionBindings(
     limits.userMaxBytes,
     limits.namespaceMaxItems,
     limits.namespaceMaxBytes,
+    prepared.receiptExpiresAt,
   ];
 }
 

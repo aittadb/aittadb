@@ -426,10 +426,11 @@ test("every bounded D1 cleanup query has an explicit deterministic order", async
   const cleanupQueries = prepared.filter((query) =>
     query.startsWith("DELETE FROM"),
   );
-  assert.equal(cleanupQueries.length, 11);
+  assert.equal(cleanupQueries.length, 12);
   for (const pattern of [
     /DELETE FROM storage_file_write_fences .* ORDER BY fence\.expires_at ASC, fence\.r2_key ASC LIMIT \?\)/,
     /DELETE FROM application_events .* ORDER BY expires_at ASC, sequence ASC LIMIT \?\)/,
+    /DELETE FROM bounded_storage_transaction_receipts .* ORDER BY expires_at ASC, created_at ASC, user_id ASC, client_id ASC, operation_id_hash ASC LIMIT \?\)/,
     /DELETE FROM authorization_codes .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
     /DELETE FROM authorization_requests .* ORDER BY ar\.expires_at ASC, ar\.rowid ASC LIMIT \?\)/,
     /DELETE FROM device_grants .* ORDER BY expires_at ASC, rowid ASC LIMIT \?\)/,
@@ -452,6 +453,30 @@ test("every bounded D1 cleanup query has an explicit deterministic order", async
 test("D1 cleanup selects the oldest eligible 500 rows in every category", async (t) => {
   const now = 10_000_000;
   const cases = [
+    {
+      name: "bounded transaction receipts",
+      insert: `
+        INSERT INTO users (id, email, display_name, created_at, updated_at)
+        VALUES ('user', 'receipt-cleanup@example.test', 'Receipt cleanup', 0, 0);
+        INSERT INTO oauth_clients
+          (id, type, name, secret_hash, disabled_at, created_at)
+        VALUES ('client', 'public', 'Receipt cleanup', NULL, NULL, 0);
+        WITH RECURSIVE sequence(value) AS (
+          SELECT 1 UNION ALL SELECT value + 1 FROM sequence WHERE value < 501
+        )
+        INSERT INTO bounded_storage_transaction_receipts
+          (user_id, client_id, operation_id_hash, request_hash, attempt_hash,
+           mutation_count, result_json, result_bytes, status, created_at,
+           committed_at, expires_at)
+        SELECT 'user', 'client', printf('%043d', value),
+          printf('%043d', value + 1000), printf('%043d', value + 2000),
+          1, '[null]', 6, 'committed', 0, 0, value
+        FROM sequence ORDER BY value DESC;
+      `,
+      select:
+        "SELECT expires_at AS value FROM bounded_storage_transaction_receipts",
+      expected: "501",
+    },
     {
       name: "authorization codes",
       insert: `
@@ -766,6 +791,8 @@ async function migratedDatabase(): Promise<{
     "0013_application_events.sql",
     "0015_application_event_retention.sql",
     "0018_bounded_storage_records.sql",
+    "0019_bounded_storage_transactions.sql",
+    "0020_bounded_storage_transaction_receipt_retention.sql",
   ]) {
     sqlite.exec(
       await readFile(

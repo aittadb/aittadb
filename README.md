@@ -114,6 +114,7 @@ npm run validate
 - `STORAGE_NAMESPACE_MAX_ITEMS` / `STORAGE_NAMESPACE_MAX_BYTES`: combined ceiling for one local user and OAuth client; defaults to 500 items and 50 MiB.
 - `STORAGE_DEFAULT_PAGE_SIZE` / `STORAGE_MAX_PAGE_SIZE`: collection-page bounds; defaults to 50 and 100.
 - `STORAGE_READ_RATE_LIMIT` / `STORAGE_WRITE_RATE_LIMIT`: per-user/client storage limits per minute; defaults to 120 and 30.
+- `BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS`: immutable replay lifetime for new atomic transaction receipts; defaults to 24 hours and accepts 60 seconds through seven days. Expired receipts remain authoritative until bounded cleanup removes them.
 - `EVENTS_GLOBAL_MAX_*`, `EVENTS_USER_MAX_*`, and `EVENTS_NAMESPACE_MAX_*`: independent finite event item and exact payload-byte ceilings; defaults are documented in [the deployment guide](docs/deployment.md).
 - `EVENTS_PUBLISH_RATE_LIMIT`: per-principal/client publication attempts per minute; defaults to 30 in addition to fixed IP/global entry limits.
 - `EVENT_RETENTION_SECONDS`: server-derived lifetime for new immutable events, from 1 second through one year; defaults to seven days.

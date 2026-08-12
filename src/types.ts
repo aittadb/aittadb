@@ -78,6 +78,7 @@ export interface RuntimeEnv {
   STORAGE_MAX_PAGE_SIZE?: string;
   STORAGE_READ_RATE_LIMIT?: string;
   STORAGE_WRITE_RATE_LIMIT?: string;
+  BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS?: string;
   ADMIN_SUBJECTS?: string;
   PRIVACY_CONTROLLER_NAME?: string;
   PRIVACY_CONTROLLER_IDENTIFIER?: string;
@@ -106,6 +107,10 @@ export interface StorageLimits {
   userMaxBytes: number;
   namespaceMaxItems: number;
   namespaceMaxBytes: number;
+}
+
+export interface BoundedStorageTransactionOptions {
+  receiptRetentionSeconds: number;
 }
 
 export interface ApplicationEventLimits {
@@ -151,6 +156,7 @@ export interface AppConfig {
   storageMaxPageSize: number;
   storageReadRateLimit: number;
   storageWriteRateLimit: number;
+  boundedRecordReceiptRetentionSeconds: number;
   adminSubjects: readonly string[];
   privacy: PrivacyConfig;
   isTest: boolean;
@@ -670,6 +676,7 @@ export interface AuthStore
     command: Readonly<BoundedRecordTransactionCommand>,
     limits: Readonly<StorageLimits>,
     now: number,
+    options?: Readonly<BoundedStorageTransactionOptions>,
   ): Promise<BoundedStorageTransactionResult>;
 
   listStorageFiles(

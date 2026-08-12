@@ -50,7 +50,7 @@ test("cleanup telemetry configuration is strict and defaults off", async () => {
 });
 
 test("D1 cleanup reports only valid bounded mutation metadata", async () => {
-  const counts = [2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+  const counts = [2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] as const;
   const results: D1Result[] = [
     { success: true },
     ...counts.map((changes) => ({ success: true, meta: { changes } })),
@@ -82,6 +82,7 @@ test("D1 cleanup marks missing and malformed mutation counts unverifiable", asyn
     { success: true, meta: { changes: Number.POSITIVE_INFINITY } },
     { success: true, meta: { changes: Number.MAX_SAFE_INTEGER + 1 } },
     { success: true, meta: { changes: -0.5 } },
+    { success: true, meta: { changes: 502 } },
   ];
   const report = await new D1AuthStore(cleanupDatabase(malformed)).cleanup(100);
 

@@ -174,7 +174,7 @@ Retain the reviewed `vendor/image-size-compat` override while Vinext's build-onl
 
 D1 schema must cover users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs, audit/application events, admin submissions, rate limits, legacy/revisioned records/receipts/files, repair/fence state, and deletion jobs. Rate increments are single-statement atomic. Index expiration, cleanup joins, and pages; select bounded cleanup oldest-first with a `rowid` tie-breaker and retain new empty refresh families through the documented race-prevention grace window.
 
-Events retain 1-31,536,000 seconds (default 604,800); cleanup deletes at most 500 oldest expired rows and reports only category/count/limit.
+Events and transaction receipts use configured finite retention. Cleanup deletes at most 500 oldest expired rows per category and reports only category/count/limit.
 
 `db/migrations/` is canonical reviewed SQL. `db/schema.ts` is the required-table manifest. `build/sites-migrations.ts` deterministically emits Sites artifacts and journal under `dist/.openai/drizzle/`; Sites applies them. Runtime handlers never execute `CREATE`, `ALTER`, or `DROP`. This project intentionally uses handwritten migrations, not Drizzle ORM/Kit. Do not reintroduce ORM tooling without a complete architecture task.
 

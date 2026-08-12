@@ -54,6 +54,7 @@ import {
 } from "../bounded-record-protocol";
 import type { BoundedRecordTransactionCommand } from "../bounded-record-protocol";
 import {
+  BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
   boundedStorageRecordResult,
   parseBoundedStorageTransactionResult,
   prepareBoundedStorageTransaction,
@@ -74,6 +75,7 @@ import type {
   ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
+  BoundedStorageTransactionOptions,
   BoundedStorageRecord,
   BoundedStorageRecordPage,
   BoundedStorageTransactionResult,
@@ -158,6 +160,16 @@ export class MemoryAuthStore implements AuthStore {
         left.expiresAt - right.expiresAt || left.sequence - right.sequence,
       undefined,
       APPLICATION_EVENT_CLEANUP_BATCH_SIZE,
+    );
+    const boundedTransactionReceipts = deleteCleanupEntries(
+      this.boundedStorageTransactionReceipts,
+      (receipt) => receipt.expiresAt <= now,
+      (left, right) =>
+        left.expiresAt - right.expiresAt ||
+        left.createdAt - right.createdAt ||
+        compareText(left.userId, right.userId) ||
+        compareText(left.clientId, right.clientId) ||
+        compareText(left.operationIdHash, right.operationIdHash),
     );
     const authorizationCodes = deleteCleanupEntries(
       this.authCodes,
@@ -253,6 +265,7 @@ export class MemoryAuthStore implements AuthStore {
         (fence) => !this.storageFileWriteFences.has(fence.r2Key),
       ).length,
       "application-events": applicationEvents,
+      "bounded-transaction-receipts": boundedTransactionReceipts,
       "authorization-codes": authorizationCodes,
       "authorization-requests": authorizationRequests,
       "device-grants": deviceGrants,
@@ -1327,12 +1340,16 @@ export class MemoryAuthStore implements AuthStore {
     command: Readonly<BoundedRecordTransactionCommand>,
     limits: Readonly<StorageLimits>,
     now: number,
+    options?: Readonly<BoundedStorageTransactionOptions>,
   ): Promise<BoundedStorageTransactionResult> {
     const prepared = await prepareBoundedStorageTransaction({
       userId,
       clientId,
       command,
       limits,
+      receiptRetentionSeconds:
+        options?.receiptRetentionSeconds ??
+        BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
       now,
     });
     const hasPut = prepared.command.transaction.mutations.some(
@@ -1466,6 +1483,7 @@ export class MemoryAuthStore implements AuthStore {
       requestHash: prepared.requestHash,
       ...receipt,
       createdAt: now,
+      expiresAt: prepared.receiptExpiresAt,
     });
     return {
       status: "created",

@@ -4,6 +4,11 @@ import {
   APPLICATION_EVENT_MAX_PAGE_SIZE,
   APPLICATION_EVENT_MAX_RETENTION_SECONDS,
 } from "./application-events";
+import {
+  BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
+  BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
+  BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+} from "./bounded-record-transaction";
 
 const DEFAULT_ACCESS_TOKEN_TTL = 600;
 const DEFAULT_AUTH_CODE_TTL = 300;
@@ -93,6 +98,20 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
   );
   if (eventMaxWaitReads < 2) {
     throw new Error("EVENTS_MAX_WAIT_READS must be at least 2");
+  }
+  const boundedRecordReceiptRetentionSeconds = readBoundedPositiveInt(
+    env.BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS,
+    BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
+    BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
+    "BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS",
+  );
+  if (
+    boundedRecordReceiptRetentionSeconds <
+    BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS
+  ) {
+    throw new Error(
+      `BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS must be at least ${BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS}`,
+    );
   }
 
   return {
@@ -221,6 +240,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       env.STORAGE_WRITE_RATE_LIMIT,
       DEFAULT_STORAGE_WRITE_RATE_LIMIT,
     ),
+    boundedRecordReceiptRetentionSeconds,
     adminSubjects: readAdminSubjects(env.ADMIN_SUBJECTS),
     privacy: readPrivacyConfig(env),
     isTest,

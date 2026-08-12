@@ -19,6 +19,10 @@ import type { BoundedStorageRecord, StorageLimits } from "./types";
 const RESULT_ENVELOPE_BYTES = 65_536;
 const NAMESPACE_PART_MAX_LENGTH = 240;
 
+export const BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS = 24 * 60 * 60;
+export const BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS = 60;
+export const BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+
 export interface PreparedBoundedStorageTransaction {
   userId: string;
   clientId: string;
@@ -28,6 +32,7 @@ export interface PreparedBoundedStorageTransaction {
   attemptHash: string;
   mutationsJson: string;
   maxResultBytes: number;
+  receiptExpiresAt: number;
   now: number;
 }
 
@@ -39,6 +44,7 @@ export interface BoundedStorageTransactionReceipt {
   resultJson: string;
   resultBytes: number;
   createdAt: number;
+  expiresAt: number;
 }
 
 export async function prepareBoundedStorageTransaction(input: {
@@ -46,6 +52,7 @@ export async function prepareBoundedStorageTransaction(input: {
   clientId: string;
   command: Readonly<BoundedRecordTransactionCommand>;
   limits: Readonly<StorageLimits>;
+  receiptRetentionSeconds: number;
   now: number;
 }): Promise<Readonly<PreparedBoundedStorageTransaction>> {
   assertNamespacePart(input.userId);
@@ -53,6 +60,16 @@ export async function prepareBoundedStorageTransaction(input: {
   assertStorageLimits(input.limits);
   if (!Number.isSafeInteger(input.now) || input.now < 0) {
     throw new RangeError("bounded_storage_transaction_now_invalid");
+  }
+  if (
+    !Number.isSafeInteger(input.receiptRetentionSeconds) ||
+    input.receiptRetentionSeconds <
+      BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS ||
+    input.receiptRetentionSeconds >
+      BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS ||
+    !Number.isSafeInteger(input.now + input.receiptRetentionSeconds)
+  ) {
+    throw new RangeError("bounded_storage_receipt_retention_invalid");
   }
   const command = decodeBoundedRecordTransaction(input.command);
   const canonicalRequest = canonicalBoundedRecordTransaction(command);
@@ -73,6 +90,7 @@ export async function prepareBoundedStorageTransaction(input: {
     maxResultBytes: boundedRecordResultMaxBytes(
       command.transaction.mutations.length,
     ),
+    receiptExpiresAt: input.now + input.receiptRetentionSeconds,
     now: input.now,
   });
 }

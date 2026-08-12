@@ -135,6 +135,13 @@ retain no receipt. A committed receipt is classified before the record-write
 kill switch, so disabling new puts does not change an exact replay into a
 failure or hide changed operation-ID reuse; fresh puts remain unavailable.
 
+Each committed receipt has a server-derived finite expiry. The default replay
+window is 24 hours and deployments may configure it from 60 seconds through
+seven days. Expiry makes a receipt eligible for ordinary bounded cleanup; an
+expired row remains authoritative for exact replay and changed-work conflict
+until cleanup physically removes it. Only then may that namespace reuse the
+operation ID. Changing retention affects new receipts only.
+
 Only SHA-256 hashes of operation IDs and canonical requests are persisted.
 Committed receipts retain the bounded ordered result required for exact replay;
 they are internal, have no list/read API, and do not count as application

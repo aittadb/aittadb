@@ -360,6 +360,9 @@ async function transactBoundedRecords(
     command,
     config.storageLimits,
     nowSeconds(),
+    {
+      receiptRetentionSeconds: config.boundedRecordReceiptRetentionSeconds,
+    },
   );
   let document;
   switch (result.status) {

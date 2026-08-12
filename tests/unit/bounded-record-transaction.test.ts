@@ -7,7 +7,13 @@ import type {
   BoundedRecordMutation,
   BoundedRecordTransactionCommand,
 } from "../../src/bounded-record-protocol";
-import { parseBoundedStorageTransactionResult } from "../../src/bounded-record-transaction";
+import {
+  BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
+  BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
+  BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+  parseBoundedStorageTransactionResult,
+} from "../../src/bounded-record-transaction";
+import { loadConfig } from "../../src/config";
 import { sha256 } from "../../src/crypto";
 import { D1AuthStore } from "../../src/store/d1";
 import { MemoryAuthStore } from "../../src/store/memory";
@@ -17,6 +23,7 @@ import type {
   ClientView,
   StorageLimits,
 } from "../../src/types";
+import { testEnv } from "../helpers";
 
 const OPEN_LIMITS: StorageLimits = {
   writesEnabled: true,
@@ -27,6 +34,137 @@ const OPEN_LIMITS: StorageLimits = {
   namespaceMaxItems: 10_000,
   namespaceMaxBytes: 1_000_000_000,
 };
+
+test("bounded receipt retention configuration is finite and strict", async () => {
+  const env = await testEnv();
+  assert.equal(
+    loadConfig(env, env.ISSUER_URL!).boundedRecordReceiptRetentionSeconds,
+    BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
+  );
+  for (const value of [
+    BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+    BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
+  ]) {
+    assert.equal(
+      loadConfig(
+        {
+          ...env,
+          BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS: String(value),
+        },
+        env.ISSUER_URL!,
+      ).boundedRecordReceiptRetentionSeconds,
+      value,
+    );
+  }
+  assert.throws(
+    () =>
+      loadConfig(
+        {
+          ...env,
+          BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS: String(
+            BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS - 1,
+          ),
+        },
+        env.ISSUER_URL!,
+      ),
+    /BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS must be at least 60/,
+  );
+  assert.throws(
+    () =>
+      loadConfig(
+        {
+          ...env,
+          BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS: String(
+            BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS + 1,
+          ),
+        },
+        env.ISSUER_URL!,
+      ),
+    /BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS must not exceed 604800/,
+  );
+});
+
+test("receipt retention migration backfills and locks indexed expiry", async () => {
+  const sqlite = await migratedDatabase(
+    "0019_bounded_storage_transactions.sql",
+  );
+  try {
+    sqlite.exec(
+      "INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES ('retention-user', 'retention@example.test', 'Retention', 1, 1); INSERT INTO oauth_clients (id, type, name, secret_hash, disabled_at, created_at) VALUES ('retention-client', 'public', 'Retention', NULL, NULL, 1);",
+    );
+    const hashes = ["a", "b", "c"].map((value) => value.repeat(43));
+    sqlite
+      .prepare(
+        "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at) VALUES (?, ?, ?, ?, ?, 1, '[null]', 6, 'committed', 100, 100)",
+      )
+      .run("retention-user", "retention-client", ...hashes);
+    sqlite.exec(
+      await readFile(
+        new URL(
+          "../../db/migrations/0020_bounded_storage_transaction_receipt_retention.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+
+    assert.equal(
+      sqlite
+        .prepare(
+          "SELECT expires_at FROM bounded_storage_transaction_receipts WHERE user_id = 'retention-user'",
+        )
+        .get()?.expires_at,
+      100 + BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
+    );
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at) VALUES (?, ?, ?, ?, ?, 1, '[null]', 6, 'committed', 200, 200)",
+        )
+        .run(
+          "retention-user",
+          "retention-client",
+          ...["d", "e", "f"].map((value) => value.repeat(43)),
+        ),
+    );
+    sqlite
+      .prepare(
+        "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at, expires_at) VALUES (?, ?, ?, ?, ?, 1, '[null]', 6, 'pending', 200, NULL, 300)",
+      )
+      .run(
+        "retention-user",
+        "retention-client",
+        ...["g", "h", "i"].map((value) => value.repeat(43)),
+      );
+    assert.throws(() =>
+      sqlite.exec(
+        `UPDATE bounded_storage_transaction_receipts SET status = 'committed', committed_at = 200, expires_at = 301 WHERE operation_id_hash = '${"g".repeat(43)}'`,
+      ),
+    );
+    sqlite.exec(
+      `UPDATE bounded_storage_transaction_receipts SET status = 'committed', committed_at = 200 WHERE operation_id_hash = '${"g".repeat(43)}'`,
+    );
+    assert.equal(
+      sqlite
+        .prepare(
+          `SELECT expires_at FROM bounded_storage_transaction_receipts WHERE operation_id_hash = '${"g".repeat(43)}'`,
+        )
+        .get()?.expires_at,
+      300,
+    );
+    const plan = sqlite
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT user_id, client_id, operation_id_hash FROM bounded_storage_transaction_receipts WHERE expires_at <= ? ORDER BY expires_at ASC, created_at ASC, user_id ASC, client_id ASC, operation_id_hash ASC LIMIT ?",
+      )
+      .all(100_000, 500)
+      .map((row) => String(row.detail))
+      .join(" ");
+    assert.match(plan, /idx_bounded_transaction_receipts_expiry_order/);
+    assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally {
+    sqlite.close();
+  }
+});
 
 test("bounded transactions atomically preserve order and durable idempotency", async (t) => {
   for (const adapter of adapters()) {
@@ -410,6 +548,161 @@ test("committed idempotency receipts outrank write disablement", async (t) => {
   }
 });
 
+test("receipt presence governs replay until bounded physical cleanup", async (t) => {
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const owner = await createSubject(
+          fixture.store,
+          `${adapter.name}-retention`,
+        );
+        const client = await createClient(
+          fixture.store,
+          `${adapter.name}-retention`,
+        );
+        const options = {
+          receiptRetentionSeconds: BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+        };
+        const original = command("retained-operation", [
+          check("items", "missing", null),
+        ]);
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              original,
+              OPEN_LIMITS,
+              100,
+              options,
+            )
+          ).status,
+          "created",
+        );
+        assert.deepEqual(await fixture.receiptExpiries(owner), [160]);
+        assert.equal(
+          (await fixture.store.cleanup(159))["bounded-transaction-receipts"]
+            .deletedCount,
+          0,
+        );
+        assert.equal(
+          (
+            await fixture
+              .reconstruct()
+              .transactBoundedStorageRecords(
+                owner,
+                client.id,
+                original,
+                OPEN_LIMITS,
+                161,
+                options,
+              )
+          ).status,
+          "replayed",
+        );
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("retained-operation", [
+                check("items", "different", null),
+              ]),
+              OPEN_LIMITS,
+              161,
+              options,
+            )
+          ).status,
+          "conflict",
+        );
+
+        assert.equal(
+          (await fixture.store.cleanup(160))["bounded-transaction-receipts"]
+            .deletedCount,
+          1,
+        );
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("retained-operation", [
+                check("items", "different", null),
+              ]),
+              OPEN_LIMITS,
+              161,
+              options,
+            )
+          ).status,
+          "created",
+        );
+        assert.deepEqual(await fixture.receiptExpiries(owner), [221]);
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
+test("receipt cleanup removes at most 500 oldest expiries in Memory and D1", async (t) => {
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const owner = await createSubject(
+          fixture.store,
+          `${adapter.name}-retention-batch`,
+        );
+        const client = await createClient(
+          fixture.store,
+          `${adapter.name}-retention-batch`,
+        );
+        const options = {
+          receiptRetentionSeconds: BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+        };
+        for (let index = 0; index < 501; index += 1) {
+          assert.equal(
+            (
+              await fixture.store.transactBoundedStorageRecords(
+                owner,
+                client.id,
+                command(`cleanup-operation-${index}`, [
+                  check("items", `missing-${index}`, null),
+                ]),
+                OPEN_LIMITS,
+                index,
+                options,
+              )
+            ).status,
+            "created",
+          );
+        }
+
+        const first = await fixture.store.cleanup(560);
+        assert.deepEqual(first["bounded-transaction-receipts"], {
+          status: "verified",
+          deletedCount: 500,
+          limit: 500,
+        });
+        assert.deepEqual(await fixture.receiptExpiries(owner), [560]);
+        assert.equal(
+          (await fixture.store.cleanup(560))["bounded-transaction-receipts"]
+            .deletedCount,
+          1,
+        );
+        assert.equal(
+          (await fixture.store.cleanup(560))["bounded-transaction-receipts"]
+            .deletedCount,
+          0,
+        );
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
 test("concurrent exact requests have one durable winner", async (t) => {
   for (const adapter of adapters()) {
     await t.test(adapter.name, async () => {
@@ -629,6 +922,7 @@ interface Fixture {
   seed(record: BoundedStorageRecord): Promise<void>;
   reconstruct(): AuthStore;
   receiptCount(subject: string): Promise<number>;
+  receiptExpiries(subject: string): Promise<number[]>;
   hasPlaintextOperationId(operationId: string): Promise<boolean>;
   close(): void;
 }
@@ -669,6 +963,12 @@ function adapters(): Array<{
             return Array.from(
               store.boundedStorageTransactionReceipts.values(),
             ).filter((receipt) => receipt.userId === subject).length;
+          },
+          async receiptExpiries(subject) {
+            return Array.from(store.boundedStorageTransactionReceipts.values())
+              .filter((receipt) => receipt.userId === subject)
+              .map((receipt) => receipt.expiresAt)
+              .sort((left, right) => left - right);
           },
           async hasPlaintextOperationId(operationId) {
             return Array.from(
@@ -719,6 +1019,14 @@ async function createD1Fixture(): Promise<D1Fixture> {
           )
           .get(subject)?.count ?? 0,
       );
+    },
+    async receiptExpiries(subject) {
+      return sqlite
+        .prepare(
+          "SELECT expires_at FROM bounded_storage_transaction_receipts WHERE user_id = ? ORDER BY expires_at ASC",
+        )
+        .all(subject)
+        .map((row) => Number(row.expires_at));
     },
     async hasPlaintextOperationId(operationId) {
       const hash = await sha256(operationId);
@@ -844,7 +1152,7 @@ function record(
   };
 }
 
-async function migratedDatabase(): Promise<DatabaseSync> {
+async function migratedDatabase(lastMigration?: string): Promise<DatabaseSync> {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON");
   const migrationUrl = new URL("../../db/migrations/", import.meta.url);
@@ -852,6 +1160,7 @@ async function migratedDatabase(): Promise<DatabaseSync> {
     .filter((name) => name.endsWith(".sql"))
     .sort();
   for (const name of names) {
+    if (lastMigration && name > lastMigration) break;
     sqlite.exec(await readFile(new URL(name, migrationUrl), "utf8"));
   }
   return sqlite;
