@@ -89,7 +89,7 @@ Each unit is a reusable vendor-neutral primitive with bounded execution, isolati
 - OIDC owns discovery, JWKS, ID claims, nonce, UserInfo, issuer metadata, and verification.
 - Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
 - Consent, audit, and rate-limit repositories own narrow records. Audit actor attribution is a nullable canonical SHA-256 base64url field, never generic JSON.
-- Storage owns scoped legacy/protocol records, atomic receipts, and file metadata; R2 uses generated keys.
+- Storage owns scoped records, finite ordinary/delete receipts, and file metadata; R2 uses generated keys.
 - Events owns quota-bounded immutable rows, atomic publication, and bounded reads/waits. Ownership comes only from validated tokens. Hash idempotency keys; waits require read+subscribe scopes, a bound cursor, and separate rate/deadline/read/cancellation limits. No fan-out or payload/type logs. Purge only the exact leased human subject in finite batches.
 - Account deletion follows `docs/account-deletion-jobs.md`. POST requires trusted identity/exact-email, origin, 1 KiB, CSRF, phrase, and bound encryption; admins/replay fail. GET authenticates the handle before D1 without identity resolution. Bounded leased phases purge credentials, records, events, and files; finalization clears audit attribution and requires no owned rows. Expose only coarse status. Same-email return creates a new UUID/empty namespaces; old JWTs may verify to `exp` but never authorize or identify it.
 - Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.

@@ -145,12 +145,28 @@ operation ID. Changing retention affects new receipts only.
 Only SHA-256 hashes of operation IDs and canonical requests are persisted.
 Committed receipts retain the bounded ordered result required for exact replay;
 they are internal, have no list/read API, and do not count as application
-records. Separate deployment, subject, and namespace receipt count/byte
-ceilings reuse the configured finite storage-limit values so check-only traffic
-cannot create unbounded internal state. Exceeding either application-record or
-receipt admission returns the same fixed `quota_exceeded` result without
-disclosing which ceiling was reached. Account deletion removes receipts before
-record rows and refuses finalization while either remains.
+records. Ordinary check, put, and mixed receipts have independent configurable
+deployment, subject, and namespace count/result-byte ceilings. They do not
+reuse application-record quotas. A successful delete-only transaction may use
+a separate server-derived `delete-reserve` class when ordinary admission is
+full. That class is not public and is unavailable to checks, puts, or mixed
+work.
+
+At each scope, retained delete-reserve receipt count plus live revisioned-record
+count cannot grow beyond the configured storage item ceiling. Receipt-result
+bytes plus six bytes for every live revisioned record are bounded by six times
+that ceiling; six bytes covers the worst one-record delete result `[null]`.
+This preserves enough finite receipt capacity to delete every revisioned record
+admitted under the item limits. A create/delete/recreate cycle cannot grow the
+combined footprint. If an operator lowers a limit below existing state,
+delete-only work remains eligible when it does not increase that footprint.
+Legacy records and files use their own delete operations and do not consume this
+reserve.
+
+Exceeding either application-record or receipt admission returns the same fixed
+`quota_exceeded` result without disclosing the class, configured ceiling, or
+usage. Account deletion removes receipts before record rows and refuses
+finalization while either remains.
 
 ## Fixed failures
 

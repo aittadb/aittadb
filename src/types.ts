@@ -79,6 +79,12 @@ export interface RuntimeEnv {
   STORAGE_READ_RATE_LIMIT?: string;
   STORAGE_WRITE_RATE_LIMIT?: string;
   BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS?: string;
+  BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_ITEMS?: string;
+  BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_BYTES?: string;
+  BOUNDED_RECORD_RECEIPT_USER_MAX_ITEMS?: string;
+  BOUNDED_RECORD_RECEIPT_USER_MAX_BYTES?: string;
+  BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_ITEMS?: string;
+  BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_BYTES?: string;
   ADMIN_SUBJECTS?: string;
   PRIVACY_CONTROLLER_NAME?: string;
   PRIVACY_CONTROLLER_IDENTIFIER?: string;
@@ -109,8 +115,18 @@ export interface StorageLimits {
   namespaceMaxBytes: number;
 }
 
+export interface BoundedStorageReceiptLimits {
+  globalMaxItems: number;
+  globalMaxBytes: number;
+  userMaxItems: number;
+  userMaxBytes: number;
+  namespaceMaxItems: number;
+  namespaceMaxBytes: number;
+}
+
 export interface BoundedStorageTransactionOptions {
   receiptRetentionSeconds: number;
+  receiptLimits: Readonly<BoundedStorageReceiptLimits>;
 }
 
 export interface ApplicationEventLimits {
@@ -157,6 +173,7 @@ export interface AppConfig {
   storageReadRateLimit: number;
   storageWriteRateLimit: number;
   boundedRecordReceiptRetentionSeconds: number;
+  boundedRecordReceiptLimits: BoundedStorageReceiptLimits;
   adminSubjects: readonly string[];
   privacy: PrivacyConfig;
   isTest: boolean;

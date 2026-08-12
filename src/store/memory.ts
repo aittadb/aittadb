@@ -54,13 +54,18 @@ import {
 } from "../bounded-record-protocol";
 import type { BoundedRecordTransactionCommand } from "../bounded-record-protocol";
 import {
+  BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD,
+  BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
   BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
   boundedStorageRecordResult,
   parseBoundedStorageTransactionResult,
   prepareBoundedStorageTransaction,
   serializeBoundedStorageTransactionResult,
 } from "../bounded-record-transaction";
-import type { BoundedStorageTransactionReceipt } from "../bounded-record-transaction";
+import type {
+  BoundedStorageReceiptAdmissionClass,
+  BoundedStorageTransactionReceipt,
+} from "../bounded-record-transaction";
 import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
@@ -75,6 +80,7 @@ import type {
   ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
+  BoundedStorageReceiptLimits,
   BoundedStorageTransactionOptions,
   BoundedStorageRecord,
   BoundedStorageRecordPage,
@@ -1347,6 +1353,8 @@ export class MemoryAuthStore implements AuthStore {
       clientId,
       command,
       limits,
+      receiptLimits:
+        options?.receiptLimits ?? BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
       receiptRetentionSeconds:
         options?.receiptRetentionSeconds ??
         BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
@@ -1454,23 +1462,29 @@ export class MemoryAuthStore implements AuthStore {
     }
 
     const receipt = serializeBoundedStorageTransactionResult(records);
+    const admissionClass = boundedReceiptAdmissionClass(
+      this,
+      userId,
+      clientId,
+      receipt.resultBytes,
+      prepared.receiptLimits,
+      prepared.deleteReceiptReserveLimits,
+      prepared.deleteOnly,
+      itemDelta,
+      limits,
+    );
     if (
       receipt.resultBytes > prepared.maxResultBytes ||
-      !fitsStorageLimits(
-        this,
-        userId,
-        clientId,
-        itemDelta,
-        byteDelta,
-        limits,
-      ) ||
-      !fitsBoundedReceiptLimits(
-        this,
-        userId,
-        clientId,
-        receipt.resultBytes,
-        limits,
-      )
+      (!prepared.deleteOnly &&
+        !fitsStorageLimits(
+          this,
+          userId,
+          clientId,
+          itemDelta,
+          byteDelta,
+          limits,
+        )) ||
+      admissionClass === null
     ) {
       return { status: "quota_exceeded" };
     }
@@ -1484,6 +1498,7 @@ export class MemoryAuthStore implements AuthStore {
       ...receipt,
       createdAt: now,
       expiresAt: prepared.receiptExpiresAt,
+      admissionClass,
     });
     return {
       status: "created",
@@ -1930,16 +1945,182 @@ function boundedStorageReceiptKey(
   return `${userId}\u0000${clientId}\u0000${operationIdHash}`;
 }
 
+function boundedReceiptAdmissionClass(
+  store: MemoryAuthStore,
+  userId: string,
+  clientId: string,
+  resultBytes: number,
+  ordinaryLimits: Readonly<BoundedStorageReceiptLimits>,
+  deleteReserveLimits: Readonly<BoundedStorageReceiptLimits>,
+  deleteOnly: boolean,
+  itemDelta: number,
+  storageLimits: Readonly<StorageLimits>,
+): BoundedStorageReceiptAdmissionClass | null {
+  if (
+    fitsBoundedReceiptLimits(
+      store,
+      userId,
+      clientId,
+      resultBytes,
+      "ordinary",
+      ordinaryLimits,
+    ) &&
+    fitsBoundedDeleteCapacity(
+      store,
+      userId,
+      clientId,
+      resultBytes,
+      itemDelta,
+      "ordinary",
+      storageLimits,
+    )
+  ) {
+    return "ordinary";
+  }
+  if (
+    deleteOnly &&
+    (fitsBoundedReceiptLimits(
+      store,
+      userId,
+      clientId,
+      resultBytes,
+      "delete-reserve",
+      deleteReserveLimits,
+    ) ||
+      deleteReceiptFootprintDoesNotIncrease(resultBytes, itemDelta)) &&
+    fitsBoundedDeleteCapacity(
+      store,
+      userId,
+      clientId,
+      resultBytes,
+      itemDelta,
+      "delete-reserve",
+      storageLimits,
+    )
+  ) {
+    return "delete-reserve";
+  }
+  return null;
+}
+
+function deleteReceiptFootprintDoesNotIncrease(
+  resultBytes: number,
+  recordItemDelta: number,
+): boolean {
+  return (
+    1 + recordItemDelta <= 0 &&
+    resultBytes +
+      recordItemDelta * BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD <=
+      0
+  );
+}
+
+function fitsBoundedDeleteCapacity(
+  store: MemoryAuthStore,
+  userId: string,
+  clientId: string,
+  resultBytes: number,
+  itemDelta: number,
+  admissionClass: BoundedStorageReceiptAdmissionClass,
+  limits: Readonly<StorageLimits>,
+): boolean {
+  const reserveGlobal = boundedReceiptUsageFor(store, "delete-reserve");
+  const reserveUser = boundedReceiptUsageFor(store, "delete-reserve", userId);
+  const reserveNamespace = boundedReceiptUsageFor(
+    store,
+    "delete-reserve",
+    userId,
+    clientId,
+  );
+  const recordGlobal = boundedRecordCountFor(store);
+  const recordUser = boundedRecordCountFor(store, userId);
+  const recordNamespace = boundedRecordCountFor(store, userId, clientId);
+  const receiptItemDelta = admissionClass === "delete-reserve" ? 1 : 0;
+  const receiptByteDelta =
+    admissionClass === "delete-reserve" ? resultBytes : 0;
+  return (
+    fitsDeleteCapacityScope(
+      reserveGlobal,
+      recordGlobal,
+      receiptItemDelta,
+      receiptByteDelta,
+      itemDelta,
+      limits.globalMaxItems,
+    ) &&
+    fitsDeleteCapacityScope(
+      reserveUser,
+      recordUser,
+      receiptItemDelta,
+      receiptByteDelta,
+      itemDelta,
+      limits.userMaxItems,
+    ) &&
+    fitsDeleteCapacityScope(
+      reserveNamespace,
+      recordNamespace,
+      receiptItemDelta,
+      receiptByteDelta,
+      itemDelta,
+      limits.namespaceMaxItems,
+    )
+  );
+}
+
+function fitsDeleteCapacityScope(
+  reserve: Readonly<StorageUsage>,
+  recordCount: number,
+  receiptItemDelta: number,
+  receiptByteDelta: number,
+  recordItemDelta: number,
+  itemLimit: number,
+): boolean {
+  const currentItems = reserve.itemCount + recordCount;
+  const candidateItems = currentItems + receiptItemDelta + recordItemDelta;
+  const currentBytes =
+    reserve.byteCount +
+    recordCount * BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD;
+  const candidateBytes =
+    currentBytes +
+    receiptByteDelta +
+    recordItemDelta * BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD;
+  return (
+    (candidateItems <= itemLimit || candidateItems <= currentItems) &&
+    (candidateBytes <=
+      itemLimit * BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD ||
+      candidateBytes <= currentBytes)
+  );
+}
+
+function boundedRecordCountFor(
+  store: MemoryAuthStore,
+  userId?: string,
+  clientId?: string,
+): number {
+  let count = 0;
+  for (const record of store.boundedStorageRecords.values()) {
+    if (userId && record.userId !== userId) continue;
+    if (clientId && record.clientId !== clientId) continue;
+    count += 1;
+  }
+  return count;
+}
+
 function fitsBoundedReceiptLimits(
   store: MemoryAuthStore,
   userId: string,
   clientId: string,
   resultBytes: number,
-  limits: StorageLimits,
+  admissionClass: BoundedStorageReceiptAdmissionClass,
+  limits: Readonly<BoundedStorageReceiptLimits>,
 ): boolean {
-  const global = boundedReceiptUsageFor(store);
-  const user = boundedReceiptUsageFor(store, userId);
-  const namespace = boundedReceiptUsageFor(store, userId, clientId);
+  const global = boundedReceiptUsageFor(store, admissionClass);
+  const user = boundedReceiptUsageFor(store, admissionClass, userId);
+  const namespace = boundedReceiptUsageFor(
+    store,
+    admissionClass,
+    userId,
+    clientId,
+  );
   return (
     global.itemCount + 1 <= limits.globalMaxItems &&
     global.byteCount + resultBytes <= limits.globalMaxBytes &&
@@ -1952,12 +2133,14 @@ function fitsBoundedReceiptLimits(
 
 function boundedReceiptUsageFor(
   store: MemoryAuthStore,
+  admissionClass: BoundedStorageReceiptAdmissionClass,
   userId?: string,
   clientId?: string,
 ): StorageUsage {
   let itemCount = 0;
   let byteCount = 0;
   for (const receipt of store.boundedStorageTransactionReceipts.values()) {
+    if (receipt.admissionClass !== admissionClass) continue;
     if (userId && receipt.userId !== userId) continue;
     if (clientId && receipt.clientId !== clientId) continue;
     itemCount += 1;

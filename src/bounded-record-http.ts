@@ -362,6 +362,7 @@ async function transactBoundedRecords(
     nowSeconds(),
     {
       receiptRetentionSeconds: config.boundedRecordReceiptRetentionSeconds,
+      receiptLimits: config.boundedRecordReceiptLimits,
     },
   );
   let document;

@@ -8,9 +8,11 @@ import type {
   BoundedRecordTransactionCommand,
 } from "../../src/bounded-record-protocol";
 import {
+  BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
   BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
   BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
   BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+  boundedRecordDeleteReceiptReserveLimits,
   parseBoundedStorageTransactionResult,
 } from "../../src/bounded-record-transaction";
 import { loadConfig } from "../../src/config";
@@ -19,7 +21,9 @@ import { D1AuthStore } from "../../src/store/d1";
 import { MemoryAuthStore } from "../../src/store/memory";
 import type {
   AuthStore,
+  BoundedStorageReceiptLimits,
   BoundedStorageRecord,
+  BoundedStorageTransactionOptions,
   ClientView,
   StorageLimits,
 } from "../../src/types";
@@ -27,6 +31,15 @@ import { testEnv } from "../helpers";
 
 const OPEN_LIMITS: StorageLimits = {
   writesEnabled: true,
+  globalMaxItems: 10_000,
+  globalMaxBytes: 1_000_000_000,
+  userMaxItems: 10_000,
+  userMaxBytes: 1_000_000_000,
+  namespaceMaxItems: 10_000,
+  namespaceMaxBytes: 1_000_000_000,
+};
+
+const OPEN_RECEIPT_LIMITS: BoundedStorageReceiptLimits = {
   globalMaxItems: 10_000,
   globalMaxBytes: 1_000_000_000,
   userMaxItems: 10_000,
@@ -81,6 +94,69 @@ test("bounded receipt retention configuration is finite and strict", async () =>
         env.ISSUER_URL!,
       ),
     /BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS must not exceed 604800/,
+  );
+});
+
+test("bounded receipt admission configuration is independent and strict", async () => {
+  const env = await testEnv();
+  const independent = loadConfig(
+    {
+      ...env,
+      STORAGE_GLOBAL_MAX_ITEMS: "1",
+      STORAGE_GLOBAL_MAX_BYTES: "1",
+      STORAGE_USER_MAX_ITEMS: "1",
+      STORAGE_USER_MAX_BYTES: "1",
+      STORAGE_NAMESPACE_MAX_ITEMS: "1",
+      STORAGE_NAMESPACE_MAX_BYTES: "1",
+    },
+    env.ISSUER_URL!,
+  );
+  assert.deepEqual(
+    independent.boundedRecordReceiptLimits,
+    BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
+  );
+
+  const configured = loadConfig(
+    {
+      ...env,
+      BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_ITEMS: "101",
+      BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_BYTES: "102",
+      BOUNDED_RECORD_RECEIPT_USER_MAX_ITEMS: "103",
+      BOUNDED_RECORD_RECEIPT_USER_MAX_BYTES: "104",
+      BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_ITEMS: "105",
+      BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_BYTES: "106",
+    },
+    env.ISSUER_URL!,
+  );
+  assert.deepEqual(configured.boundedRecordReceiptLimits, {
+    globalMaxItems: 101,
+    globalMaxBytes: 102,
+    userMaxItems: 103,
+    userMaxBytes: 104,
+    namespaceMaxItems: 105,
+    namespaceMaxBytes: 106,
+  });
+
+  for (const name of [
+    "BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_ITEMS",
+    "BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_BYTES",
+    "BOUNDED_RECORD_RECEIPT_USER_MAX_ITEMS",
+    "BOUNDED_RECORD_RECEIPT_USER_MAX_BYTES",
+    "BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_ITEMS",
+    "BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_BYTES",
+  ] as const) {
+    assert.throws(() => loadConfig({ ...env, [name]: "0" }, env.ISSUER_URL!));
+  }
+  assert.throws(() =>
+    loadConfig(
+      {
+        ...env,
+        STORAGE_GLOBAL_MAX_ITEMS: String(
+          Math.floor(Number.MAX_SAFE_INTEGER / 6) + 1,
+        ),
+      },
+      env.ISSUER_URL!,
+    ),
   );
 });
 
@@ -160,6 +236,88 @@ test("receipt retention migration backfills and locks indexed expiry", async () 
       .map((row) => String(row.detail))
       .join(" ");
     assert.match(plan, /idx_bounded_transaction_receipts_expiry_order/);
+    assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("receipt admission migration backfills and locks indexed classes", async () => {
+  const sqlite = await migratedDatabase(
+    "0020_bounded_storage_transaction_receipt_retention.sql",
+  );
+  try {
+    sqlite.exec(
+      "INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES ('admission-user', 'admission@example.test', 'Admission', 1, 1); INSERT INTO oauth_clients (id, type, name, secret_hash, disabled_at, created_at) VALUES ('admission-client', 'public', 'Admission', NULL, NULL, 1);",
+    );
+    sqlite
+      .prepare(
+        "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at, expires_at) VALUES (?, ?, ?, ?, ?, 1, '[null]', 6, 'pending', 100, NULL, 200)",
+      )
+      .run(
+        "admission-user",
+        "admission-client",
+        ...["j", "k", "l"].map((value) => value.repeat(43)),
+      );
+    sqlite
+      .prepare(
+        "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at, expires_at) VALUES (?, ?, ?, ?, ?, 1, '[null]', 6, 'committed', 101, 101, 201)",
+      )
+      .run(
+        "admission-user",
+        "admission-client",
+        ...["p", "q", "r"].map((value) => value.repeat(43)),
+      );
+    sqlite.exec(
+      await readFile(
+        new URL(
+          "../../db/migrations/0021_bounded_storage_transaction_receipt_admission.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+
+    assert.deepEqual(
+      sqlite
+        .prepare(
+          "SELECT admission_class FROM bounded_storage_transaction_receipts ORDER BY created_at ASC",
+        )
+        .all()
+        .map((row) => row.admission_class),
+      ["ordinary", "ordinary"],
+    );
+    assert.throws(() =>
+      sqlite
+        .prepare(
+          "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at, expires_at, admission_class) VALUES (?, ?, ?, ?, ?, 1, '[null]', 6, 'pending', 101, NULL, 201, 'invalid')",
+        )
+        .run(
+          "admission-user",
+          "admission-client",
+          ...["m", "n", "o"].map((value) => value.repeat(43)),
+        ),
+    );
+    assert.throws(() =>
+      sqlite.exec(
+        `UPDATE bounded_storage_transaction_receipts SET status = 'committed', committed_at = 100, admission_class = 'delete-reserve' WHERE operation_id_hash = '${"j".repeat(43)}'`,
+      ),
+    );
+    sqlite.exec(
+      `UPDATE bounded_storage_transaction_receipts SET status = 'committed', committed_at = 100 WHERE operation_id_hash = '${"j".repeat(43)}'`,
+    );
+    for (const query of [
+      "EXPLAIN QUERY PLAN SELECT COUNT(*), COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary'",
+      "EXPLAIN QUERY PLAN SELECT COUNT(*), COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary' AND user_id = 'admission-user'",
+      "EXPLAIN QUERY PLAN SELECT COUNT(*), COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary' AND user_id = 'admission-user' AND client_id = 'admission-client'",
+    ]) {
+      const plan = sqlite
+        .prepare(query)
+        .all()
+        .map((row) => String(row.detail))
+        .join(" ");
+      assert.match(plan, /idx_bounded_transaction_receipts_admission_scope/);
+    }
     assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
   } finally {
     sqlite.close();
@@ -430,11 +588,18 @@ test("bounded transactions enforce active namespaces, write switch, and receipt 
         );
         await fixture.store.setClientDisabled(client.id, null);
 
-        const receiptOne: StorageLimits = {
-          ...OPEN_LIMITS,
+        const receiptOne: BoundedStorageReceiptLimits = {
           globalMaxItems: 1,
+          globalMaxBytes: 1_000,
           userMaxItems: 1,
+          userMaxBytes: 1_000,
           namespaceMaxItems: 1,
+          namespaceMaxBytes: 1_000,
+        };
+        const receiptOneOptions = {
+          receiptRetentionSeconds:
+            BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
+          receiptLimits: receiptOne,
         };
         assert.equal(
           (
@@ -442,8 +607,9 @@ test("bounded transactions enforce active namespaces, write switch, and receipt 
               owner,
               client.id,
               command("receipt-one", [check("items", "missing", null)]),
-              receiptOne,
+              OPEN_LIMITS,
               32,
+              receiptOneOptions,
             )
           ).status,
           "created",
@@ -453,8 +619,9 @@ test("bounded transactions enforce active namespaces, write switch, and receipt 
             owner,
             client.id,
             command("receipt-two", [check("items", "missing", null)]),
-            receiptOne,
+            OPEN_LIMITS,
             33,
+            receiptOneOptions,
           ),
           { status: "quota_exceeded" },
         );
@@ -469,6 +636,646 @@ test("bounded transactions enforce active namespaces, write switch, and receipt 
             )
           ).status,
           "created",
+        );
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
+test("independent receipt count and byte ceilings bind every scope", async (t) => {
+  const cases = [
+    { name: "deployment-count", field: "globalMaxItems", value: 1 },
+    { name: "subject-count", field: "userMaxItems", value: 1 },
+    { name: "namespace-count", field: "namespaceMaxItems", value: 1 },
+    { name: "deployment-bytes", field: "globalMaxBytes", value: 5 },
+    { name: "subject-bytes", field: "userMaxBytes", value: 5 },
+    { name: "namespace-bytes", field: "namespaceMaxBytes", value: 5 },
+  ] as const;
+  for (const adapter of adapters()) {
+    for (const limitCase of cases) {
+      await t.test(`${adapter.name}-${limitCase.name}`, async () => {
+        const fixture = await adapter.create();
+        try {
+          const firstOwner = await createSubject(
+            fixture.store,
+            `${adapter.name}-${limitCase.name}-first`,
+          );
+          const secondOwner = await createSubject(
+            fixture.store,
+            `${adapter.name}-${limitCase.name}-second`,
+          );
+          const firstClient = await createClient(
+            fixture.store,
+            `${adapter.name}-${limitCase.name}-first`,
+          );
+          const secondClient = await createClient(
+            fixture.store,
+            `${adapter.name}-${limitCase.name}-second`,
+          );
+          const receiptLimits = {
+            ...OPEN_RECEIPT_LIMITS,
+            [limitCase.field]: limitCase.value,
+          };
+          const options = transactionOptions(receiptLimits);
+          const isByteCase = limitCase.name.endsWith("bytes");
+
+          if (!isByteCase) {
+            assert.equal(
+              (
+                await fixture.store.transactBoundedStorageRecords(
+                  firstOwner,
+                  firstClient.id,
+                  command(`${limitCase.name}-first`, [
+                    check("items", "missing-first", null),
+                  ]),
+                  OPEN_LIMITS,
+                  1,
+                  options,
+                )
+              ).status,
+              "created",
+            );
+          }
+
+          const target = limitCase.name.startsWith("deployment")
+            ? { owner: secondOwner, clientId: secondClient.id }
+            : limitCase.name.startsWith("subject")
+              ? { owner: firstOwner, clientId: secondClient.id }
+              : { owner: firstOwner, clientId: firstClient.id };
+          assert.deepEqual(
+            await fixture.store.transactBoundedStorageRecords(
+              target.owner,
+              target.clientId,
+              command(`${limitCase.name}-rejected`, [
+                check("items", "missing-rejected", null),
+              ]),
+              OPEN_LIMITS,
+              2,
+              options,
+            ),
+            { status: "quota_exceeded" },
+          );
+          assert.equal(
+            (await fixture.receiptCount(firstOwner)) +
+              (await fixture.receiptCount(secondOwner)),
+            isByteCase ? 0 : 1,
+          );
+        } finally {
+          fixture.close();
+        }
+      });
+    }
+  }
+});
+
+test("delete-only receipts use a finite isolated reserve", async (t) => {
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const owner = await createSubject(
+          fixture.store,
+          `${adapter.name}-delete-reserve`,
+        );
+        const client = await createClient(
+          fixture.store,
+          `${adapter.name}-delete-reserve`,
+        );
+        const storageLimits: StorageLimits = {
+          ...OPEN_LIMITS,
+          globalMaxItems: 3,
+          userMaxItems: 3,
+          namespaceMaxItems: 3,
+        };
+        const receiptLimits: BoundedStorageReceiptLimits = {
+          globalMaxItems: 1,
+          globalMaxBytes: 6,
+          userMaxItems: 1,
+          userMaxBytes: 6,
+          namespaceMaxItems: 1,
+          namespaceMaxBytes: 6,
+        };
+        const ordinaryOptions = {
+          receiptRetentionSeconds: BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+          receiptLimits,
+        };
+        const reserveOptions = {
+          receiptRetentionSeconds: BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
+          receiptLimits,
+        };
+        for (const id of ["a", "b", "c"]) {
+          await fixture.seed(record(owner, client.id, "items", id, 1));
+        }
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("fill-ordinary", [check("items", "missing", null)]),
+              storageLimits,
+              10,
+              ordinaryOptions,
+            )
+          ).status,
+          "created",
+        );
+
+        for (const [operationId, mutations] of [
+          ["blocked-check", [check("items", "missing-2", null)]],
+          [
+            "blocked-put",
+            [put("items", "new", null, { reserve: "not-ordinary" })],
+          ],
+          [
+            "blocked-mixed",
+            [check("items", "missing-3", null), remove("items", "a", 1)],
+          ],
+        ] as const) {
+          assert.deepEqual(
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command(operationId, mutations),
+              storageLimits,
+              11,
+              ordinaryOptions,
+            ),
+            { status: "quota_exceeded" },
+          );
+        }
+        assert.ok(
+          await fixture.store.getBoundedStorageRecord(
+            owner,
+            client.id,
+            "items",
+            "a",
+          ),
+        );
+
+        for (const [index, id] of ["a", "b", "c"].entries()) {
+          assert.equal(
+            (
+              await fixture.store.transactBoundedStorageRecords(
+                owner,
+                client.id,
+                command(`reserved-delete-${id}`, [remove("items", id, 1)]),
+                storageLimits,
+                20 + index,
+                reserveOptions,
+              )
+            ).status,
+            "created",
+          );
+        }
+        assert.deepEqual(await fixture.receiptClasses(owner), [
+          "delete-reserve",
+          "delete-reserve",
+          "delete-reserve",
+          "ordinary",
+        ]);
+
+        assert.equal(
+          (await fixture.store.cleanup(70))["bounded-transaction-receipts"]
+            .deletedCount,
+          1,
+        );
+        assert.deepEqual(await fixture.receiptClasses(owner), [
+          "delete-reserve",
+          "delete-reserve",
+          "delete-reserve",
+        ]);
+        assert.deepEqual(
+          await fixture.store.transactBoundedStorageRecords(
+            owner,
+            client.id,
+            command("blocked-recreate", [
+              put("items", "d", null, { reserve: "still-retained" }),
+            ]),
+            storageLimits,
+            80,
+            reserveOptions,
+          ),
+          { status: "quota_exceeded" },
+        );
+        assert.equal(
+          await fixture.store.getBoundedStorageRecord(
+            owner,
+            client.id,
+            "items",
+            "d",
+          ),
+          null,
+        );
+
+        await fixture.seed(record(owner, client.id, "items", "d", 1));
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("lowered-limit-delete", [remove("items", "d", 1)]),
+              storageLimits,
+              81,
+              reserveOptions,
+            )
+          ).status,
+          "created",
+        );
+        assert.equal(
+          await fixture.store.getBoundedStorageRecord(
+            owner,
+            client.id,
+            "items",
+            "d",
+          ),
+          null,
+        );
+
+        const firstDelete = command("reserved-delete-a", [
+          remove("items", "a", 1),
+        ]);
+        assert.equal(
+          (
+            await fixture
+              .reconstruct()
+              .transactBoundedStorageRecords(
+                owner,
+                client.id,
+                firstDelete,
+                storageLimits,
+                31,
+                reserveOptions,
+              )
+          ).status,
+          "replayed",
+        );
+        assert.deepEqual(
+          await fixture.store.transactBoundedStorageRecords(
+            owner,
+            client.id,
+            command("reserved-delete-a", [remove("items", "d", 1)]),
+            storageLimits,
+            31,
+            reserveOptions,
+          ),
+          { status: "conflict" },
+        );
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
+test("competing receipt attempts re-evaluate ordinary and delete capacity", async (t) => {
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const owner = await createSubject(
+          fixture.store,
+          `${adapter.name}-receipt-concurrency`,
+        );
+        const client = await createClient(
+          fixture.store,
+          `${adapter.name}-receipt-concurrency`,
+        );
+        const storageLimits: StorageLimits = {
+          ...OPEN_LIMITS,
+          globalMaxItems: 2,
+          userMaxItems: 2,
+          namespaceMaxItems: 2,
+        };
+        const options = transactionOptions({
+          globalMaxItems: 1,
+          globalMaxBytes: 6,
+          userMaxItems: 1,
+          userMaxBytes: 6,
+          namespaceMaxItems: 1,
+          namespaceMaxBytes: 6,
+        });
+        const ordinaryResults = await Promise.all([
+          fixture.store.transactBoundedStorageRecords(
+            owner,
+            client.id,
+            command("ordinary-race-one", [check("items", "missing-one", null)]),
+            storageLimits,
+            10,
+            options,
+          ),
+          fixture
+            .reconstruct()
+            .transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("ordinary-race-two", [
+                check("items", "missing-two", null),
+              ]),
+              storageLimits,
+              10,
+              options,
+            ),
+        ]);
+        assert.deepEqual(
+          ordinaryResults.map((result) => result.status).sort(),
+          ["created", "quota_exceeded"],
+        );
+
+        await fixture.seed(record(owner, client.id, "items", "a", 1));
+        await fixture.seed(record(owner, client.id, "items", "b", 1));
+        const deleteResults = await Promise.all([
+          fixture.store.transactBoundedStorageRecords(
+            owner,
+            client.id,
+            command("reserve-race-a", [remove("items", "a", 1)]),
+            storageLimits,
+            20,
+            options,
+          ),
+          fixture
+            .reconstruct()
+            .transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("reserve-race-b", [remove("items", "b", 1)]),
+              storageLimits,
+              20,
+              options,
+            ),
+        ]);
+        assert.deepEqual(deleteResults.map((result) => result.status).sort(), [
+          "created",
+          "created",
+        ]);
+        assert.deepEqual(await fixture.receiptClasses(owner), [
+          "delete-reserve",
+          "delete-reserve",
+          "ordinary",
+        ]);
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
+test("asymmetric delete reserves bind deployment, subject, and namespace scopes", async (t) => {
+  const scenarios = [
+    {
+      name: "namespace",
+      itemLimits: { global: 10, user: 8, namespace: 2 },
+      seeds: [{ owner: 0, client: 0, count: 2 }],
+      blocked: { owner: 0, client: 0 },
+      control: { owner: 0, client: 1 },
+      usage: { owner: 0, client: 0, items: 2, bytes: 12 },
+    },
+    {
+      name: "subject",
+      itemLimits: { global: 10, user: 4, namespace: 3 },
+      seeds: [
+        { owner: 0, client: 0, count: 2 },
+        { owner: 0, client: 1, count: 2 },
+      ],
+      blocked: { owner: 0, client: 0 },
+      control: { owner: 1, client: 2 },
+      usage: { owner: 0, items: 4, bytes: 24 },
+    },
+    {
+      name: "deployment",
+      itemLimits: { global: 6, user: 4, namespace: 3 },
+      seeds: [
+        { owner: 0, client: 0, count: 2 },
+        { owner: 1, client: 1, count: 2 },
+        { owner: 2, client: 2, count: 2 },
+      ],
+      blocked: { owner: 0, client: 0 },
+      control: null,
+      usage: { items: 6, bytes: 36 },
+    },
+  ] as const;
+
+  for (const adapter of adapters()) {
+    for (const scenario of scenarios) {
+      await t.test(`${adapter.name}-${scenario.name}`, async () => {
+        const fixture = await adapter.create();
+        try {
+          const owners = await Promise.all(
+            [0, 1, 2].map((index) =>
+              createSubject(
+                fixture.store,
+                `${adapter.name}-${scenario.name}-owner-${index}`,
+              ),
+            ),
+          );
+          const clients = await Promise.all(
+            [0, 1, 2].map((index) =>
+              createClient(
+                fixture.store,
+                `${adapter.name}-${scenario.name}-client-${index}`,
+              ),
+            ),
+          );
+          const storageLimits: StorageLimits = {
+            ...OPEN_LIMITS,
+            globalMaxItems: scenario.itemLimits.global,
+            userMaxItems: scenario.itemLimits.user,
+            namespaceMaxItems: scenario.itemLimits.namespace,
+          };
+          const receiptLimits: BoundedStorageReceiptLimits = {
+            globalMaxItems: 1,
+            globalMaxBytes: OPEN_RECEIPT_LIMITS.globalMaxBytes,
+            userMaxItems: 1,
+            userMaxBytes: OPEN_RECEIPT_LIMITS.userMaxBytes,
+            namespaceMaxItems: 1,
+            namespaceMaxBytes: OPEN_RECEIPT_LIMITS.namespaceMaxBytes,
+          };
+          const ordinaryOptions = {
+            receiptRetentionSeconds:
+              BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+            receiptLimits,
+          };
+          const reserveOptions = {
+            receiptRetentionSeconds:
+              BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
+            receiptLimits,
+          };
+          assert.equal(
+            (
+              await fixture.store.transactBoundedStorageRecords(
+                owners[0]!,
+                clients[0]!.id,
+                command(`${scenario.name}-ordinary`, [
+                  check("items", "missing", null),
+                ]),
+                storageLimits,
+                1,
+                ordinaryOptions,
+              )
+            ).status,
+            "created",
+          );
+
+          let ordinal = 0;
+          for (const seed of scenario.seeds) {
+            for (let index = 0; index < seed.count; index += 1) {
+              const id = `${scenario.name}-${ordinal}`;
+              const owner = owners[seed.owner]!;
+              const clientId = clients[seed.client]!.id;
+              await fixture.seed(record(owner, clientId, "items", id, 1));
+              assert.equal(
+                (
+                  await fixture.store.transactBoundedStorageRecords(
+                    owner,
+                    clientId,
+                    command(`${scenario.name}-delete-${ordinal}`, [
+                      remove("items", id, 1),
+                    ]),
+                    storageLimits,
+                    10 + ordinal,
+                    reserveOptions,
+                  )
+                ).status,
+                "created",
+              );
+              ordinal += 1;
+            }
+          }
+
+          assert.deepEqual(
+            await fixture.receiptUsage(
+              "delete-reserve",
+              !("owner" in scenario.usage)
+                ? undefined
+                : owners[scenario.usage.owner],
+              !("client" in scenario.usage)
+                ? undefined
+                : clients[scenario.usage.client]!.id,
+            ),
+            {
+              itemCount: scenario.usage.items,
+              byteCount: scenario.usage.bytes,
+            },
+          );
+          assert.equal(
+            (await fixture.store.cleanup(61))["bounded-transaction-receipts"]
+              .deletedCount,
+            1,
+          );
+          assert.deepEqual(
+            await fixture.store.transactBoundedStorageRecords(
+              owners[scenario.blocked.owner]!,
+              clients[scenario.blocked.client]!.id,
+              command(`${scenario.name}-blocked-recreate`, [
+                put("items", "blocked", null, { admitted: false }),
+              ]),
+              storageLimits,
+              70,
+              ordinaryOptions,
+            ),
+            { status: "quota_exceeded" },
+          );
+          if (scenario.control) {
+            assert.equal(
+              (
+                await fixture.store.transactBoundedStorageRecords(
+                  owners[scenario.control.owner]!,
+                  clients[scenario.control.client]!.id,
+                  command(`${scenario.name}-control-create`, [
+                    put("items", "control", null, { admitted: true }),
+                  ]),
+                  storageLimits,
+                  71,
+                  ordinaryOptions,
+                )
+              ).status,
+              "created",
+            );
+          }
+        } finally {
+          fixture.close();
+        }
+      });
+    }
+  }
+});
+
+test("a full delete batch consumes the exact finite reserve bytes", async (t) => {
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const owner = await createSubject(
+          fixture.store,
+          `${adapter.name}-delete-reserve-bytes`,
+        );
+        const client = await createClient(
+          fixture.store,
+          `${adapter.name}-delete-reserve-bytes`,
+        );
+        const storageLimits: StorageLimits = {
+          ...OPEN_LIMITS,
+          globalMaxItems: 25,
+          userMaxItems: 25,
+          namespaceMaxItems: 25,
+        };
+        assert.deepEqual(
+          boundedRecordDeleteReceiptReserveLimits(storageLimits),
+          {
+            globalMaxItems: 25,
+            globalMaxBytes: 150,
+            userMaxItems: 25,
+            userMaxBytes: 150,
+            namespaceMaxItems: 25,
+            namespaceMaxBytes: 150,
+          },
+        );
+        const options = transactionOptions({
+          globalMaxItems: 1,
+          globalMaxBytes: 6,
+          userMaxItems: 1,
+          userMaxBytes: 6,
+          namespaceMaxItems: 1,
+          namespaceMaxBytes: 6,
+        });
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("fill-ordinary-for-batch", [
+                check("items", "missing", null),
+              ]),
+              storageLimits,
+              10,
+              options,
+            )
+          ).status,
+          "created",
+        );
+        const mutations: BoundedRecordMutation[] = [];
+        for (let index = 0; index < 25; index += 1) {
+          const id = `record-${index}`;
+          await fixture.seed(record(owner, client.id, "items", id, 1));
+          mutations.push(remove("items", id, 1));
+        }
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              owner,
+              client.id,
+              command("delete-full-batch", mutations),
+              storageLimits,
+              20,
+              options,
+            )
+          ).status,
+          "created",
+        );
+        assert.deepEqual(
+          await fixture.receiptResultBytes(owner, "delete-reserve"),
+          [126],
         );
       } finally {
         fixture.close();
@@ -563,6 +1370,7 @@ test("receipt presence governs replay until bounded physical cleanup", async (t)
         );
         const options = {
           receiptRetentionSeconds: BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+          receiptLimits: OPEN_RECEIPT_LIMITS,
         };
         const original = command("retained-operation", [
           check("items", "missing", null),
@@ -660,6 +1468,7 @@ test("receipt cleanup removes at most 500 oldest expiries in Memory and D1", asy
         );
         const options = {
           receiptRetentionSeconds: BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+          receiptLimits: OPEN_RECEIPT_LIMITS,
         };
         for (let index = 0; index < 501; index += 1) {
           assert.equal(
@@ -922,6 +1731,16 @@ interface Fixture {
   seed(record: BoundedStorageRecord): Promise<void>;
   reconstruct(): AuthStore;
   receiptCount(subject: string): Promise<number>;
+  receiptClasses(subject: string): Promise<string[]>;
+  receiptUsage(
+    admissionClass: string,
+    subject?: string,
+    clientId?: string,
+  ): Promise<{ itemCount: number; byteCount: number }>;
+  receiptResultBytes(
+    subject: string,
+    admissionClass: string,
+  ): Promise<number[]>;
   receiptExpiries(subject: string): Promise<number[]>;
   hasPlaintextOperationId(operationId: string): Promise<boolean>;
   close(): void;
@@ -963,6 +1782,39 @@ function adapters(): Array<{
             return Array.from(
               store.boundedStorageTransactionReceipts.values(),
             ).filter((receipt) => receipt.userId === subject).length;
+          },
+          async receiptClasses(subject) {
+            return Array.from(store.boundedStorageTransactionReceipts.values())
+              .filter((receipt) => receipt.userId === subject)
+              .map((receipt) => receipt.admissionClass)
+              .sort();
+          },
+          async receiptUsage(admissionClass, subject, clientId) {
+            const receipts = Array.from(
+              store.boundedStorageTransactionReceipts.values(),
+            ).filter(
+              (receipt) =>
+                receipt.admissionClass === admissionClass &&
+                (subject === undefined || receipt.userId === subject) &&
+                (clientId === undefined || receipt.clientId === clientId),
+            );
+            return {
+              itemCount: receipts.length,
+              byteCount: receipts.reduce(
+                (total, receipt) => total + receipt.resultBytes,
+                0,
+              ),
+            };
+          },
+          async receiptResultBytes(subject, admissionClass) {
+            return Array.from(store.boundedStorageTransactionReceipts.values())
+              .filter(
+                (receipt) =>
+                  receipt.userId === subject &&
+                  receipt.admissionClass === admissionClass,
+              )
+              .map((receipt) => receipt.resultBytes)
+              .sort((left, right) => left - right);
           },
           async receiptExpiries(subject) {
             return Array.from(store.boundedStorageTransactionReceipts.values())
@@ -1019,6 +1871,46 @@ async function createD1Fixture(): Promise<D1Fixture> {
           )
           .get(subject)?.count ?? 0,
       );
+    },
+    async receiptClasses(subject) {
+      return sqlite
+        .prepare(
+          "SELECT admission_class FROM bounded_storage_transaction_receipts WHERE user_id = ? ORDER BY admission_class ASC, created_at ASC",
+        )
+        .all(subject)
+        .map((row) => String(row.admission_class));
+    },
+    async receiptUsage(admissionClass, subject, clientId) {
+      const row =
+        subject === undefined
+          ? sqlite
+              .prepare(
+                "SELECT COUNT(*) AS item_count, COALESCE(SUM(result_bytes), 0) AS byte_count FROM bounded_storage_transaction_receipts WHERE admission_class = ?",
+              )
+              .get(admissionClass)
+          : clientId === undefined
+            ? sqlite
+                .prepare(
+                  "SELECT COUNT(*) AS item_count, COALESCE(SUM(result_bytes), 0) AS byte_count FROM bounded_storage_transaction_receipts WHERE admission_class = ? AND user_id = ?",
+                )
+                .get(admissionClass, subject)
+            : sqlite
+                .prepare(
+                  "SELECT COUNT(*) AS item_count, COALESCE(SUM(result_bytes), 0) AS byte_count FROM bounded_storage_transaction_receipts WHERE admission_class = ? AND user_id = ? AND client_id = ?",
+                )
+                .get(admissionClass, subject, clientId);
+      return {
+        itemCount: Number(row?.item_count ?? 0),
+        byteCount: Number(row?.byte_count ?? 0),
+      };
+    },
+    async receiptResultBytes(subject, admissionClass) {
+      return sqlite
+        .prepare(
+          "SELECT result_bytes FROM bounded_storage_transaction_receipts WHERE user_id = ? AND admission_class = ? ORDER BY result_bytes ASC",
+        )
+        .all(subject, admissionClass)
+        .map((row) => Number(row.result_bytes));
     },
     async receiptExpiries(subject) {
       return sqlite
@@ -1082,6 +1974,15 @@ function command(
   mutations: readonly BoundedRecordMutation[],
 ): BoundedRecordTransactionCommand {
   return { transaction: { operation_id: operationId, mutations } };
+}
+
+function transactionOptions(
+  receiptLimits: Readonly<BoundedStorageReceiptLimits>,
+): BoundedStorageTransactionOptions {
+  return {
+    receiptRetentionSeconds: BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
+    receiptLimits,
+  };
 }
 
 function put(

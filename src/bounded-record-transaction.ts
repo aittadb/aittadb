@@ -14,7 +14,11 @@ import type {
   BoundedRecordValue,
 } from "./bounded-record-protocol";
 import { randomToken, sha256 } from "./crypto";
-import type { BoundedStorageRecord, StorageLimits } from "./types";
+import type {
+  BoundedStorageReceiptLimits,
+  BoundedStorageRecord,
+  StorageLimits,
+} from "./types";
 
 const RESULT_ENVELOPE_BYTES = 65_536;
 const NAMESPACE_PART_MAX_LENGTH = 240;
@@ -22,6 +26,18 @@ const NAMESPACE_PART_MAX_LENGTH = 240;
 export const BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS = 24 * 60 * 60;
 export const BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS = 60;
 export const BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+export const BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS = Object.freeze({
+  globalMaxItems: 10_000,
+  globalMaxBytes: 1024 * 1024 * 1024,
+  userMaxItems: 1_000,
+  userMaxBytes: 100 * 1024 * 1024,
+  namespaceMaxItems: 500,
+  namespaceMaxBytes: 50 * 1024 * 1024,
+}) satisfies Readonly<BoundedStorageReceiptLimits>;
+
+export const BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD = 6;
+
+export type BoundedStorageReceiptAdmissionClass = "ordinary" | "delete-reserve";
 
 export interface PreparedBoundedStorageTransaction {
   userId: string;
@@ -33,6 +49,9 @@ export interface PreparedBoundedStorageTransaction {
   mutationsJson: string;
   maxResultBytes: number;
   receiptExpiresAt: number;
+  receiptLimits: Readonly<BoundedStorageReceiptLimits>;
+  deleteReceiptReserveLimits: Readonly<BoundedStorageReceiptLimits>;
+  deleteOnly: boolean;
   now: number;
 }
 
@@ -45,6 +64,7 @@ export interface BoundedStorageTransactionReceipt {
   resultBytes: number;
   createdAt: number;
   expiresAt: number;
+  admissionClass: BoundedStorageReceiptAdmissionClass;
 }
 
 export async function prepareBoundedStorageTransaction(input: {
@@ -52,6 +72,7 @@ export async function prepareBoundedStorageTransaction(input: {
   clientId: string;
   command: Readonly<BoundedRecordTransactionCommand>;
   limits: Readonly<StorageLimits>;
+  receiptLimits: Readonly<BoundedStorageReceiptLimits>;
   receiptRetentionSeconds: number;
   now: number;
 }): Promise<Readonly<PreparedBoundedStorageTransaction>> {
@@ -71,7 +92,11 @@ export async function prepareBoundedStorageTransaction(input: {
   ) {
     throw new RangeError("bounded_storage_receipt_retention_invalid");
   }
+  assertBoundedStorageReceiptLimits(input.receiptLimits);
   const command = decodeBoundedRecordTransaction(input.command);
+  const deleteReceiptReserveLimits = boundedRecordDeleteReceiptReserveLimits(
+    input.limits,
+  );
   const canonicalRequest = canonicalBoundedRecordTransaction(command);
   const [operationIdHash, requestHash, attemptHash] = await Promise.all([
     sha256(command.transaction.operation_id),
@@ -91,7 +116,28 @@ export async function prepareBoundedStorageTransaction(input: {
       command.transaction.mutations.length,
     ),
     receiptExpiresAt: input.now + input.receiptRetentionSeconds,
+    receiptLimits: Object.freeze({ ...input.receiptLimits }),
+    deleteReceiptReserveLimits,
+    deleteOnly: command.transaction.mutations.every(
+      (mutation) => mutation.type === "delete",
+    ),
     now: input.now,
+  });
+}
+
+export function boundedRecordDeleteReceiptReserveLimits(
+  storageLimits: Readonly<StorageLimits>,
+): Readonly<BoundedStorageReceiptLimits> {
+  assertStorageLimits(storageLimits);
+  return Object.freeze({
+    globalMaxItems: storageLimits.globalMaxItems,
+    globalMaxBytes: deleteReceiptReserveBytes(storageLimits.globalMaxItems),
+    userMaxItems: storageLimits.userMaxItems,
+    userMaxBytes: deleteReceiptReserveBytes(storageLimits.userMaxItems),
+    namespaceMaxItems: storageLimits.namespaceMaxItems,
+    namespaceMaxBytes: deleteReceiptReserveBytes(
+      storageLimits.namespaceMaxItems,
+    ),
   });
 }
 
@@ -272,6 +318,29 @@ function assertStorageLimits(limits: Readonly<StorageLimits>): void {
   ) {
     throw new RangeError("bounded_storage_transaction_limits_invalid");
   }
+}
+
+function assertBoundedStorageReceiptLimits(
+  limits: Readonly<BoundedStorageReceiptLimits>,
+): void {
+  if (
+    !positiveInteger(limits.globalMaxItems) ||
+    !positiveInteger(limits.globalMaxBytes) ||
+    !positiveInteger(limits.userMaxItems) ||
+    !positiveInteger(limits.userMaxBytes) ||
+    !positiveInteger(limits.namespaceMaxItems) ||
+    !positiveInteger(limits.namespaceMaxBytes)
+  ) {
+    throw new RangeError("bounded_storage_receipt_limits_invalid");
+  }
+}
+
+function deleteReceiptReserveBytes(itemLimit: number): number {
+  const bytes = itemLimit * BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD;
+  if (!Number.isSafeInteger(bytes)) {
+    throw new RangeError("bounded_storage_transaction_limits_invalid");
+  }
+  return bytes;
 }
 
 function positiveInteger(value: number): boolean {

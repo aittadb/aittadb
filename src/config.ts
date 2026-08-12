@@ -1,13 +1,21 @@
-import type { AppConfig, PrivacyConfig, RuntimeEnv } from "./types";
+import type {
+  AppConfig,
+  BoundedStorageReceiptLimits,
+  PrivacyConfig,
+  RuntimeEnv,
+  StorageLimits,
+} from "./types";
 import {
   APPLICATION_EVENT_DEFAULT_RETENTION_SECONDS,
   APPLICATION_EVENT_MAX_PAGE_SIZE,
   APPLICATION_EVENT_MAX_RETENTION_SECONDS,
 } from "./application-events";
 import {
+  BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
   BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
   BOUNDED_RECORD_RECEIPT_MAX_RETENTION_SECONDS,
   BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
+  boundedRecordDeleteReceiptReserveLimits,
 } from "./bounded-record-transaction";
 
 const DEFAULT_ACCESS_TOKEN_TTL = 600;
@@ -113,6 +121,60 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       `BOUNDED_RECORD_RECEIPT_RETENTION_SECONDS must be at least ${BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS}`,
     );
   }
+  const storageLimits = {
+    writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),
+    globalMaxItems: readPositiveInt(
+      env.STORAGE_GLOBAL_MAX_ITEMS,
+      DEFAULT_STORAGE_GLOBAL_MAX_ITEMS,
+    ),
+    globalMaxBytes: readPositiveInt(
+      env.STORAGE_GLOBAL_MAX_BYTES,
+      DEFAULT_STORAGE_GLOBAL_MAX_BYTES,
+    ),
+    userMaxItems: readPositiveInt(
+      env.STORAGE_USER_MAX_ITEMS,
+      DEFAULT_STORAGE_USER_MAX_ITEMS,
+    ),
+    userMaxBytes: readPositiveInt(
+      env.STORAGE_USER_MAX_BYTES,
+      DEFAULT_STORAGE_USER_MAX_BYTES,
+    ),
+    namespaceMaxItems: readPositiveInt(
+      env.STORAGE_NAMESPACE_MAX_ITEMS,
+      DEFAULT_STORAGE_NAMESPACE_MAX_ITEMS,
+    ),
+    namespaceMaxBytes: readPositiveInt(
+      env.STORAGE_NAMESPACE_MAX_BYTES,
+      DEFAULT_STORAGE_NAMESPACE_MAX_BYTES,
+    ),
+  } satisfies StorageLimits;
+  boundedRecordDeleteReceiptReserveLimits(storageLimits);
+  const boundedRecordReceiptLimits = {
+    globalMaxItems: readPositiveInt(
+      env.BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_ITEMS,
+      BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS.globalMaxItems,
+    ),
+    globalMaxBytes: readPositiveInt(
+      env.BOUNDED_RECORD_RECEIPT_GLOBAL_MAX_BYTES,
+      BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS.globalMaxBytes,
+    ),
+    userMaxItems: readPositiveInt(
+      env.BOUNDED_RECORD_RECEIPT_USER_MAX_ITEMS,
+      BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS.userMaxItems,
+    ),
+    userMaxBytes: readPositiveInt(
+      env.BOUNDED_RECORD_RECEIPT_USER_MAX_BYTES,
+      BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS.userMaxBytes,
+    ),
+    namespaceMaxItems: readPositiveInt(
+      env.BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_ITEMS,
+      BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS.namespaceMaxItems,
+    ),
+    namespaceMaxBytes: readPositiveInt(
+      env.BOUNDED_RECORD_RECEIPT_NAMESPACE_MAX_BYTES,
+      BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS.namespaceMaxBytes,
+    ),
+  } satisfies BoundedStorageReceiptLimits;
 
   return {
     issuerUrl,
@@ -203,33 +265,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       "EVENTS_MAX_WAIT_SECONDS",
     ),
     eventMaxWaitReads,
-    storageLimits: {
-      writesEnabled: readBoolean(env.STORAGE_WRITES_ENABLED, true),
-      globalMaxItems: readPositiveInt(
-        env.STORAGE_GLOBAL_MAX_ITEMS,
-        DEFAULT_STORAGE_GLOBAL_MAX_ITEMS,
-      ),
-      globalMaxBytes: readPositiveInt(
-        env.STORAGE_GLOBAL_MAX_BYTES,
-        DEFAULT_STORAGE_GLOBAL_MAX_BYTES,
-      ),
-      userMaxItems: readPositiveInt(
-        env.STORAGE_USER_MAX_ITEMS,
-        DEFAULT_STORAGE_USER_MAX_ITEMS,
-      ),
-      userMaxBytes: readPositiveInt(
-        env.STORAGE_USER_MAX_BYTES,
-        DEFAULT_STORAGE_USER_MAX_BYTES,
-      ),
-      namespaceMaxItems: readPositiveInt(
-        env.STORAGE_NAMESPACE_MAX_ITEMS,
-        DEFAULT_STORAGE_NAMESPACE_MAX_ITEMS,
-      ),
-      namespaceMaxBytes: readPositiveInt(
-        env.STORAGE_NAMESPACE_MAX_BYTES,
-        DEFAULT_STORAGE_NAMESPACE_MAX_BYTES,
-      ),
-    },
+    storageLimits,
     storageDefaultPageSize,
     storageMaxPageSize,
     storageReadRateLimit: readPositiveInt(
@@ -241,6 +277,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       DEFAULT_STORAGE_WRITE_RATE_LIMIT,
     ),
     boundedRecordReceiptRetentionSeconds,
+    boundedRecordReceiptLimits,
     adminSubjects: readAdminSubjects(env.ADMIN_SUBJECTS),
     privacy: readPrivacyConfig(env),
     isTest,

@@ -59,6 +59,8 @@ import type {
   BoundedRecordValue,
 } from "../bounded-record-protocol";
 import {
+  BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD,
+  BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
   BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
   parseBoundedStorageTransactionResult,
   prepareBoundedStorageTransaction,
@@ -470,6 +472,7 @@ WITH mutations AS (
     COALESCE(SUM(failure = 'precondition_failed'), 0) AS precondition_count,
     COALESCE(SUM(failure = 'unavailable'), 0) AS unavailable_count,
     COALESCE(SUM(mutation_type = 'put'), 0) AS put_count,
+    COALESCE(SUM(mutation_type = 'delete'), 0) AS delete_count,
     COALESCE(SUM(item_delta), 0) AS item_delta,
     COALESCE(SUM(byte_delta), 0) AS byte_delta,
     '[' || COALESCE(group_concat(result_json, ','), '') || ']' AS result_json
@@ -488,6 +491,9 @@ WITH mutations AS (
       SELECT 1 FROM account_deletion_jobs WHERE subject = ?1
     ) AS deletion_inactive,
     (
+      summary.delete_count = summary.mutation_count
+      OR
+      (
       (SELECT COUNT(*) FROM storage_records) +
       (SELECT COUNT(*) FROM bounded_storage_records) +
       (SELECT COUNT(*) FROM storage_files) + summary.item_delta <= ?11
@@ -511,33 +517,163 @@ WITH mutations AS (
       (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
       (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) +
       (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) + summary.byte_delta <= ?16
+      )
     ) AS record_quota_ok,
     (
-      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts) + 1 <= ?17
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary') + 1 <= ?17
       AND
-      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts) +
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary') +
         length(CAST(summary.result_json AS BLOB)) <= ?18
       AND
-      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE user_id = ?1) + 1 <= ?19
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary' AND user_id = ?1) + 1 <= ?19
       AND
-      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE user_id = ?1) +
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary' AND user_id = ?1) +
         length(CAST(summary.result_json AS BLOB)) <= ?20
       AND
-      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE user_id = ?1 AND client_id = ?2) + 1 <= ?21
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary' AND user_id = ?1 AND client_id = ?2) + 1 <= ?21
       AND
-      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE user_id = ?1 AND client_id = ?2) +
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'ordinary' AND user_id = ?1 AND client_id = ?2) +
         length(CAST(summary.result_json AS BLOB)) <= ?22
-    ) AS receipt_quota_ok,
+    ) AS ordinary_receipt_quota_ok,
+    (
+      summary.delete_count = summary.mutation_count
+      AND
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve') + 1 <= ?24
+      AND
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve') +
+        length(CAST(summary.result_json AS BLOB)) <= ?25
+      AND
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1) + 1 <= ?26
+      AND
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1) +
+        length(CAST(summary.result_json AS BLOB)) <= ?27
+      AND
+      (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1 AND client_id = ?2) + 1 <= ?28
+      AND
+      (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1 AND client_id = ?2) +
+        length(CAST(summary.result_json AS BLOB)) <= ?29
+    ) AS delete_receipt_reserve_ok,
     ?23 AS receipt_expires_at
   FROM summary
+), capacity AS (
+  SELECT
+    candidate.*,
+    (
+      (
+        (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve') +
+          (SELECT COUNT(*) FROM bounded_storage_records) + candidate.item_delta <= ?11
+        OR candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve') +
+          ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * ((SELECT COUNT(*) FROM bounded_storage_records) + candidate.item_delta) <=
+            ?11 * ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD}
+        OR candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1) +
+          (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1) + candidate.item_delta <= ?13
+        OR candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1) +
+          ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * ((SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1) + candidate.item_delta) <=
+            ?13 * ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD}
+        OR candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1 AND client_id = ?2) +
+          (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) + candidate.item_delta <= ?15
+        OR candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1 AND client_id = ?2) +
+          ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * ((SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) + candidate.item_delta) <=
+            ?15 * ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD}
+        OR candidate.item_delta <= 0
+      )
+    ) AS ordinary_delete_capacity_ok,
+    (
+      (
+        (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve') + 1 +
+          (SELECT COUNT(*) FROM bounded_storage_records) + candidate.item_delta <= ?11
+        OR 1 + candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve') +
+          candidate.result_bytes +
+          ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * ((SELECT COUNT(*) FROM bounded_storage_records) + candidate.item_delta) <=
+            ?11 * ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD}
+        OR candidate.result_bytes +
+            ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1) + 1 +
+          (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1) + candidate.item_delta <= ?13
+        OR 1 + candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1) +
+          candidate.result_bytes +
+          ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * ((SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1) + candidate.item_delta) <=
+            ?13 * ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD}
+        OR candidate.result_bytes +
+            ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COUNT(*) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1 AND client_id = ?2) + 1 +
+          (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) + candidate.item_delta <= ?15
+        OR 1 + candidate.item_delta <= 0
+      )
+      AND
+      (
+        (SELECT COALESCE(SUM(result_bytes), 0) FROM bounded_storage_transaction_receipts WHERE admission_class = 'delete-reserve' AND user_id = ?1 AND client_id = ?2) +
+          candidate.result_bytes +
+          ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * ((SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) + candidate.item_delta) <=
+            ?15 * ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD}
+        OR candidate.result_bytes +
+            ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * candidate.item_delta <= 0
+      )
+    ) AS reserve_delete_capacity_ok
+  FROM candidate
+), admission AS (
+  SELECT
+    capacity.*,
+    CASE
+      WHEN capacity.ordinary_receipt_quota_ok = 1
+        AND capacity.ordinary_delete_capacity_ok = 1
+      THEN 'ordinary'
+      WHEN (
+        capacity.delete_receipt_reserve_ok = 1
+        OR (
+          capacity.delete_count = capacity.mutation_count
+          AND 1 + capacity.item_delta <= 0
+          AND capacity.result_bytes +
+            ${BOUNDED_RECORD_DELETE_RECEIPT_BYTES_PER_RECORD} * capacity.item_delta <= 0
+        )
+      )
+        AND capacity.reserve_delete_capacity_ok = 1
+      THEN 'delete-reserve'
+      ELSE NULL
+    END AS receipt_admission_class
+  FROM capacity
 )`;
 
 const BOUNDED_TRANSACTION_PREFLIGHT = `${BOUNDED_TRANSACTION_STATE}
 SELECT
   CASE
-    WHEN candidate.subject_active = 0
-      OR candidate.client_active = 0
-      OR candidate.deletion_inactive = 0
+    WHEN admission.subject_active = 0
+      OR admission.client_active = 0
+      OR admission.deletion_inactive = 0
     THEN 'unavailable'
     WHEN EXISTS (
       SELECT 1 FROM bounded_storage_transaction_receipts
@@ -553,14 +689,14 @@ SELECT
       SELECT 1 FROM bounded_storage_transaction_receipts
       WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
     ) THEN 'unavailable'
-    WHEN ?10 = 0 AND candidate.put_count > 0 THEN 'unavailable'
-    WHEN candidate.conflict_count > 0 THEN 'conflict'
-    WHEN candidate.precondition_count > 0 THEN 'precondition_failed'
-    WHEN candidate.unavailable_count > 0 THEN 'unavailable'
-    WHEN candidate.mutation_count <> ?7
-      OR candidate.result_bytes > ?9
-      OR candidate.record_quota_ok = 0
-      OR candidate.receipt_quota_ok = 0
+    WHEN ?10 = 0 AND admission.put_count > 0 THEN 'unavailable'
+    WHEN admission.conflict_count > 0 THEN 'conflict'
+    WHEN admission.precondition_count > 0 THEN 'precondition_failed'
+    WHEN admission.unavailable_count > 0 THEN 'unavailable'
+    WHEN admission.mutation_count <> ?7
+      OR admission.result_bytes > ?9
+      OR admission.record_quota_ok = 0
+      OR admission.receipt_admission_class IS NULL
     THEN 'quota_exceeded'
     ELSE 'created'
   END AS outcome,
@@ -573,32 +709,32 @@ SELECT
       SELECT result_json FROM bounded_storage_transaction_receipts
       WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
     )
-    ELSE candidate.result_json
+    ELSE admission.result_json
   END AS result_json
-FROM candidate`;
+FROM admission`;
 
 const BOUNDED_TRANSACTION_INSERT_RECEIPT = `${BOUNDED_TRANSACTION_STATE}
 INSERT INTO bounded_storage_transaction_receipts (
   user_id, client_id, operation_id_hash, request_hash, attempt_hash,
   mutation_count, result_json, result_bytes, status, created_at, committed_at,
-  expires_at
+  expires_at, admission_class
 )
 SELECT
-  ?1, ?2, ?3, ?4, ?5, candidate.mutation_count,
-  candidate.result_json, candidate.result_bytes, 'pending', ?8, NULL,
-  candidate.receipt_expires_at
-FROM candidate
-WHERE candidate.subject_active = 1
-  AND candidate.client_active = 1
-  AND candidate.deletion_inactive = 1
-  AND (?10 = 1 OR candidate.put_count = 0)
-  AND candidate.conflict_count = 0
-  AND candidate.precondition_count = 0
-  AND candidate.unavailable_count = 0
-  AND candidate.mutation_count = ?7
-  AND candidate.result_bytes <= ?9
-  AND candidate.record_quota_ok = 1
-  AND candidate.receipt_quota_ok = 1
+  ?1, ?2, ?3, ?4, ?5, admission.mutation_count,
+  admission.result_json, admission.result_bytes, 'pending', ?8, NULL,
+  admission.receipt_expires_at, admission.receipt_admission_class
+FROM admission
+WHERE admission.subject_active = 1
+  AND admission.client_active = 1
+  AND admission.deletion_inactive = 1
+  AND (?10 = 1 OR admission.put_count = 0)
+  AND admission.conflict_count = 0
+  AND admission.precondition_count = 0
+  AND admission.unavailable_count = 0
+  AND admission.mutation_count = ?7
+  AND admission.result_bytes <= ?9
+  AND admission.record_quota_ok = 1
+  AND admission.receipt_admission_class IS NOT NULL
 ON CONFLICT(user_id, client_id, operation_id_hash) DO NOTHING`;
 
 const BOUNDED_TRANSACTION_PUT = `
@@ -2074,6 +2210,8 @@ export class D1AuthStore implements AuthStore {
       clientId,
       command,
       limits,
+      receiptLimits:
+        options?.receiptLimits ?? BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
       receiptRetentionSeconds:
         options?.receiptRetentionSeconds ??
         BOUNDED_RECORD_RECEIPT_DEFAULT_RETENTION_SECONDS,
@@ -2582,13 +2720,19 @@ function boundedTransactionBindings(
     limits.userMaxBytes,
     limits.namespaceMaxItems,
     limits.namespaceMaxBytes,
-    limits.globalMaxItems,
-    limits.globalMaxBytes,
-    limits.userMaxItems,
-    limits.userMaxBytes,
-    limits.namespaceMaxItems,
-    limits.namespaceMaxBytes,
+    prepared.receiptLimits.globalMaxItems,
+    prepared.receiptLimits.globalMaxBytes,
+    prepared.receiptLimits.userMaxItems,
+    prepared.receiptLimits.userMaxBytes,
+    prepared.receiptLimits.namespaceMaxItems,
+    prepared.receiptLimits.namespaceMaxBytes,
     prepared.receiptExpiresAt,
+    prepared.deleteReceiptReserveLimits.globalMaxItems,
+    prepared.deleteReceiptReserveLimits.globalMaxBytes,
+    prepared.deleteReceiptReserveLimits.userMaxItems,
+    prepared.deleteReceiptReserveLimits.userMaxBytes,
+    prepared.deleteReceiptReserveLimits.namespaceMaxItems,
+    prepared.deleteReceiptReserveLimits.namespaceMaxBytes,
   ];
 }
 
