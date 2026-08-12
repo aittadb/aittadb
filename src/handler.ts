@@ -196,7 +196,10 @@ import {
   isBoundedRecordRoute,
   isBoundedRecordTransactionRoute,
 } from "./bounded-record-http";
-import { BOUNDED_RECORD_MAX_TRANSACTION_BYTES } from "./bounded-record-protocol";
+import {
+  BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
+  BOUNDED_RECORD_MEDIA_TYPE,
+} from "./bounded-record-protocol";
 
 export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
@@ -2191,6 +2194,9 @@ function negotiateApplicationError(
   request: Request,
   response: Response,
 ): Response {
+  if (response.headers.get("content-type") === BOUNDED_RECORD_MEDIA_TYPE) {
+    return response;
+  }
   if (
     response.status < 400 ||
     !usesApplicationErrorNegotiation(request) ||

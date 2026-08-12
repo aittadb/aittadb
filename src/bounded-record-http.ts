@@ -1,6 +1,7 @@
 import {
   BOUNDED_RECORD_MAX_PAGE_SIZE,
   BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
+  BOUNDED_RECORD_MEDIA_TYPE,
   BoundedRecordProtocolError,
   boundedRecordDiscovery,
   boundedRecordDocument,
@@ -44,11 +45,7 @@ import {
   readForm,
   redirect,
 } from "./http";
-import {
-  HYPERMEDIA_API_VERSION,
-  HYPERMEDIA_MEDIA_TYPE,
-  prefersVendorHypermedia,
-} from "./hypermedia";
+import { HYPERMEDIA_API_VERSION, prefersVendorHypermedia } from "./hypermedia";
 import {
   requireSitesIdentity,
   type UpstreamIdentityProvider,
@@ -544,7 +541,7 @@ function protocolJson(
   response.headers.set(
     "content-type",
     prefersVendorHypermedia(request)
-      ? `${HYPERMEDIA_MEDIA_TYPE}; version=${HYPERMEDIA_API_VERSION}; charset=utf-8`
+      ? BOUNDED_RECORD_MEDIA_TYPE
       : "application/json; charset=utf-8",
   );
   response.headers.set("aittadb-api-version", HYPERMEDIA_API_VERSION);
@@ -674,10 +671,7 @@ function browserForms(csrfToken: string) {
 function requestWithBearer(request: Request, token: string): Request {
   const headers = new Headers(request.headers);
   headers.set("authorization", `Bearer ${token}`);
-  headers.set(
-    "accept",
-    `${HYPERMEDIA_MEDIA_TYPE}; version=${HYPERMEDIA_API_VERSION}`,
-  );
+  headers.set("accept", BOUNDED_RECORD_MEDIA_TYPE);
   return new Request(request.url, { method: request.method, headers });
 }
 

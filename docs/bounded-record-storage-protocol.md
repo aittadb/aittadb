@@ -9,6 +9,10 @@ Protocol 1.1 uses AittaDB's `0.1` hypermedia envelope and the response media
 type `application/vnd.aittadb+json; version=0.1`. The strict TypeScript wire
 contract is maintained in `src/bounded-record-protocol.ts`.
 
+The versioned value is exact: links and actions advertise it verbatim, and a
+request selecting it receives the same `Content-Type` without an added charset
+parameter. `application/json` remains a separate compatibility representation.
+
 ## Discovery contract
 
 The discovery resource has type `bounded-record-storage` and advertises these

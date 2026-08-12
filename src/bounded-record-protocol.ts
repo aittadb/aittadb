@@ -1,6 +1,8 @@
 import { HYPERMEDIA_API_VERSION, HYPERMEDIA_MEDIA_TYPE } from "./hypermedia";
 
 export const BOUNDED_RECORD_PROTOCOL_VERSION = "1.1";
+export const BOUNDED_RECORD_MEDIA_TYPE =
+  `${HYPERMEDIA_MEDIA_TYPE}; version=${HYPERMEDIA_API_VERSION}` as const;
 export const BOUNDED_RECORD_MAX_PAGE_SIZE = 100;
 export const BOUNDED_RECORD_MAX_TRANSACTION_ENTRIES = 25;
 export const BOUNDED_RECORD_MAX_RECORD_BYTES = 65_536;
@@ -90,7 +92,7 @@ export interface BoundedRecordTransactionCommand {
 export interface BoundedRecordLink {
   rel: readonly string[];
   href: string;
-  type: typeof HYPERMEDIA_MEDIA_TYPE;
+  type: typeof BOUNDED_RECORD_MEDIA_TYPE;
   templated?: boolean;
 }
 
@@ -114,7 +116,7 @@ export interface BoundedRecordAction {
   method: "GET" | "POST";
   href: string;
   type?: "application/json";
-  accept: typeof HYPERMEDIA_MEDIA_TYPE;
+  accept: typeof BOUNDED_RECORD_MEDIA_TYPE;
   templated?: boolean;
   authorization: Readonly<{
     scheme: "bearer";
@@ -304,7 +306,7 @@ export function boundedRecordDiscovery(input: {
         title: "Read record",
         method: "GET",
         href: input.readRecordHref,
-        accept: HYPERMEDIA_MEDIA_TYPE,
+        accept: BOUNDED_RECORD_MEDIA_TYPE,
         templated: true,
         authorization: { scheme: "bearer", scopes: ["storage.read"] },
         fields: [
@@ -317,7 +319,7 @@ export function boundedRecordDiscovery(input: {
         title: "List records",
         method: "GET",
         href: list.href,
-        accept: HYPERMEDIA_MEDIA_TYPE,
+        accept: BOUNDED_RECORD_MEDIA_TYPE,
         authorization: { scheme: "bearer", scopes: ["storage.read"] },
         fields: [
           textField("collection", "Collection", "query", true, 1, 64),
@@ -346,7 +348,7 @@ export function boundedRecordDiscovery(input: {
         method: "POST",
         href: transaction.href,
         type: "application/json",
-        accept: HYPERMEDIA_MEDIA_TYPE,
+        accept: BOUNDED_RECORD_MEDIA_TYPE,
         authorization: {
           scheme: "bearer",
           scopes: ["storage.read", "storage.write", "storage.delete"],
@@ -839,7 +841,7 @@ function occurrences(value: string, search: string): number {
 }
 
 function protocolLink(relation: string, href: string): BoundedRecordLink {
-  return { rel: [relation], href, type: HYPERMEDIA_MEDIA_TYPE };
+  return { rel: [relation], href, type: BOUNDED_RECORD_MEDIA_TYPE };
 }
 
 function textField(

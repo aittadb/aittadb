@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   BOUNDED_RECORD_CAPABILITIES,
   BOUNDED_RECORD_LIMITS,
+  BOUNDED_RECORD_MEDIA_TYPE,
   BOUNDED_RECORD_MAX_TRANSACTION_ENTRIES,
   BOUNDED_RECORD_PROTOCOL_VERSION,
   BoundedRecordProtocolError,
@@ -19,10 +20,7 @@ import {
   validateBoundedRecordLimits,
   type BoundedRecordTransactionCommand,
 } from "../../src/bounded-record-protocol";
-import {
-  HYPERMEDIA_API_VERSION,
-  HYPERMEDIA_MEDIA_TYPE,
-} from "../../src/hypermedia";
+import { HYPERMEDIA_API_VERSION } from "../../src/hypermedia";
 
 const ORIGIN = "https://storage.example.test";
 const ENTRY = `${ORIGIN}/storage/record-protocol`;
@@ -60,7 +58,10 @@ test("protocol 1.1 discovery freezes the exact generic capability contract", () 
     "storage.delete",
   ]);
   assert.equal(document.actions[2]?.type, "application/json");
-  assert.equal(document.actions[2]?.accept, HYPERMEDIA_MEDIA_TYPE);
+  assert.equal(document.actions[2]?.accept, BOUNDED_RECORD_MEDIA_TYPE);
+  assert.ok(
+    document.links.every((link) => link.type === BOUNDED_RECORD_MEDIA_TYPE),
+  );
   assert.equal(Object.isFrozen(document), true);
   assert.equal(Object.isFrozen(document.data.capabilities), true);
 });

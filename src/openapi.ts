@@ -1,6 +1,7 @@
 import {
   BOUNDED_RECORD_CAPABILITIES,
   BOUNDED_RECORD_LIMITS,
+  BOUNDED_RECORD_MEDIA_TYPE,
   BOUNDED_RECORD_MAX_CURSOR_LENGTH,
   BOUNDED_RECORD_MAX_PAGE_SIZE,
   BOUNDED_RECORD_MAX_RECORD_BYTES,
@@ -74,7 +75,7 @@ const applicationEventIdParameter = {
 
 const hypermediaVendorType = "application/vnd.aittadb+json; version=0.1";
 
-const boundedRecordProtocolMediaType = hypermediaVendorType;
+const boundedRecordProtocolMediaType = BOUNDED_RECORD_MEDIA_TYPE;
 
 const boundedRecordProtocolDescription =
   "The bounded record-storage protocol is a versioned AittaDB primitive. It is scoped to the authenticated bearer token's local user and OAuth-client namespace; it never exposes deployment data, credentials, physical storage keys, or another namespace. Missing or denied records are intentionally non-disclosing. The operation targets are same-origin HTTPS resources returned by protocol discovery.";

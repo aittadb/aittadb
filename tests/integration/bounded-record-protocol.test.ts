@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   BOUNDED_RECORD_CAPABILITIES,
+  BOUNDED_RECORD_MEDIA_TYPE,
   BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
 } from "../../src/bounded-record-protocol";
 import { loadConfig } from "../../src/config";
@@ -24,7 +25,7 @@ import {
 } from "../helpers";
 
 const ISSUER = "https://aittadb.example.test";
-const ACCEPT = "application/vnd.aittadb+json; version=0.1";
+const ACCEPT = BOUNDED_RECORD_MEDIA_TYPE;
 const ENTRY = `${ISSUER}/storage/record-protocol`;
 const RECORDS = `${ENTRY}/records`;
 const TRANSACTIONS = `${ENTRY}/transactions`;
@@ -42,10 +43,7 @@ test("bounded record discovery is public, exact, and D1-free", async () => {
     app.fetch(new Request(ENTRY, { headers: { accept: ACCEPT } })),
   );
   assert.equal(response.status, 200);
-  assert.match(
-    response.headers.get("content-type") ?? "",
-    /^application\/vnd\.aittadb\+json; version=0\.1/,
-  );
+  assert.equal(response.headers.get("content-type"), ACCEPT);
   const document = (await response.json()) as DiscoveryDocument;
   assert.equal(document.type, "bounded-record-storage");
   assert.equal(document.data.protocol_version, "1.1");
@@ -64,6 +62,40 @@ test("bounded record discovery is public, exact, and D1-free", async () => {
   assert.ok(document.data.limits.max_record_bytes > 0);
   assert.ok(document.data.limits.max_transaction_bytes > 0);
   assert.ok(document.data.limits.max_cursor_length > 0);
+});
+
+test("strict protocol clients receive the exact versioned media type", async () => {
+  const fixture = await protocolFixture();
+  const discovery = await requiredResponse(
+    fixture.app.fetch(new Request(ENTRY, { headers: { accept: ACCEPT } })),
+  );
+  assert.equal(discovery.headers.get("content-type"), ACCEPT);
+
+  const transactionResponse = await fixture.postTransaction(
+    transaction("operation:strict-media", [
+      mutation("put", "settings", "strict", null, { accepted: true }),
+    ]),
+  );
+  assert.equal(transactionResponse.status, 200);
+  assert.equal(transactionResponse.headers.get("content-type"), ACCEPT);
+
+  for (const response of [
+    await fixture.get(`${RECORDS}/settings/strict`),
+    await fixture.get(`${RECORDS}?collection=settings&limit=100`),
+    await fixture.get(`${RECORDS}/settings/missing`),
+  ]) {
+    assert.equal(response.headers.get("content-type"), ACCEPT);
+  }
+
+  const compatible = await requiredResponse(
+    fixture.app.fetch(
+      new Request(ENTRY, { headers: { accept: "application/json" } }),
+    ),
+  );
+  assert.equal(
+    compatible.headers.get("content-type"),
+    "application/json; charset=utf-8",
+  );
 });
 
 test("service credentials execute and replay mixed bounded record operations", async () => {
