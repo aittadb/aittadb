@@ -765,6 +765,7 @@ async function migratedDatabase(): Promise<{
     "0010_account_deletion_finalization.sql",
     "0013_application_events.sql",
     "0015_application_event_retention.sql",
+    "0018_bounded_storage_records.sql",
   ]) {
     sqlite.exec(
       await readFile(

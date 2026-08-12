@@ -48,6 +48,10 @@ import {
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
 } from "../system-client";
+import {
+  BOUNDED_RECORD_MAX_PAGE_SIZE,
+  decodeBoundedRecordKey,
+} from "../bounded-record-protocol";
 import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
@@ -62,6 +66,8 @@ import type {
   ApplicationEventPage,
   AuditEventAttribution,
   AuthStore,
+  BoundedStorageRecord,
+  BoundedStorageRecordPage,
   AuthorizationCode,
   AuthorizationRequest,
   ClientRegistrationInput,
@@ -101,6 +107,7 @@ export class MemoryAuthStore implements AuthStore {
   accountDeletionJobs = new Map<string, AccountDeletionJob>();
   applicationEvents = new Map<string, ApplicationEvent>();
   storageRecords = new Map<string, StorageRecord>();
+  boundedStorageRecords = new Map<string, BoundedStorageRecord>();
   storageFiles = new Map<string, StorageFileMetadata>();
   storageFileWriteFences = new Map<string, StorageFileWriteFence>();
   storageFileOrphanRepairs = new Map<string, StorageFileOrphanRepair>();
@@ -587,17 +594,30 @@ export class MemoryAuthStore implements AuthStore {
     if (!this.accountDeletionJobs.has(subject)) {
       throw accountRecordPurgeUnavailable();
     }
+    const boundedKeys = Array.from(this.boundedStorageRecords.entries())
+      .filter(([, record]) => record.userId === subject)
+      .sort(
+        ([, left], [, right]) =>
+          compareText(left.clientId, right.clientId) ||
+          compareText(left.collection, right.collection) ||
+          compareText(left.id, right.id),
+      )
+      .slice(0, limit)
+      .map(([key]) => key);
+    for (const key of boundedKeys) this.boundedStorageRecords.delete(key);
+
+    const legacyLimit = limit - boundedKeys.length;
     const keys = Array.from(this.storageRecords.entries())
       .filter(([, record]) => record.userId === subject)
       .sort(
         ([, left], [, right]) =>
-          left.clientId.localeCompare(right.clientId) ||
-          left.key.localeCompare(right.key),
+          compareText(left.clientId, right.clientId) ||
+          compareText(left.key, right.key),
       )
-      .slice(0, limit)
+      .slice(0, legacyLimit)
       .map(([key]) => key);
     for (const key of keys) this.storageRecords.delete(key);
-    return accountRecordPurgeBatch(keys.length, limit);
+    return accountRecordPurgeBatch(boundedKeys.length + keys.length, limit);
   }
 
   async purgeAccountEvents(
@@ -1231,6 +1251,43 @@ export class MemoryAuthStore implements AuthStore {
     this.storageRecords.delete(storageKey(userId, clientId, key));
   }
 
+  async getBoundedStorageRecord(
+    userId: string,
+    clientId: string,
+    collection: string,
+    id: string,
+  ): Promise<BoundedStorageRecord | null> {
+    assertBoundedStorageKey(collection, id);
+    return (
+      copyBoundedStorageRecord(
+        this.boundedStorageRecords.get(
+          boundedStorageKey(userId, clientId, collection, id),
+        ),
+      ) ?? null
+    );
+  }
+
+  async listBoundedStorageRecords(
+    userId: string,
+    clientId: string,
+    collection: string,
+    afterId: string | null,
+    limit: number,
+  ): Promise<BoundedStorageRecordPage> {
+    assertBoundedStoragePage(collection, afterId, limit);
+    const items = Array.from(this.boundedStorageRecords.values())
+      .filter(
+        (record) =>
+          record.userId === userId &&
+          record.clientId === clientId &&
+          record.collection === collection &&
+          (afterId === null || record.id > afterId),
+      )
+      .sort((left, right) => compareText(left.id, right.id))
+      .map((record) => copyBoundedStorageRecord(record)!);
+    return { items: items.slice(0, limit), hasMore: items.length > limit };
+  }
+
   async listStorageFiles(
     userId: string,
     clientId: string,
@@ -1476,6 +1533,9 @@ export class MemoryAuthStore implements AuthStore {
       Array.from(this.storageRecords.values()).some(
         (record) => record.userId === subject,
       ) ||
+      Array.from(this.boundedStorageRecords.values()).some(
+        (record) => record.userId === subject,
+      ) ||
       Array.from(this.storageFiles.values()).some(
         (file) => file.userId === subject,
       ) ||
@@ -1572,6 +1632,48 @@ function storageKey(userId: string, clientId: string, key: string): string {
   return `${userId}:${clientId}:${key}`;
 }
 
+function boundedStorageKey(
+  userId: string,
+  clientId: string,
+  collection: string,
+  id: string,
+): string {
+  return JSON.stringify([userId, clientId, collection, id]);
+}
+
+function assertBoundedStorageKey(collection: string, id: string): void {
+  try {
+    decodeBoundedRecordKey({ collection, id });
+  } catch {
+    throw new RangeError("bounded_storage_record_key_invalid");
+  }
+}
+
+function assertBoundedStoragePage(
+  collection: string,
+  afterId: string | null,
+  limit: number,
+): void {
+  assertBoundedStorageKey(collection, afterId ?? "cursor-boundary");
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > BOUNDED_RECORD_MAX_PAGE_SIZE
+  ) {
+    throw new RangeError("bounded_storage_record_page_invalid");
+  }
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function copyBoundedStorageRecord(
+  record: BoundedStorageRecord | undefined,
+): BoundedStorageRecord | undefined {
+  return record ? { ...record } : undefined;
+}
+
 function isAfterPosition(
   item: { updatedAt: number; key: string },
   after: StorageListPosition | null,
@@ -1595,6 +1697,12 @@ function usageFor(
     if (clientId && record.clientId !== clientId) continue;
     itemCount += 1;
     byteCount += utf8Bytes(record.valueJson);
+  }
+  for (const record of store.boundedStorageRecords.values()) {
+    if (userId && record.userId !== userId) continue;
+    if (clientId && record.clientId !== clientId) continue;
+    itemCount += 1;
+    byteCount += record.valueBytes;
   }
   for (const file of store.storageFiles.values()) {
     if (userId && file.userId !== userId) continue;

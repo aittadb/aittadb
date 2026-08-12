@@ -46,9 +46,17 @@ JSON object. Revision 1 is assigned at creation; every successful replacement
 increments the positive revision by exactly one.
 
 Collection pages are ordered by stable record ID and use opaque continuation
-cursors. Cursors are bound to the authenticated user/client namespace,
-collection, and page parameters. They never contain a public principal,
-physical storage key, or authorization-policy field.
+cursors. The cursor plaintext is the canonical JSON object
+`{"v":1,"last_record_id":"..."}` and contains no other field. A random
+AES-GCM IV and ciphertext make the result URL-safe; authenticated data binds
+the bounded-record list resource, exact authenticated user/client namespace,
+collection, and requested page size. The key is derived from the configured
+private ES256 JWK scalar through a domain distinct from legacy storage cursors.
+The cursor is at most 2,048 characters and carries no public principal,
+physical storage key, or authorization-policy field. Rotating the private
+signing-key material immediately invalidates outstanding cursors. Tampering,
+malformed or noncanonical encoding, wrong context, invalid IDs, and oversized
+input all fail with the same generic invalid-cursor result.
 
 ## Atomic transactions
 

@@ -48,6 +48,12 @@ import {
   BROWSER_SESSION_CLIENT_ID,
   isBrowserSessionClientId,
 } from "../system-client";
+import {
+  BOUNDED_RECORD_MAX_PAGE_SIZE,
+  boundedRecordDocument,
+  decodeBoundedRecordKey,
+} from "../bounded-record-protocol";
+import type { BoundedRecordValue } from "../bounded-record-protocol";
 import type {
   AccountDeletionJob,
   AccountDeletionJobStartResult,
@@ -70,6 +76,8 @@ import type {
   LocalUser,
   RefreshTokenFamily,
   RefreshTokenRecord,
+  BoundedStorageRecord,
+  BoundedStorageRecordPage,
   StorageFileMetadata,
   StorageFileOrphanRepair,
   StorageFileOrphanRepairDisposition,
@@ -223,6 +231,7 @@ WHERE id = ?1
   AND NOT EXISTS (SELECT 1 FROM consents WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
@@ -243,6 +252,7 @@ WHERE subject = ?1 AND state = 'running' AND attempt = ?2 AND available_at > ?3
   AND NOT EXISTS (SELECT 1 FROM consents WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
@@ -262,6 +272,7 @@ WHERE subject = ?1 AND state = 'completed' AND attempt = ?2
   AND NOT EXISTS (SELECT 1 FROM consents WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM revoked_access_tokens WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)
+  AND NOT EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_write_fences WHERE user_id = ?1)
   AND NOT EXISTS (SELECT 1 FROM storage_file_orphan_repairs WHERE user_id = ?1)
@@ -274,23 +285,29 @@ INSERT INTO storage_records (user_id, client_id, key, value_json, created_at, up
 SELECT ?1, ?2, ?3, ?4, ?5, ?6
 WHERE
   (SELECT COUNT(*) FROM storage_records) +
+  (SELECT COUNT(*) FROM bounded_storage_records) +
   (SELECT COUNT(*) FROM storage_files) +
   CASE WHEN EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?7
   AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records) +
+  (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records) +
   (SELECT COALESCE(SUM(size), 0) FROM storage_files) -
   COALESCE((SELECT length(CAST(value_json AS BLOB)) FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) +
   length(CAST(?4 AS BLOB)) <= ?8
   AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1) +
   (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1) +
   CASE WHEN EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?9
   AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1) +
   (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1) -
   COALESCE((SELECT length(CAST(value_json AS BLOB)) FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) +
   length(CAST(?4 AS BLOB)) <= ?10
   AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) +
   (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) +
   CASE WHEN EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?11
   AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) +
   (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) -
   COALESCE((SELECT length(CAST(value_json AS BLOB)) FROM storage_records WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) +
   length(CAST(?4 AS BLOB)) <= ?12
@@ -308,21 +325,27 @@ WHERE
     OR (?10 IS NOT NULL AND EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3 AND r2_key = ?10)))
   AND
   (SELECT COUNT(*) FROM storage_records) +
+  (SELECT COUNT(*) FROM bounded_storage_records) +
   (SELECT COUNT(*) FROM storage_files) +
   CASE WHEN EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?11
   AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records) +
+  (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records) +
   (SELECT COALESCE(SUM(size), 0) FROM storage_files) -
   COALESCE((SELECT size FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) + ?6 <= ?12
   AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1) +
   (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1) +
   CASE WHEN EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?13
   AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1) +
+  (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1) +
   (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1) -
   COALESCE((SELECT size FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) + ?6 <= ?14
   AND (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) +
   (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) +
   CASE WHEN EXISTS (SELECT 1 FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3) THEN 0 ELSE 1 END <= ?15
   AND (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) +
+  (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) +
   (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) -
   COALESCE((SELECT size FROM storage_files WHERE user_id = ?1 AND client_id = ?2 AND key = ?3), 0) + ?6 <= ?16
 ON CONFLICT(user_id, client_id, key) DO UPDATE SET
@@ -735,16 +758,64 @@ export class D1AuthStore implements AuthStore {
     if (!(await this.getAccountDeletionJob(subject))) {
       throw accountRecordPurgeUnavailable();
     }
-    const result = await this.db
+    if (!this.db.batch) throw new Error("account_record_purge_failed");
+
+    const countRow = await this.db
       .prepare(
-        "DELETE FROM storage_records WHERE rowid IN (SELECT rowid FROM storage_records WHERE user_id = ? ORDER BY client_id ASC, key ASC LIMIT ?)",
+        "SELECT MIN(COUNT(*), ?) AS selected FROM bounded_storage_records WHERE user_id = ?",
       )
-      .bind(subject, limit)
-      .run();
-    return accountRecordPurgeBatch(
-      requiredMutationChanges(result, "account_record_purge_failed"),
-      limit,
+      .bind(limit, subject)
+      .first<Row>();
+    const boundedLimit = Number(countRow?.selected ?? 0);
+    if (
+      !Number.isSafeInteger(boundedLimit) ||
+      boundedLimit < 0 ||
+      boundedLimit > limit
+    ) {
+      throw new Error("account_record_purge_failed");
+    }
+    const legacyLimit = limit - boundedLimit;
+    const statements: D1PreparedStatement[] = [];
+    if (boundedLimit > 0) {
+      statements.push(
+        this.db
+          .prepare(
+            "DELETE FROM bounded_storage_records WHERE (user_id, client_id, collection, record_id) IN (SELECT user_id, client_id, collection, record_id FROM bounded_storage_records WHERE user_id = ? ORDER BY client_id ASC, collection ASC, record_id ASC LIMIT ?)",
+          )
+          .bind(subject, boundedLimit),
+      );
+    }
+    if (legacyLimit > 0) {
+      statements.push(
+        this.db
+          .prepare(
+            "DELETE FROM storage_records WHERE rowid IN (SELECT rowid FROM storage_records WHERE user_id = ? ORDER BY client_id ASC, key ASC LIMIT ?)",
+          )
+          .bind(subject, legacyLimit),
+      );
+    }
+    const results = await this.db.batch(statements);
+    if (
+      results.length !== statements.length ||
+      results.some((result) => !result.success)
+    ) {
+      throw new Error("account_record_purge_failed");
+    }
+    const deletedCount = results.reduce(
+      (total, result) =>
+        total + requiredMutationChanges(result, "account_record_purge_failed"),
+      0,
     );
+    if (deletedCount < limit) {
+      const remaining = await this.db
+        .prepare(
+          "SELECT 1 AS remaining WHERE EXISTS (SELECT 1 FROM bounded_storage_records WHERE user_id = ?1) OR EXISTS (SELECT 1 FROM storage_records WHERE user_id = ?1)",
+        )
+        .bind(subject)
+        .first<Row>();
+      if (remaining) return { deletedCount, done: false };
+    }
+    return accountRecordPurgeBatch(deletedCount, limit);
   }
 
   async purgeAccountEvents(
@@ -1640,6 +1711,46 @@ export class D1AuthStore implements AuthStore {
       .run();
   }
 
+  async getBoundedStorageRecord(
+    userId: string,
+    clientId: string,
+    collection: string,
+    id: string,
+  ): Promise<BoundedStorageRecord | null> {
+    assertBoundedStorageKey(collection, id);
+    const row = await this.db
+      .prepare(
+        "SELECT * FROM bounded_storage_records WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?",
+      )
+      .bind(userId, clientId, collection, id)
+      .first<Row>();
+    return row ? rowToBoundedStorageRecord(row) : null;
+  }
+
+  async listBoundedStorageRecords(
+    userId: string,
+    clientId: string,
+    collection: string,
+    afterId: string | null,
+    limit: number,
+  ): Promise<BoundedStorageRecordPage> {
+    assertBoundedStoragePage(collection, afterId, limit);
+    const rows = await this.db
+      .prepare(
+        afterId === null
+          ? "SELECT * FROM bounded_storage_records WHERE user_id = ? AND client_id = ? AND collection = ? ORDER BY record_id ASC LIMIT ?"
+          : "SELECT * FROM bounded_storage_records WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id > ? ORDER BY record_id ASC LIMIT ?",
+      )
+      .bind(
+        ...(afterId === null
+          ? [userId, clientId, collection, limit + 1]
+          : [userId, clientId, collection, afterId, limit + 1]),
+      )
+      .all<Row>();
+    const items = (rows.results ?? []).map(rowToBoundedStorageRecord);
+    return { items: items.slice(0, limit), hasMore: items.length > limit };
+  }
+
   async listStorageFiles(
     userId: string,
     clientId: string,
@@ -1929,18 +2040,9 @@ export class D1AuthStore implements AuthStore {
   ): Promise<StorageUsage> {
     const row = await this.db
       .prepare(
-        "SELECT (SELECT COUNT(*) FROM storage_records WHERE user_id = ? AND client_id = ?) + (SELECT COUNT(*) FROM storage_files WHERE user_id = ? AND client_id = ?) AS item_count, (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ? AND client_id = ?) + (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ? AND client_id = ?) AS byte_count",
+        "SELECT (SELECT COUNT(*) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) + (SELECT COUNT(*) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) + (SELECT COUNT(*) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) AS item_count, (SELECT COALESCE(SUM(length(CAST(value_json AS BLOB))), 0) FROM storage_records WHERE user_id = ?1 AND client_id = ?2) + (SELECT COALESCE(SUM(value_bytes), 0) FROM bounded_storage_records WHERE user_id = ?1 AND client_id = ?2) + (SELECT COALESCE(SUM(size), 0) FROM storage_files WHERE user_id = ?1 AND client_id = ?2) AS byte_count",
       )
-      .bind(
-        userId,
-        clientId,
-        userId,
-        clientId,
-        userId,
-        clientId,
-        userId,
-        clientId,
-      )
+      .bind(userId, clientId)
       .first<Row>();
     return {
       itemCount: Number(row?.item_count ?? 0),
@@ -2138,6 +2240,79 @@ function rowToStorageRecord(row: Row): StorageRecord {
     valueJson: String(row.value_json),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+  };
+}
+
+function assertBoundedStorageKey(collection: string, id: string): void {
+  try {
+    decodeBoundedRecordKey({ collection, id });
+  } catch {
+    throw new RangeError("bounded_storage_record_key_invalid");
+  }
+}
+
+function assertBoundedStoragePage(
+  collection: string,
+  afterId: string | null,
+  limit: number,
+): void {
+  assertBoundedStorageKey(collection, afterId ?? "cursor-boundary");
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > BOUNDED_RECORD_MAX_PAGE_SIZE
+  ) {
+    throw new RangeError("bounded_storage_record_page_invalid");
+  }
+}
+
+function rowToBoundedStorageRecord(row: Row): BoundedStorageRecord {
+  if (
+    typeof row.user_id !== "string" ||
+    typeof row.client_id !== "string" ||
+    typeof row.collection !== "string" ||
+    typeof row.record_id !== "string" ||
+    typeof row.value_json !== "string" ||
+    typeof row.value_bytes !== "number" ||
+    typeof row.revision !== "number" ||
+    typeof row.created_at !== "number" ||
+    typeof row.updated_at !== "number" ||
+    !Number.isSafeInteger(row.value_bytes) ||
+    row.value_bytes < 0 ||
+    !Number.isSafeInteger(row.revision) ||
+    row.revision < 1 ||
+    !Number.isSafeInteger(row.created_at) ||
+    row.created_at < 0 ||
+    !Number.isSafeInteger(row.updated_at) ||
+    row.updated_at < row.created_at ||
+    new TextEncoder().encode(row.value_json).byteLength !== row.value_bytes
+  ) {
+    throw new Error("bounded_storage_record_row_invalid");
+  }
+  try {
+    const key = decodeBoundedRecordKey({
+      collection: row.collection,
+      id: row.record_id,
+    });
+    const value: unknown = JSON.parse(row.value_json);
+    boundedRecordDocument({
+      key,
+      revision: row.revision,
+      value: value as BoundedRecordValue,
+    });
+  } catch {
+    throw new Error("bounded_storage_record_row_invalid");
+  }
+  return {
+    userId: row.user_id,
+    clientId: row.client_id,
+    collection: row.collection,
+    id: row.record_id,
+    valueJson: row.value_json,
+    valueBytes: row.value_bytes,
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 

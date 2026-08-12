@@ -266,6 +266,24 @@ export interface StorageRecord {
   updatedAt: number;
 }
 
+/** Internal persistence model for the versioned bounded-record protocol. */
+export interface BoundedStorageRecord {
+  userId: string;
+  clientId: string;
+  collection: string;
+  id: string;
+  valueJson: string;
+  valueBytes: number;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface BoundedStorageRecordPage {
+  items: BoundedStorageRecord[];
+  hasMore: boolean;
+}
+
 export interface StorageFileMetadata {
   userId: string;
   clientId: string;
@@ -616,6 +634,19 @@ export interface AuthStore
     clientId: string,
     key: string,
   ): Promise<void>;
+  getBoundedStorageRecord(
+    userId: string,
+    clientId: string,
+    collection: string,
+    id: string,
+  ): Promise<BoundedStorageRecord | null>;
+  listBoundedStorageRecords(
+    userId: string,
+    clientId: string,
+    collection: string,
+    afterId: string | null,
+    limit: number,
+  ): Promise<BoundedStorageRecordPage>;
 
   listStorageFiles(
     userId: string,
