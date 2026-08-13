@@ -2694,17 +2694,15 @@ export class D1AuthStore implements AuthStore {
       return { status: "unavailable" };
     }
     const deletedRecords = mutationChanges(results[2]!);
-    const deletedReceipts = mutationChanges(results[3]!);
-    if (
-      deletedRecords !== before.records ||
-      deletedReceipts !== before.receipts
-    ) {
+    if (deletedRecords !== before.records) {
       return { status: "unavailable" };
     }
+    // Receipt deletion also cascades the private collection-index rows. The
+    // bounded preflight/postflight pair is the portable semantic receipt count.
     return {
       status: "completed",
       deletedRecords,
-      deletedReceipts,
+      deletedReceipts: before.receipts,
       remainingRecords: after.records,
       remainingReceipts: after.receipts,
     };
