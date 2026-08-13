@@ -159,6 +159,11 @@ test("service credentials execute and replay mixed bounded record operations", a
   assert.equal(replay.status, 200);
   const replayDocument = (await replay.json()) as TransactionDocument;
   assert.equal(replayDocument.data.replayed, true);
+  assert.deepEqual(Object.keys(replayDocument.data).sort(), [
+    "operation_id",
+    "records",
+    "replayed",
+  ]);
   assert.deepEqual(replayDocument.data.records, firstDocument.data.records);
 
   const changed = await fixture.postTransaction(

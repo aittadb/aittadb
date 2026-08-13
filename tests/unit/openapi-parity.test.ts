@@ -149,6 +149,12 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
     discoveryTransactionShape.properties,
     "bounded transaction shape properties",
   );
+  assert.equal(discoveryTransactionShape.additionalProperties, false);
+  assert.deepEqual(Object.keys(discoveryTransactionProperties).sort(), [
+    "mutations",
+    "operation_id",
+    "records",
+  ]);
   assert.equal(
     asObject(
       discoveryTransactionProperties.records,
@@ -162,12 +168,15 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
     "replayed",
     "records",
   ]);
-  assert.ok(
-    "records" in
+  assert.equal(transactionData.additionalProperties, false);
+  assert.deepEqual(
+    Object.keys(
       asObject(
         transactionData.properties,
         "bounded transaction result properties",
       ),
+    ).sort(),
+    ["operation_id", "records", "replayed"],
   );
 
   const list = openApiOperation("/storage/record-protocol/records", "get");

@@ -332,6 +332,11 @@ test("record, page, and transaction documents preserve bounded ordered evidence"
     records: [first, null, second],
   });
   assert.equal(result.type, "bounded-storage-transaction");
+  assert.deepEqual(Object.keys(result.data).sort(), [
+    "operation_id",
+    "records",
+    "replayed",
+  ]);
   assert.equal(result.data.records[0]?.revision, 1);
   assert.equal(result.data.records[1], null);
   assert.equal(result.data.records[2]?.revision, 4);
