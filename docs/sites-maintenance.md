@@ -5,10 +5,11 @@ AittaDB is operated through its ChatGPT Sites project and its private Sites sour
 ## Acceptance upgrade
 
 1. Start from a committed public-source revision with `npm run validate` passing. The repository remains secret-free; Sites project metadata, configuration, and credentials stay outside it.
-2. Package the checked-in migrations with the build and push that exact `develop` commit to the approved Sites mirror using a short-lived credential supplied only to the Git process environment.
-3. Create or update the acceptance version from that source commit. Verify the version records the intended commit and that D1 migrations apply before exercising a changed route.
-4. Make one reviewable configuration change at a time through ChatGPT Sites. Preserve bindings, access mode, unrelated variables, and source version. Record only the setting names and redacted before/after state.
-5. Exercise the named behavior with the least-privilege Sites session or client. Retain only count-only or credential-free evidence; never copy secrets, client IDs, bearer values, stored values, namespace names, D1 output, or hosted settings into Git, logs, or public reports.
+2. Resolve the stored Sites project ID and verify its title and current live URL match the intended target custom domain. Do this before any source-mirror push, configuration mutation, saved version, or deployment. A source-mirror hostname, similar title, or version number is never target identity.
+3. Package the checked-in migrations with the build and push that exact `develop` commit to the verified Sites mirror using a short-lived credential supplied only to the Git process environment.
+4. Create or update the acceptance version from that source commit. Verify the version records the intended commit and that D1 migrations apply before exercising a changed route.
+5. Make one reviewable configuration change at a time through ChatGPT Sites. Preserve bindings, access mode, unrelated variables, and source version. Record only the setting names and redacted before/after state.
+6. Exercise the named behavior with the least-privilege Sites session or client. Retain only count-only or credential-free evidence; never copy secrets, client IDs, bearer values, stored values, namespace names, D1 output, or hosted settings into Git, logs, or public reports.
 
 ## Acceptance-only namespace maintenance
 

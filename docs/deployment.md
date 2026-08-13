@@ -21,12 +21,13 @@ ChatGPT Sites assigns independent monotonically increasing version numbers to ea
 For an AittaDB release:
 
 1. Start from a clean pushed `develop` commit that passed `npm run validate` and exact-head CI.
-2. Build that commit once. Create target-specific packages from that unchanged output; vary only `project_id`.
-3. Save and deploy it to `test.aittadb.com` without changing hosted values, secrets, bindings, custom domains, or access policy.
-4. Verify public metadata, health, protected-route denial, discovery, enabled feature behavior, migrations where applicable, and error-only private logs.
-5. If acceptance fails, stop and fix a new commit. Never promote the failed artifact.
-6. After acceptance succeeds, save and deploy the identical commit and build output to `aittadb.com`, again preserving hosted configuration.
-7. Verify both custom domains serve equivalent public behavior and record each Site's local version number plus the shared source commit in private operational evidence.
+2. Before each target operation, verify the stored Sites project ID resolves to the intended project title and current custom-domain live URL. Do not infer a target from a mirror hostname, similar title, or Site version number.
+3. Build that commit once. Create target-specific packages from that unchanged output; vary only `project_id`.
+4. Save and deploy it to `test.aittadb.com` without changing hosted values, secrets, bindings, custom domains, or access policy.
+5. Verify public metadata, health, protected-route denial, discovery, enabled feature behavior, migrations where applicable, and error-only private logs.
+6. If acceptance fails, stop and fix a new commit. Never promote the failed artifact.
+7. After acceptance succeeds, save and deploy the identical commit and build output to `aittadb.com`, again preserving hosted configuration.
+8. Verify both custom domains serve equivalent public behavior and record each Site's local version number plus the shared source commit in private operational evidence.
 
 Production must never advance from an untested save, even when its runtime diff appears equivalent to the accepted commit. Documentation-only changes may not alter runtime behavior, but they still require this exact-source promotion path when a new Sites version is published.
 

@@ -238,7 +238,7 @@ Implementation DoD: contract/code/negative tests/user+developer docs/passing for
 
 Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; reset/checkout needs approval. Run `npm run validate` before handoff. Feature PRs target `develop`; keep at most one `main` PR from `develop`; no merge without approval; close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits.
 
-Outside test, deployment needs approval. Push validated `develop` to the Sites mirror with a short-lived env-only credential; never command args, Git config, files, logs, or source. Use ChatGPT Sites, not direct Cloudflare administration. Deploy/verify acceptance before the identical production commit/build; archives differ only by target `project_id`. Compare commits, apply migrations, verify status, and claim E2E only after hosted tests.
+Outside test, deployment needs approval. Before mirror, setting change, or deploy, verify project title/live URL match intended domain. Use short-lived env-only credentials; never args/config/files/logs/source. Use Sites, not direct Cloudflare. Deploy/verify acceptance before identical production build; archives differ only by target project_id. Compare commits, apply migrations, verify status, and claim E2E only after hosted tests.
 
 ## Maintaining This File
 
