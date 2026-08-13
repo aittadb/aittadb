@@ -3530,7 +3530,7 @@ export const openApiSpec = {
           pagination: { const: "opaque-cursor-with-next-link" },
           transaction_shape: {
             type: "object",
-            required: ["operation_id", "mutations", "results"],
+            required: ["operation_id", "mutations", "records"],
             properties: {
               operation_id: {
                 type: "object",
@@ -3569,7 +3569,7 @@ export const openApiSpec = {
                 },
                 additionalProperties: false,
               },
-              results: { const: "ordered-record-or-null-per-mutation" },
+              records: { const: "ordered-record-or-null-per-mutation" },
             },
             additionalProperties: false,
           },

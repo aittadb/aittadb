@@ -155,7 +155,7 @@ export interface BoundedRecordDiscoveryDocument {
         delete: "positive-revision-required";
         check: "null-requires-absence-positive-revision-preserves-record";
       }>;
-      results: "ordered-record-or-null-per-mutation";
+      records: "ordered-record-or-null-per-mutation";
     }>;
   }>;
   links: readonly BoundedRecordLink[];
@@ -293,7 +293,7 @@ export function boundedRecordDiscovery(input: {
           delete: "positive-revision-required",
           check: "null-requires-absence-positive-revision-preserves-record",
         },
-        results: "ordered-record-or-null-per-mutation",
+        records: "ordered-record-or-null-per-mutation",
       },
     },
     links: [

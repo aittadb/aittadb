@@ -40,6 +40,10 @@ test("protocol 1.1 discovery freezes the exact generic capability contract", () 
   assert.equal(document.data.limits.max_transaction_mutations, 25);
   assert.equal(document.data.transaction_shape.mutations.unique_keys, true);
   assert.equal(
+    document.data.transaction_shape.records,
+    "ordered-record-or-null-per-mutation",
+  );
+  assert.equal(
     document.data.transaction_shape.mutations.check,
     "null-requires-absence-positive-revision-preserves-record",
   );

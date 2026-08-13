@@ -136,6 +136,39 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
       value,
     );
   }
+  const discoveryTransactionShape = asObject(
+    discoveryProperties.transaction_shape,
+    "bounded transaction shape",
+  );
+  assert.deepEqual(discoveryTransactionShape.required, [
+    "operation_id",
+    "mutations",
+    "records",
+  ]);
+  const discoveryTransactionProperties = asObject(
+    discoveryTransactionShape.properties,
+    "bounded transaction shape properties",
+  );
+  assert.equal(
+    asObject(
+      discoveryTransactionProperties.records,
+      "bounded transaction records declaration",
+    ).const,
+    "ordered-record-or-null-per-mutation",
+  );
+  const transactionData = openApiSchema("BoundedRecordTransactionData");
+  assert.deepEqual(transactionData.required, [
+    "operation_id",
+    "replayed",
+    "records",
+  ]);
+  assert.ok(
+    "records" in
+      asObject(
+        transactionData.properties,
+        "bounded transaction result properties",
+      ),
+  );
 
   const list = openApiOperation("/storage/record-protocol/records", "get");
   assert.deepEqual(list.security, [{ bearer: [] }]);

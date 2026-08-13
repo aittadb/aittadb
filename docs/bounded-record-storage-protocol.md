@@ -120,6 +120,10 @@ durable operation receipt commit together, or none commit. Deletes can free
 capacity for puts in the same transaction because quotas use the complete
 candidate state.
 
+Discovery names the ordered transaction outcome `transaction_shape.records`.
+Every successful transaction and exact replay returns the corresponding ordered
+record-or-null evidence in `data.records`.
+
 Precondition evaluation uses only the authenticated caller's exact user/client
 namespace. A record in another namespace is not inspected and is therefore
 treated as an absent record in the caller namespace before later rate,

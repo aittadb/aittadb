@@ -89,6 +89,11 @@ test("strict protocol clients receive the exact versioned media type", async () 
     fixture.app.fetch(new Request(ENTRY, { headers: { accept: ACCEPT } })),
   );
   assert.equal(discovery.headers.get("content-type"), ACCEPT);
+  const discoveryDocument = (await discovery.json()) as DiscoveryDocument;
+  assert.equal(
+    discoveryDocument.data.transaction_shape.records,
+    "ordered-record-or-null-per-mutation",
+  );
 
   const transactionResponse = await fixture.postTransaction(
     transaction("operation:strict-media", [
@@ -97,6 +102,22 @@ test("strict protocol clients receive the exact versioned media type", async () 
   );
   assert.equal(transactionResponse.status, 200);
   assert.equal(transactionResponse.headers.get("content-type"), ACCEPT);
+  const transactionDocument =
+    (await transactionResponse.json()) as TransactionDocument;
+  assert.deepEqual(Object.keys(transactionDocument).sort(), [
+    "actions",
+    "api_version",
+    "data",
+    "id",
+    "links",
+    "type",
+  ]);
+  assert.deepEqual(Object.keys(transactionDocument.data).sort(), [
+    "operation_id",
+    "records",
+    "replayed",
+  ]);
+  assert.equal(transactionDocument.data.records.length, 1);
 
   for (const response of [
     await fixture.get(`${RECORDS}/settings/strict`),
@@ -919,6 +940,9 @@ interface DiscoveryDocument {
       max_transaction_bytes: number;
       max_cursor_length: number;
     };
+    transaction_shape: {
+      records: "ordered-record-or-null-per-mutation";
+    };
   };
   actions: Array<{
     name: string;
@@ -937,10 +961,16 @@ interface RecordDocument {
 }
 
 interface TransactionDocument {
+  api_version: string;
+  type: string;
+  id: string;
   data: {
+    operation_id: string;
     replayed: boolean;
     records: Array<RecordValue | null>;
   };
+  links: unknown[];
+  actions: unknown[];
 }
 
 interface PageDocument {
