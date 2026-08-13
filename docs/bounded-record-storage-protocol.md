@@ -150,11 +150,15 @@ retain their existing fixed outcomes when admission allows the request.
 
 The D1 repository executes one bounded atomic batch. It first stores a pending
 receipt only after preflight succeeds, applies at most 25 guarded unique-key
-mutations, verifies every resulting revision/value/absence, and transitions the
-receipt to committed. A failed guard deliberately aborts the D1 batch, so no
-partial record or pending receipt survives. The in-memory test adapter performs
-the same transition without yielding between its final precondition and state
-replacement.
+mutations, verifies every resulting revision/value/absence through the same
+validated bounded mutation document with seven fixed bindings, and transitions
+the receipt to committed. The verifier does not duplicate stored values inside
+another bound string, so a valid 1 MiB transaction remains below Cloudflare
+D1's 2,000,000-byte bound-value and 100-parameter statement limits while retaining the
+advertised 25-entry limit. A failed guard deliberately aborts the D1 batch, so
+no partial record or pending receipt survives. The in-memory test adapter
+performs the same transition without yielding between its final precondition
+and state replacement.
 
 An exact retry in the same credential namespace returns the original ordered
 result with `replayed: true`, including after runtime reconstruction. Reusing

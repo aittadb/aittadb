@@ -774,7 +774,95 @@ WHERE user_id = ?1 AND client_id = ?2 AND collection = ?3 AND record_id = ?4
   AND EXISTS (
     SELECT 1 FROM bounded_storage_transaction_receipts
     WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?6
-      AND request_hash = ?7 AND attempt_hash = ?8 AND status = 'pending'
+    AND request_hash = ?7 AND attempt_hash = ?8 AND status = 'pending'
+  )`;
+
+const BOUNDED_TRANSACTION_COMMIT = `
+WITH expected_state AS (
+  SELECT
+    CAST(entry.key AS INTEGER) AS ordinal,
+    json_extract(entry.value, '$.type') AS mutation_type,
+    json_extract(entry.value, '$.key.collection') AS collection,
+    json_extract(entry.value, '$.key.id') AS record_id,
+    json_type(entry.value, '$.expected_revision') AS expected_revision_type,
+    CASE
+      WHEN json_type(entry.value, '$.expected_revision') = 'null' THEN NULL
+      ELSE CAST(json_extract(entry.value, '$.expected_revision') AS INTEGER)
+    END AS expected_revision,
+    json_type(entry.value, '$.value') AS value_type,
+    CASE
+      WHEN json_extract(entry.value, '$.type') = 'put'
+      THEN json(json_extract(entry.value, '$.value'))
+      ELSE NULL
+    END AS value_json
+  FROM json_each(?7) AS entry
+)
+UPDATE bounded_storage_transaction_receipts
+SET status = 'committed', committed_at = ?1
+WHERE user_id = ?2 AND client_id = ?3 AND operation_id_hash = ?4
+  AND request_hash = ?5 AND attempt_hash = ?6 AND status = 'pending'
+  AND json_type(?7) = 'array'
+  AND json_array_length(?7) = bounded_storage_transaction_receipts.mutation_count
+  AND (SELECT COUNT(*) FROM expected_state) = bounded_storage_transaction_receipts.mutation_count
+  AND NOT EXISTS (
+    SELECT 1
+    FROM expected_state AS verification
+    LEFT JOIN bounded_storage_records AS record
+      ON record.user_id = ?2
+     AND record.client_id = ?3
+     AND record.collection = verification.collection
+     AND record.record_id = verification.record_id
+    WHERE
+      verification.ordinal < 0
+      OR verification.mutation_type IS NULL
+      OR verification.mutation_type NOT IN ('put', 'delete', 'check')
+      OR verification.collection IS NULL
+      OR typeof(verification.collection) <> 'text'
+      OR verification.record_id IS NULL
+      OR typeof(verification.record_id) <> 'text'
+      OR verification.expected_revision_type IS NULL
+      OR verification.expected_revision_type NOT IN ('null', 'integer')
+      OR (
+        verification.mutation_type = 'put'
+        AND (
+          verification.value_type IS NULL
+          OR verification.value_type <> 'object'
+        )
+      )
+      OR (
+        verification.mutation_type = 'delete'
+        AND (
+          verification.expected_revision_type <> 'integer'
+          OR verification.expected_revision IS NULL
+          OR verification.expected_revision < 1
+          OR record.revision IS NOT NULL
+        )
+      )
+      OR (
+        verification.mutation_type = 'check'
+        AND (
+          (verification.expected_revision IS NULL AND record.revision IS NOT NULL)
+          OR (
+            verification.expected_revision_type = 'integer'
+            AND (
+              verification.expected_revision < 1
+              OR record.revision IS NULL
+              OR record.revision <> verification.expected_revision
+            )
+          )
+        )
+      )
+      OR (
+        verification.mutation_type = 'put'
+        AND (
+          (verification.expected_revision_type = 'integer' AND verification.expected_revision < 1)
+          OR verification.value_json IS NULL
+          OR record.revision IS NULL
+          OR record.revision <> COALESCE(verification.expected_revision, 0) + 1
+          OR record.value_json <> verification.value_json
+          OR record.value_bytes <> length(CAST(verification.value_json AS BLOB))
+        )
+      )
   )`;
 
 const BOUNDED_TRANSACTION_ABORT_PENDING = `
@@ -2239,13 +2327,7 @@ export class D1AuthStore implements AuthStore {
       }
     }
     const commitIndex = statements.length;
-    statements.push(
-      boundedTransactionCommitStatement(
-        this.db,
-        prepared,
-        prepared.command.transaction.mutations,
-      ),
-    );
+    statements.push(boundedTransactionCommitStatement(this.db, prepared));
     const abortIndex = statements.length;
     statements.push(
       this.db
@@ -2777,90 +2859,18 @@ function boundedTransactionMutationStatement(
 function boundedTransactionCommitStatement(
   db: D1Database,
   prepared: Readonly<PreparedBoundedStorageTransaction>,
-  mutations: readonly Readonly<BoundedRecordMutation>[],
 ): D1PreparedStatement {
-  let sql = `
-UPDATE bounded_storage_transaction_receipts
-SET status = 'committed', committed_at = ?
-WHERE user_id = ? AND client_id = ? AND operation_id_hash = ?
-  AND request_hash = ? AND attempt_hash = ? AND status = 'pending'`;
-  const bindings: (string | number)[] = [
-    prepared.now,
-    prepared.userId,
-    prepared.clientId,
-    prepared.operationIdHash,
-    prepared.requestHash,
-    prepared.attemptHash,
-  ];
-
-  for (const mutation of mutations) {
-    if (mutation.type === "delete") {
-      sql += `
-  AND NOT EXISTS (
-    SELECT 1 FROM bounded_storage_records
-    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
-  )`;
-      bindings.push(
-        prepared.userId,
-        prepared.clientId,
-        mutation.key.collection,
-        mutation.key.id,
-      );
-      continue;
-    }
-    if (mutation.type === "check" && mutation.expected_revision === null) {
-      sql += `
-  AND NOT EXISTS (
-    SELECT 1 FROM bounded_storage_records
-    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
-  )`;
-      bindings.push(
-        prepared.userId,
-        prepared.clientId,
-        mutation.key.collection,
-        mutation.key.id,
-      );
-      continue;
-    }
-    if (mutation.type === "check") {
-      const expectedRevision = mutation.expected_revision;
-      if (expectedRevision === null) {
-        throw new Error("bounded_storage_transaction_command_invalid");
-      }
-      sql += `
-  AND EXISTS (
-    SELECT 1 FROM bounded_storage_records
-    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
-      AND revision = ?
-  )`;
-      bindings.push(
-        prepared.userId,
-        prepared.clientId,
-        mutation.key.collection,
-        mutation.key.id,
-        expectedRevision,
-      );
-      continue;
-    }
-
-    const valueJson = JSON.stringify(mutation.value);
-    sql += `
-  AND EXISTS (
-    SELECT 1 FROM bounded_storage_records
-    WHERE user_id = ? AND client_id = ? AND collection = ? AND record_id = ?
-      AND revision = ? AND value_json = ? AND value_bytes = ?
-  )`;
-    bindings.push(
+  return db
+    .prepare(BOUNDED_TRANSACTION_COMMIT)
+    .bind(
+      prepared.now,
       prepared.userId,
       prepared.clientId,
-      mutation.key.collection,
-      mutation.key.id,
-      (mutation.expected_revision ?? 0) + 1,
-      valueJson,
-      new TextEncoder().encode(valueJson).byteLength,
+      prepared.operationIdHash,
+      prepared.requestHash,
+      prepared.attemptHash,
+      prepared.mutationsJson,
     );
-  }
-  return db.prepare(sql).bind(...bindings);
 }
 
 function firstBatchRow(result: D1Result): Row | null {

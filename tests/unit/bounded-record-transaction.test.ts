@@ -3,9 +3,12 @@ import { readdir, readFile } from "node:fs/promises";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import test from "node:test";
 
-import type {
-  BoundedRecordMutation,
-  BoundedRecordTransactionCommand,
+import {
+  BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
+  canonicalBoundedRecordTransaction,
+  type BoundedRecordMutation,
+  type BoundedRecordTransactionCommand,
+  type BoundedRecordValue,
 } from "../../src/bounded-record-protocol";
 import {
   BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS,
@@ -47,6 +50,8 @@ const OPEN_RECEIPT_LIMITS: BoundedStorageReceiptLimits = {
   namespaceMaxItems: 10_000,
   namespaceMaxBytes: 1_000_000_000,
 };
+const D1_MAX_BOUND_PARAMETERS = 100;
+const D1_MAX_BOUND_VALUE_BYTES = 2_000_000;
 
 test("bounded receipt retention configuration is finite and strict", async () => {
   const env = await testEnv();
@@ -1682,9 +1687,12 @@ test("D1 recovers an exact result after committed response loss", async () => {
     const owner = await createSubject(fixture.store, "d1-response-loss");
     const client = await createClient(fixture.store, "d1-response-loss");
     fixture.controls.throwAfterCommit = true;
-    const tx = command("response-loss", [
-      put("items", "record", null, { durable: true }),
-    ]);
+    const tx = command(
+      "response-loss",
+      Array.from({ length: 25 }, (_, index) =>
+        put("items", `record-${index}`, null, { durable: index }),
+      ),
+    );
     assert.deepEqual(
       await fixture.store.transactBoundedStorageRecords(
         owner,
@@ -1695,15 +1703,18 @@ test("D1 recovers an exact result after committed response loss", async () => {
       ),
       { status: "unavailable" },
     );
-    assert.equal(
-      (
-        await fixture
-          .reconstruct()
-          .transactBoundedStorageRecords(owner, client.id, tx, OPEN_LIMITS, 51)
-      ).status,
-      "replayed",
-    );
+    const replayed = await fixture
+      .reconstruct()
+      .transactBoundedStorageRecords(owner, client.id, tx, OPEN_LIMITS, 51);
+    assert.equal(replayed.status, "replayed");
+    if (replayed.status === "replayed") {
+      assert.equal(replayed.records.length, 25);
+    }
     assert.equal(await fixture.receiptCount(owner), 1);
+    assert.equal(fixture.controls.maxBatchStatements, 30);
+    assert.ok(
+      fixture.controls.maxObservedBoundParameters <= D1_MAX_BOUND_PARAMETERS,
+    );
   } finally {
     fixture.close();
   }
@@ -1714,15 +1725,17 @@ test("D1 rolls records and receipt back after an injected mutation failure", asy
   try {
     const owner = await createSubject(fixture.store, "d1-rollback");
     const client = await createClient(fixture.store, "d1-rollback");
-    fixture.controls.failBatchIndex = 3;
+    fixture.controls.failBatchIndex = 26;
     assert.deepEqual(
       await fixture.store.transactBoundedStorageRecords(
         owner,
         client.id,
-        command("injected-failure", [
-          put("items", "first", null, { stored: false }),
-          put("items", "second", null, { stored: false }),
-        ]),
+        command(
+          "injected-failure",
+          Array.from({ length: 25 }, (_, index) =>
+            put("items", `record-${index}`, null, { stored: index }),
+          ),
+        ),
         OPEN_LIMITS,
         60,
       ),
@@ -1734,9 +1747,400 @@ test("D1 rolls records and receipt back after an injected mutation failure", asy
         owner,
         client.id,
         "items",
+        "record-0",
+      ),
+      null,
+    );
+    assert.equal(
+      await fixture.store.getBoundedStorageRecord(
+        owner,
+        client.id,
+        "items",
+        "record-24",
+      ),
+      null,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 final verification rejection rolls back records and the pending receipt", async () => {
+  const fixture = await createD1Fixture();
+  try {
+    const owner = await createSubject(
+      fixture.store,
+      "d1-final-verifier-rollback",
+    );
+    const client = await createClient(
+      fixture.store,
+      "d1-final-verifier-rollback",
+    );
+    fixture.controls.skipBatchIndex = 3;
+    assert.deepEqual(
+      await fixture.store.transactBoundedStorageRecords(
+        owner,
+        client.id,
+        command("d1-final-verifier-rollback", [
+          put("items", "first", null, { stored: 1 }),
+          put("items", "second", null, { stored: 2 }),
+        ]),
+        OPEN_LIMITS,
+        65,
+      ),
+      { status: "unavailable" },
+    );
+    assert.equal(fixture.controls.abortPendingAttempts, 1);
+    assert.equal(await fixture.receiptCount(owner), 0);
+    assert.equal(
+      await fixture.store.getBoundedStorageRecord(
+        owner,
+        client.id,
+        "items",
         "first",
       ),
       null,
+    );
+    assert.equal(
+      await fixture.store.getBoundedStorageRecord(
+        owner,
+        client.id,
+        "items",
+        "second",
+      ),
+      null,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 verification document shape fails closed before a receipt can commit", async () => {
+  const fixture = await createD1Fixture();
+  try {
+    const owner = await createSubject(fixture.store, "d1-verifier-shape");
+    const client = await createClient(fixture.store, "d1-verifier-shape");
+    const overrides = [
+      "[]",
+      JSON.stringify([
+        {
+          type: "unknown",
+          key: { collection: "items", id: "record" },
+          expected_revision: null,
+        },
+      ]),
+      JSON.stringify([
+        {
+          type: "put",
+          key: { collection: "items", id: "record" },
+          expected_revision: null,
+        },
+      ]),
+    ];
+    for (const [index, override] of overrides.entries()) {
+      fixture.controls.commitVerificationOverride = override;
+      assert.deepEqual(
+        await fixture.store.transactBoundedStorageRecords(
+          owner,
+          client.id,
+          command(`d1-verifier-shape-${index}`, [
+            put("items", "record", null, { shape: index }),
+          ]),
+          OPEN_LIMITS,
+          66 + index,
+        ),
+        { status: "unavailable" },
+      );
+      assert.equal(await fixture.receiptCount(owner), 0);
+      assert.equal(
+        await fixture.store.getBoundedStorageRecord(
+          owner,
+          client.id,
+          "items",
+          "record",
+        ),
+        null,
+      );
+    }
+    assert.equal(fixture.controls.abortPendingAttempts, overrides.length);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 accepts a near-limit escaped 25-entry transaction within its value limit", async () => {
+  const fixture = await createD1Fixture();
+  try {
+    const owner = await createSubject(fixture.store, "d1-large-verifier");
+    const client = await createClient(fixture.store, "d1-large-verifier");
+    const escapedValue: BoundedRecordValue = {
+      payload: '"'.repeat(20_800),
+      unicode: "\u00e5".repeat(8),
+    };
+    const transaction = command(
+      "d1-large-verifier",
+      Array.from({ length: 25 }, (_, index) =>
+        put("items", `record-${index}`, null, escapedValue),
+      ),
+    );
+    const transactionBytes = new TextEncoder().encode(
+      canonicalBoundedRecordTransaction(transaction),
+    ).byteLength;
+    assert.ok(transactionBytes > 900_000);
+    assert.ok(transactionBytes <= BOUNDED_RECORD_MAX_TRANSACTION_BYTES);
+    const legacyNestedVerifierBytes = new TextEncoder().encode(
+      JSON.stringify(
+        transaction.transaction.mutations.map((mutation) => ({
+          type: mutation.type,
+          key: mutation.key,
+          expected_revision: mutation.expected_revision,
+          value_json:
+            mutation.type === "put" ? JSON.stringify(mutation.value) : null,
+        })),
+      ),
+    ).byteLength;
+    assert.ok(legacyNestedVerifierBytes > D1_MAX_BOUND_VALUE_BYTES);
+
+    const created = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      transaction,
+      OPEN_LIMITS,
+      69,
+    );
+    assert.equal(created.status, "created");
+    if (created.status === "created") assert.equal(created.records.length, 25);
+    assert.ok(
+      fixture.controls.maxObservedBoundValueBytes >= transactionBytes - 256,
+    );
+    assert.ok(
+      fixture.controls.maxObservedBoundValueBytes <= D1_MAX_BOUND_VALUE_BYTES,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 completes every 25-entry final-state verification shape within platform limits", async () => {
+  const fixture = await createD1Fixture();
+  try {
+    const owner = await createSubject(fixture.store, "d1-parameter-boundary");
+    const client = await createClient(fixture.store, "d1-parameter-boundary");
+    const initialValues = Array.from(
+      { length: 25 },
+      (_, index): BoundedRecordValue =>
+        index === 0
+          ? {
+              z: { first: "Nordic \u00e5", second: [true, null, 0.1] },
+              a: { second: 2, first: 1 },
+            }
+          : { ordinal: index },
+    );
+    const create = command(
+      "d1-parameter-create",
+      initialValues.map((value, index) =>
+        put("items", `record-${index}`, null, value),
+      ),
+    );
+    const created = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      create,
+      OPEN_LIMITS,
+      70,
+    );
+    assert.equal(created.status, "created");
+    if (created.status !== "created") return;
+    assert.equal(created.records.length, 25);
+    assert.deepEqual(
+      created.records[0],
+      protocolRecord("items", "record-0", 1, initialValues[0]!),
+    );
+
+    const replayed = await fixture
+      .reconstruct()
+      .transactBoundedStorageRecords(owner, client.id, create, OPEN_LIMITS, 71);
+    assert.deepEqual(replayed, {
+      status: "replayed",
+      records: created.records,
+    });
+    assert.deepEqual(
+      await fixture.store.transactBoundedStorageRecords(
+        owner,
+        client.id,
+        command("d1-parameter-create", [check("items", "record-0", 1)]),
+        OPEN_LIMITS,
+        72,
+      ),
+      { status: "conflict" },
+    );
+
+    const checked = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      command(
+        "d1-parameter-positive-check",
+        Array.from({ length: 25 }, (_, index) =>
+          check("items", `record-${index}`, 1),
+        ),
+      ),
+      OPEN_LIMITS,
+      73,
+    );
+    assert.equal(checked.status, "created");
+    if (checked.status === "created") assert.equal(checked.records.length, 25);
+
+    const replaced = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      command(
+        "d1-parameter-replace",
+        Array.from({ length: 25 }, (_, index) =>
+          put("items", `record-${index}`, 1, { replaced: index }),
+        ),
+      ),
+      OPEN_LIMITS,
+      74,
+    );
+    assert.equal(replaced.status, "created");
+    if (replaced.status === "created") {
+      assert.equal(replaced.records[0]?.revision, 2);
+      assert.equal(replaced.records[24]?.revision, 2);
+    }
+
+    const absent = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      command(
+        "d1-parameter-absence-check",
+        Array.from({ length: 25 }, (_, index) =>
+          check("items", `missing-${index}`, null),
+        ),
+      ),
+      OPEN_LIMITS,
+      75,
+    );
+    assert.deepEqual(absent, {
+      status: "created",
+      records: Array(25).fill(null),
+    });
+
+    const deleted = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      command(
+        "d1-parameter-delete",
+        Array.from({ length: 25 }, (_, index) =>
+          remove("items", `record-${index}`, 2),
+        ),
+      ),
+      OPEN_LIMITS,
+      76,
+    );
+    assert.deepEqual(deleted, {
+      status: "created",
+      records: Array(25).fill(null),
+    });
+
+    const mixedChecks = Array.from(
+      { length: 8 },
+      (_, index) => `check-${index}`,
+    );
+    const mixedDeletes = Array.from(
+      { length: 9 },
+      (_, index) => `delete-${index}`,
+    );
+    for (const id of [...mixedChecks, ...mixedDeletes]) {
+      await fixture.seed(record(owner, client.id, "mixed", id, 1));
+    }
+    const mixed = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      command("d1-parameter-mixed", [
+        ...Array.from({ length: 8 }, (_, index) =>
+          put("mixed", `put-${index}`, null, { put: index }),
+        ),
+        ...mixedChecks.map((id) => check("mixed", id, 1)),
+        ...mixedDeletes.map((id) => remove("mixed", id, 1)),
+      ]),
+      OPEN_LIMITS,
+      77,
+    );
+    assert.equal(mixed.status, "created");
+    if (mixed.status === "created") {
+      assert.equal(mixed.records.length, 25);
+      assert.equal(mixed.records[0]?.revision, 1);
+      assert.equal(mixed.records[8]?.revision, 1);
+      assert.equal(mixed.records[24], null);
+    }
+    assert.equal(fixture.controls.maxBatchStatements, 30);
+    assert.ok(
+      fixture.controls.maxObservedBoundParameters <= D1_MAX_BOUND_PARAMETERS,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 preflights 25-entry quota overflow and delete-funded puts without partial state", async () => {
+  const fixture = await createD1Fixture();
+  try {
+    const owner = await createSubject(fixture.store, "d1-quota-boundary");
+    const client = await createClient(fixture.store, "d1-quota-boundary");
+    const limits: StorageLimits = {
+      ...OPEN_LIMITS,
+      globalMaxItems: 24,
+      userMaxItems: 24,
+      namespaceMaxItems: 24,
+    };
+    const overflow = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      command(
+        "d1-quota-overflow",
+        Array.from({ length: 25 }, (_, index) =>
+          put("items", `overflow-${index}`, null, { ordinal: index }),
+        ),
+      ),
+      limits,
+      80,
+    );
+    assert.deepEqual(overflow, { status: "quota_exceeded" });
+    assert.equal(await fixture.receiptCount(owner), 0);
+    assert.equal(
+      await fixture.store.getBoundedStorageRecord(
+        owner,
+        client.id,
+        "items",
+        "overflow-0",
+      ),
+      null,
+    );
+
+    for (let index = 0; index < 24; index += 1) {
+      await fixture.seed(record(owner, client.id, "items", `full-${index}`, 1));
+    }
+    const funded = await fixture.store.transactBoundedStorageRecords(
+      owner,
+      client.id,
+      command("d1-quota-funded", [
+        ...Array.from({ length: 12 }, (_, index) =>
+          remove("items", `full-${index}`, 1),
+        ),
+        ...Array.from({ length: 12 }, (_, index) =>
+          put("items", `replacement-${index}`, null, { ordinal: index }),
+        ),
+        check("items", "missing", null),
+      ]),
+      limits,
+      81,
+    );
+    assert.equal(funded.status, "created");
+    if (funded.status === "created") assert.equal(funded.records.length, 25);
+    assert.equal(await fixture.receiptCount(owner), 1);
+    assert.equal(fixture.controls.maxBatchStatements, 30);
+    assert.ok(
+      fixture.controls.maxObservedBoundParameters <= D1_MAX_BOUND_PARAMETERS,
     );
   } finally {
     fixture.close();
@@ -1821,7 +2225,13 @@ interface Fixture {
 
 interface D1Controls {
   failBatchIndex: number | null;
+  skipBatchIndex: number | null;
+  commitVerificationOverride: string | null;
   throwAfterCommit: boolean;
+  abortPendingAttempts: number;
+  maxBatchStatements: number;
+  maxObservedBoundParameters: number;
+  maxObservedBoundValueBytes: number;
 }
 
 interface D1Fixture extends Fixture {
@@ -1912,7 +2322,13 @@ async function createD1Fixture(): Promise<D1Fixture> {
   const sqlite = await migratedDatabase();
   const controls: D1Controls = {
     failBatchIndex: null,
+    skipBatchIndex: null,
+    commitVerificationOverride: null,
     throwAfterCommit: false,
+    abortPendingAttempts: 0,
+    maxBatchStatements: 0,
+    maxObservedBoundParameters: 0,
+    maxObservedBoundValueBytes: 0,
   };
   const d1 = sqliteD1(sqlite, controls);
   return {
@@ -2062,7 +2478,7 @@ function put(
   collection: string,
   id: string,
   expectedRevision: number | null,
-  value: Record<string, string | number | boolean>,
+  value: BoundedRecordValue,
 ): BoundedRecordMutation {
   return {
     type: "put",
@@ -2100,7 +2516,7 @@ function protocolRecord(
   collection: string,
   id: string,
   revision: number,
-  value: Record<string, string | number | boolean>,
+  value: BoundedRecordValue,
 ) {
   return { key: { collection, id }, revision, value };
 }
@@ -2180,6 +2596,10 @@ function sqliteD1(database: DatabaseSync, controls: D1Controls): D1Database {
     async batch<T>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]> {
       database.exec("BEGIN IMMEDIATE");
       try {
+        controls.maxBatchStatements = Math.max(
+          controls.maxBatchStatements,
+          statements.length,
+        );
         const results = statements.map((statement, index) => {
           if (controls.failBatchIndex === index) {
             controls.failBatchIndex = null;
@@ -2187,15 +2607,51 @@ function sqliteD1(database: DatabaseSync, controls: D1Controls): D1Database {
           }
           const execution = prepared.get(statement);
           assert.ok(execution);
+          const values = [...execution.values];
+          if (
+            controls.commitVerificationOverride !== null &&
+            execution.query.startsWith("\nWITH expected_state AS")
+          ) {
+            values[6] = controls.commitVerificationOverride;
+            controls.commitVerificationOverride = null;
+          }
+          controls.maxObservedBoundParameters = Math.max(
+            controls.maxObservedBoundParameters,
+            values.length,
+          );
+          controls.maxObservedBoundValueBytes = Math.max(
+            controls.maxObservedBoundValueBytes,
+            ...values.map(d1BoundValueBytes),
+          );
+          if (values.length > D1_MAX_BOUND_PARAMETERS) {
+            throw new Error("d1_bound_parameter_limit");
+          }
+          if (
+            values.some(
+              (value) => d1BoundValueBytes(value) > D1_MAX_BOUND_VALUE_BYTES,
+            )
+          ) {
+            throw new Error("d1_bound_value_limit");
+          }
+          if (controls.skipBatchIndex === index) {
+            controls.skipBatchIndex = null;
+            return {
+              success: true,
+              meta: { changes: 0 },
+            } as D1Result<T>;
+          }
+          if (execution.query.includes("committed_at = -1")) {
+            controls.abortPendingAttempts += 1;
+          }
           const sqliteStatement = database.prepare(execution.query);
           if (sqliteStatement.columns().length > 0) {
             return {
               success: true,
-              results: sqliteStatement.all(...execution.values) as T[],
+              results: sqliteStatement.all(...values) as T[],
               meta: { changes: 0 },
             } as D1Result<T>;
           }
-          const result = sqliteStatement.run(...execution.values);
+          const result = sqliteStatement.run(...values);
           return {
             success: true,
             meta: { changes: Number(result.changes) },
@@ -2213,4 +2669,10 @@ function sqliteD1(database: DatabaseSync, controls: D1Controls): D1Database {
       }
     },
   };
+}
+
+function d1BoundValueBytes(value: SQLInputValue): number {
+  if (typeof value === "string")
+    return new TextEncoder().encode(value).byteLength;
+  return value instanceof Uint8Array ? value.byteLength : 0;
 }
