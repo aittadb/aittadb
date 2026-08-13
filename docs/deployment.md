@@ -40,6 +40,8 @@ Keep `.env`, `.dev.vars`, `.secrets/`, `.wrangler/`, and active `.openai/hosting
 
 The build configuration falls back to `.openai/hosting.example.json` so type checking and production-build validation work in a clean checkout and in CI. This fallback does not configure a deployable Sites project. A real deployment still requires the ignored checkout-local `.openai/hosting.json` created in step 3.
 
+Each Sites project has a private source mirror separate from public GitHub. First push the validated `develop` commit to GitHub, then push that exact commit to the approved Site mirror with a newly issued short-lived credential supplied only through the one Git process environment. Never put that credential in command arguments, Git configuration, files, logs, URLs, or source. Clear it immediately after the push, package the same commit, save the version, and deploy acceptance before an approved production rollout.
+
 Forks must create their own Sites project, D1 database, R2 bucket, JWT signing key, and hosted secrets. Do not reuse another deployment's `.openai/hosting.json`, signing key, administrator allowlist, D1 database, or R2 bucket. Signing-key rotation is an approved single-key cutover and rollback operation; follow `docs/key-rotation.md` rather than generating or printing replacement material ad hoc.
 
 ## Administrator Bootstrap and Migration

@@ -238,7 +238,7 @@ Implementation DoD: contract/code/negative tests/user+developer docs/passing for
 
 Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; reset/checkout needs approval. Run `npm run validate` before handoff. Feature PRs target `develop`; keep at most one `main` PR from `develop`; no merge without approval; close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits.
 
-Outside test, deployment needs approval. Build one pushed `develop` commit; deploy/verify it on acceptance, then deploy the same commit/build to production without configuration changes. Archives may differ only by required target `project_id`. Never bypass/reverse this order. Sites version numbers are project-local; compare commits. Apply migrations and verify status. Claim sign-in E2E only after hosted testing; record uncertainty/next step.
+Outside test, deployment needs approval. Push validated `develop` to the Sites mirror with a short-lived env-only credential; never command args, Git config, files, logs, or source. Deploy/verify acceptance before the identical production commit/build; archives differ only by target `project_id`. Compare commits, apply migrations, verify status, and claim E2E only after hosted tests.
 
 ## Maintaining This File
 
