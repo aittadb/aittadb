@@ -62,6 +62,9 @@ const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/session", "get", "200", HYPERMEDIA_HTML),
   response("/authorize", "get", "200", HYPERMEDIA_HTML),
   response("/authorize", "get", "302"),
+  response("/.well-known/aittadb-proof-safety", "get", "200", [
+    HYPERMEDIA_MEDIA,
+  ]),
   response("/oauth/device_authorization", "get", "200", HYPERMEDIA_HTML),
   response("/oauth/token", "get", "200", HYPERMEDIA_HTML),
   response("/oauth/revoke", "get", "200", HYPERMEDIA_HTML),

@@ -200,6 +200,10 @@ import {
   BOUNDED_RECORD_MAX_TRANSACTION_BYTES,
   BOUNDED_RECORD_MEDIA_TYPE,
 } from "./bounded-record-protocol";
+import {
+  ACCEPTANCE_PROOF_SAFETY_PATH,
+  acceptanceProofSafetyResponse,
+} from "./proof-safety";
 
 export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
@@ -229,6 +233,23 @@ export function createAittaDBWithStore(
   return {
     async fetch(request: Request): Promise<Response | null> {
       const url = new URL(request.url);
+      if (
+        url.pathname === "/.well-known/aittadb-proof-safety" &&
+        request.method === "GET"
+      ) {
+        return finalizeResponse(
+          request,
+          acceptanceProofSafetyResponse(request, url, config),
+          config,
+        );
+      }
+      if (url.pathname === "/.well-known/aittadb-proof-safety") {
+        return finalizeResponse(
+          request,
+          acceptanceProofSafetyResponse(request, url, config),
+          config,
+        );
+      }
       if (!config.features.oauthApps && url.pathname === "/admin/clients") {
         const negotiationError = hypermediaNegotiationError(request);
         return finalizeResponse(
@@ -3666,6 +3687,7 @@ export function isAittaDBRoute(pathname: string): boolean {
     pathname === "/auth-ui.js" ||
     pathname === "/.well-known/openid-configuration" ||
     pathname === "/.well-known/jwks.json" ||
+    pathname === ACCEPTANCE_PROOF_SAFETY_PATH ||
     pathname === "/authorize" ||
     pathname.startsWith("/oauth/") ||
     pathname === "/userinfo" ||
@@ -3933,6 +3955,7 @@ function isClientCorsRoute(pathname: string): boolean {
 
 function needsStore(pathname: string): boolean {
   if (isBoundedRecordDiscoveryRoute(pathname)) return false;
+  if (pathname === ACCEPTANCE_PROOF_SAFETY_PATH) return false;
   return ![
     "/",
     "/health",

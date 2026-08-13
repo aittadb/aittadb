@@ -6,7 +6,7 @@ Read before changes. Keep below 32,000 bytes (`npm run agents:check`); put ratio
 
 AittaDB is a general-purpose hosted database server and application-backend service. It exposes small, independent, reusable primitives through stable HTTP protocols. On ChatGPT Sites it maps trusted server-side sign-in to a local user, issues AittaDB OAuth/OIDC/JWT credentials, and isolates data.
 
-Current: identity, OAuth/OIDC/JWT, D1 records, R2 files, and feature-gated immutable Events publication/reads/bounded waits.
+Current: identity, OAuth/OIDC/JWT, records, files, and feature-gated Events.
 
 Server boundary: identity/authentication; isolation; records/objects/events; conditional writes/versions/cursors/idempotency; bounded atomics/quotas/expiry/cleanup; hypermedia/OpenAPI/ops docs. Client SDKs, libraries, application integrations, and provider adapters belong in separate repositories; this repository documents protocols only.
 
@@ -22,7 +22,7 @@ Public releases use FSL-1.1-MIT and convert to MIT after two years; an immediate
 
 `https://github.com/aittadb/aittadb` is canonical/public/secret-free. Preserve files/lockfile/package choices/instructions/unrelated changes. Commit no secrets/private deployment material; use inert placeholders/synthetic fixtures. Never echo suspected exposure; escalate privately. Rotation, revocation, or history rewrites need approval.
 
-The canonical public origin and issuer is `https://aittadb.com`. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata must use it. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
+Production issuer is `https://aittadb.com`; each acceptance/fork uses its own HTTPS issuer. `ISSUER_URL`, discovery, JWT `iss`, verification URLs, absolute hypermedia, and social metadata use that deployment's issuer. A legacy `chatgpt.site` host may route at the platform, but is not canonical.
 
 `develop` tracks `main`; only validated main-ready work belongs there. Keep unfinished work separate. `test.aittadb.com` permits bounded reversible tests; restore settings and delete fixtures/secrets. Production must use the accepted commit/build. Approval is required to push/merge `main` or alter `aittadb.com` deployment, secrets, access, or versions.
 
@@ -75,11 +75,9 @@ Lead public descriptions with "source-available hosted application backend for t
 - `src/`: deployed domain, protocols, repositories, crypto, config, HTTP, identity, storage, and HTML.
 - `tests/`: unit/integration tests with test-only adapters/fakes.
 
-Update this section when ownership moves.
-
 ## Unit Interfaces
 
-Each unit is a reusable vendor-neutral primitive with bounded execution, isolation, defined failures, composition, and narrow dependencies:
+Units are reusable vendor-neutral primitives with bounded execution, isolation, failures, composition, and narrow dependencies:
 
 - HTTP handlers parse/limit/negotiate, apply CORS/security, and call domain services.
 - `UpstreamIdentityProvider` parses trusted identity; production injects Sites and tests inject mocks.
@@ -188,7 +186,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes, publication, reads, and bounded waits; when off, reject before origin/body/CORS/auth/rate/repository/maintenance and omit controls. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
+`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes, publication, reads, and bounded waits; when off, reject before origin/body/CORS/auth/rate/repository/maintenance and omit controls. Production `ISSUER_URL` is `https://aittadb.com`; acceptance/forks use their own pathless HTTPS issuer. Changes invalidate the old token boundary and need acceptance notes.
 
 Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 
@@ -249,12 +247,12 @@ Outside test, deployment needs approval. Build one pushed `develop` commit; depl
 
 ## Maintaining This File
 
-Update `AGENTS.md` when architecture/interfaces/commands/constraints/security/structure/deployment/operations/workflow change. Keep below 32,000 bytes; put rationale in docs and replace stale text.
+Update `AGENTS.md` for architecture, interface, command, constraint, security, structure, deployment, operation, or workflow changes. Keep it below 32,000 bytes; put rationale in docs and replace stale text.
 
 ## Multi-agent execution
 
-Cost-effective subagent-first: primary architects, orchestrates, integrates, and decides. For nontrivial work, split independent streams; delegate most investigation, implementation, tests, docs, debugging, and review with scope/files/constraints/DoD; resolve conflicts and validate. Direct work is coordination, integration, inseparable/trivial work; never spawn for a quota.
+Primary architects, orchestrates, integrates, and decides. For nontrivial work, split independent streams and delegate most scoped research, code, tests, docs, debug, and review; integrate, resolve, validate. Direct work is coordination, integration, or irreducible.
 
-- Least-cost capable model: Luna low for search/logs/commands/docs; Luna medium/high for specified routine code/tests (high only edge cases); Terra medium/high for multi-file/state/debug; Sol high/xhigh for architecture/security/protocol/persistence/hard debugging/independent review; Sol max: exceptional high-risk uncertainty. Escalate, not retry unsuitable workers; use `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol` when selectable, closest equivalent otherwise.
-- Luna never owns unresolved product/protocol/auth/data-integrity/concurrency/cross-cutting decisions. Parallelize independent units in isolated worktrees; no overlap. Each implementation delegation owns code/tests/docs.
-- Workers report files, validation, assumptions, risks, next action. Lifecycle: Sol plan -> Luna/Terra workers -> independent Sol review -> least-cost remediation -> risk-proportionate re-review. Primary inspects work, resolves findings, runs relevant validation, reviews diff. Coordination docs may be direct.
+- Least-cost model: Luna low search/logs/commands/docs; Luna med/high specified routine code/tests (high: edges); Terra med/high multi-file/state/debug; Sol high/xhigh architecture/security/protocol/persistence/hard debug/review; Sol max exceptional high-risk uncertainty. Escalate, do not retry; use `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol` when selectable, closest equivalent otherwise.
+- Luna never owns unresolved product/protocol/auth/data-integrity/concurrency/cross-cutting decisions. Parallelize independent work whenever practical. Implementation subagents MUST edit only isolated Git worktrees; no overlap. Each implementation delegation owns code/tests/docs.
+- Workers report files, validation, assumptions, risks, next action. Lifecycle: Sol plan -> Luna/Terra -> independent Sol review -> lowest-cost remediation -> re-review per risk. Primary inspects and integrates returned work, resolves findings, runs relevant validation, reviews final diff, and accepts only reviewed, complete, validated agent commits. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly.

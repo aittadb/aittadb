@@ -17,6 +17,7 @@ import {
   BOUNDED_RECORD_RECEIPT_MIN_RETENTION_SECONDS,
   boundedRecordDeleteReceiptReserveLimits,
 } from "./bounded-record-transaction";
+import { isAcceptanceProofSafetyIssuer } from "./proof-safety";
 
 const DEFAULT_ACCESS_TOKEN_TTL = 600;
 const DEFAULT_AUTH_CODE_TTL = 300;
@@ -175,6 +176,27 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       BOUNDED_RECORD_RECEIPT_DEFAULT_LIMITS.namespaceMaxBytes,
     ),
   } satisfies BoundedStorageReceiptLimits;
+  const features = {
+    records: readBoolean(env.FEATURE_RECORDS_ENABLED, true),
+    files: readBoolean(env.FEATURE_FILES_ENABLED, true),
+    statistics: readBoolean(env.FEATURE_STATISTICS_ENABLED, true),
+    oauthApps: readBoolean(env.FEATURE_OAUTH_APPS_ENABLED, false),
+    events: readBoolean(env.FEATURE_EVENTS_ENABLED, false),
+  };
+  const acceptanceProofSafetyEnabled = readBoolean(
+    env.ACCEPTANCE_PROOF_SAFETY_ENABLED,
+    false,
+  );
+  if (
+    acceptanceProofSafetyEnabled &&
+    (!isAcceptanceProofSafetyIssuer(issuerUrl) ||
+      !features.records ||
+      !features.oauthApps)
+  ) {
+    throw new Error(
+      "ACCEPTANCE_PROOF_SAFETY_ENABLED requires a recognized non-production HTTPS issuer with Records and OAuth Apps enabled",
+    );
+  }
 
   return {
     issuerUrl,
@@ -201,13 +223,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       DEFAULT_REFRESH_TOKEN_TTL,
     ),
     allowedCorsOrigins: splitList(env.ALLOWED_CORS_ORIGINS),
-    features: {
-      records: readBoolean(env.FEATURE_RECORDS_ENABLED, true),
-      files: readBoolean(env.FEATURE_FILES_ENABLED, true),
-      statistics: readBoolean(env.FEATURE_STATISTICS_ENABLED, true),
-      oauthApps: readBoolean(env.FEATURE_OAUTH_APPS_ENABLED, false),
-      events: readBoolean(env.FEATURE_EVENTS_ENABLED, false),
-    },
+    features,
     maintenanceCleanupTelemetryEnabled: readBoolean(
       env.MAINTENANCE_CLEANUP_TELEMETRY_ENABLED,
       false,
@@ -278,6 +294,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
     ),
     boundedRecordReceiptRetentionSeconds,
     boundedRecordReceiptLimits,
+    acceptanceProofSafetyEnabled,
     adminSubjects: readAdminSubjects(env.ADMIN_SUBJECTS),
     privacy: readPrivacyConfig(env),
     isTest,

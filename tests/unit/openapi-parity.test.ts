@@ -13,6 +13,7 @@ import {
 import {
   BOUNDED_RECORD_CAPABILITIES,
   BOUNDED_RECORD_LIMITS,
+  BOUNDED_RECORD_MEDIA_TYPE,
   BOUNDED_RECORD_PROTOCOL_VERSION,
 } from "../../src/bounded-record-protocol";
 import { oidcConfiguration, openApiSpec } from "../../src/openapi";
@@ -28,6 +29,7 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
   for (const operation of [
     "GET /privacy",
     "GET /statistics",
+    "GET /.well-known/aittadb-proof-safety",
     "GET /account/deletion",
     "POST /account/deletion",
     "GET /events",
@@ -53,6 +55,40 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
   ]) {
     assert.ok(operations.has(operation), `missing ${operation}`);
   }
+});
+
+test("OpenAPI documents the strict acceptance proof-safety assertion", () => {
+  const operation = openApiOperation(
+    "/.well-known/aittadb-proof-safety",
+    "get",
+  );
+  assert.deepEqual(operation.security, []);
+  const parameters = operation.parameters as UnknownObject[];
+  assert.deepEqual(
+    parameters.map((parameter) => parameter.name),
+    ["challenge"],
+  );
+  const responses = operationResponses(
+    "/.well-known/aittadb-proof-safety",
+    "get",
+  );
+  for (const status of ["200", "404", "405", "406"]) {
+    assert.ok(status in responses, `GET proof safety ${status}`);
+  }
+  const content = asObject(
+    asObject(responses["200"], "proof safety success").content,
+    "proof safety content",
+  );
+  assert.deepEqual(Object.keys(content), [BOUNDED_RECORD_MEDIA_TYPE]);
+  const schema = openApiSchema("AcceptanceProofSafetyDocument");
+  assert.deepEqual(schema.required, [
+    "api_version",
+    "type",
+    "id",
+    "data",
+    "links",
+    "actions",
+  ]);
 });
 
 test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () => {

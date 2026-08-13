@@ -52,6 +52,7 @@ export interface RuntimeEnv {
   FEATURE_STATISTICS_ENABLED?: string;
   FEATURE_OAUTH_APPS_ENABLED?: string;
   FEATURE_EVENTS_ENABLED?: string;
+  ACCEPTANCE_PROOF_SAFETY_ENABLED?: string;
   EVENT_RETENTION_SECONDS?: string;
   EVENTS_GLOBAL_MAX_ITEMS?: string;
   EVENTS_GLOBAL_MAX_BYTES?: string;
@@ -174,6 +175,7 @@ export interface AppConfig {
   storageWriteRateLimit: number;
   boundedRecordReceiptRetentionSeconds: number;
   boundedRecordReceiptLimits: BoundedStorageReceiptLimits;
+  acceptanceProofSafetyEnabled: boolean;
   adminSubjects: readonly string[];
   privacy: PrivacyConfig;
   isTest: boolean;

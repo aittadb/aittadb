@@ -637,6 +637,61 @@ export const openApiSpec = {
         },
       },
     },
+    "/.well-known/aittadb-proof-safety": {
+      get: {
+        summary: "Acceptance proof-safety assertion",
+        description:
+          "This operator-controlled disposable-proof assertion is available only when ACCEPTANCE_PROOF_SAFETY_ENABLED is true for a recognized non-production HTTPS issuer with Records and OAuth Apps enabled. It accepts exactly one canonical lowercase UUIDv4 challenge and the exact versioned AittaDB hypermedia Accept field. It performs no D1, R2, identity, CORS, rate-limit, or cleanup work. The logical identifier and issuer are bound to the configured issuer, not the transport host. It is not a client API, authorization grant, or production health signal; disabled, malformed, or unsupported requests expose no allowing assertion.",
+        security: [],
+        parameters: [
+          {
+            name: "challenge",
+            in: "query",
+            required: true,
+            schema: {
+              type: "string",
+              format: "uuid",
+              pattern:
+                "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            },
+            description:
+              "One canonical lowercase UUIDv4 challenge. Other or duplicate query members are unavailable.",
+          },
+        ],
+        responses: {
+          "200": {
+            description:
+              "No-store disposable-acceptance proof-safety assertion with no links or actions.",
+            headers: {
+              "Cache-Control": {
+                schema: { type: "string", const: "no-store" },
+              },
+            },
+            content: {
+              [boundedRecordProtocolMediaType]: {
+                schema: {
+                  $ref: "#/components/schemas/AcceptanceProofSafetyDocument",
+                },
+              },
+            },
+          },
+          "404": {
+            description:
+              "The assertion is unavailable or the challenge is malformed, absent, duplicated, or noncanonical.",
+          },
+          "405": {
+            description: "Only GET is supported.",
+            headers: {
+              Allow: { schema: { type: "string", const: "GET" } },
+            },
+          },
+          "406": {
+            description:
+              "Accept must exactly equal application/vnd.aittadb+json; version=0.1.",
+          },
+        },
+      },
+    },
     "/authorize": {
       get: {
         summary:
@@ -2469,6 +2524,38 @@ export const openApiSpec = {
             type: "array",
             items: { $ref: "#/components/schemas/HypermediaAction" },
           },
+        },
+        additionalProperties: false,
+      },
+      AcceptanceProofSafetyDocument: {
+        type: "object",
+        required: ["api_version", "type", "id", "data", "links", "actions"],
+        properties: {
+          api_version: { const: "0.1" },
+          type: { const: "acceptance-proof-safety" },
+          id: { type: "string", format: "uri" },
+          data: {
+            type: "object",
+            required: [
+              "challenge",
+              "environment",
+              "issuer",
+              "storage_contract_proofs",
+            ],
+            properties: {
+              challenge: {
+                type: "string",
+                pattern:
+                  "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              },
+              environment: { const: "disposable-acceptance" },
+              issuer: { type: "string", format: "uri" },
+              storage_contract_proofs: { const: "allowed" },
+            },
+            additionalProperties: false,
+          },
+          links: { type: "array", maxItems: 0 },
+          actions: { type: "array", maxItems: 0 },
         },
         additionalProperties: false,
       },
