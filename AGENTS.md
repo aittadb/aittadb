@@ -100,15 +100,14 @@ Each unit is a reusable vendor-neutral primitive with bounded execution, isolati
 
 Use dependency injection where useful. Separate protocol-independent logic from HTTP and keep storage behind repository interfaces.
 
-## TypeScript and Coding Rules
+## TypeScript, React, and Coding Rules
 
-Use TypeScript `strict`; avoid `any`. Parse unknown input with explicit guards and structured APIs. Prefer small modules, pure domain functions, existing local patterns, and conservative changes. Use succinct comments only for non-obvious blocks.
-
-Before adding work, answer: (1) server primitive? (2) demonstrated problem? (3) useful across unrelated apps without provider rules? (4) extend an existing primitive? (5) smaller contract than its motivation? (6) externally composable through public protocols? (7) every new abstraction needed now? If mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation and propose the smallest general-purpose enabling primitive; request a decision only if none fits.
-
-Choose the smallest complete design; reuse primitives first. Add no framework, extension system, generic query language, workflow engine, or configuration layer without a concrete unmet requirement. Do not generalize one example without an independent contract, relocate complexity, or add non-server infrastructure. Prefer explicit models, narrow interfaces, and short composable operations. Keep behavior deterministic, bounded, observable, and testable; version necessary contract changes. Simplicity never weakens correctness, durability, security, privacy, authorization, or failure handling.
-
-Use prepared SQL with one statement per `prepare()` and bound untrusted values. Never construct SQL identifiers or clauses from caller input. Use documented integer Unix seconds or ISO text consistently. Use Web-standard `Request`, `Response`, URL, streams, and Web Crypto in deployed code.
+- **Types and dependencies:** Use TypeScript `strict`, never `any`; validate external `unknown` into named types, narrow interfaces, discriminated unions, and exhaustive cases. Pass dependencies explicitly; avoid globals, hidden initialization, cycles, and broad exports. Separate pure logic from effects.
+- **Units and ownership:** Keep files small and semantically cohesive. Organize by feature/domain; it owns its code and tests. Avoid catch-all `utils`, `helpers`, `types`, and `components`; add narrow feature contracts, not hot spots or unrelated refactors.
+- **Extension:** For independent variants, use a typed handler, strategy, adapter, small registration, pipeline, or injected service. Core invokes its contract without feature branches. Do not add speculative frameworks, containers, registries, or abstractions; prefer direct composition.
+- **React:** Give components one visible responsibility and typed props. Compose focused subcomponents; move substantial parsing, persistence, networking, and transitions only across a real domain/hook boundary. Keep state local until shared, make user-visible states explicit, and retain accessible semantic HTML and current UI dependencies.
+- **Tests and names:** Test pure behavior directly and UI through observable behavior; use local fixtures, regressions, and no whole-app startup. Use precise names and concise comments/TSDoc for contracts, invariants, edge cases, or intent; remove stale comments and synchronize examples.
+- **Decision rule:** Before adding work, answer: server primitive, demonstrated need, reuse/extension point, smaller public contract, external composability, and is every new abstraction needed now? If mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation; propose the smallest general-purpose enabling primitive and ask only if none fits. Growing central conditionals, mixed components, concrete imports, unclear utilities, global setup, and merge hot spots signal refactoring. Refactor proportionally; simplicity never weakens correctness, durability, security, privacy, authorization, or failure handling. Use prepared SQL with bound values; never construct identifiers or clauses from input. Use documented times and Web-standard Worker APIs.
 
 ## Cryptography and Authentication
 
@@ -154,7 +153,7 @@ Current-session storage uses the reserved browser client, so it is durable but i
 
 ## Browser and Hypermedia Contract
 
-Assume public Sites access: anonymous callers receive only public resources; identity, storage, deletion, and administration stay subject-scoped, authorized, and quota-bounded. The root negotiates JSON and a polished HTML operation map; other resources retain JSON fallback. Selection never uses `User-Agent`. Keep public `robots.txt` and local social metadata crawlable. Add no hero, pricing, testimonials, blog, dashboard, general account/profile pages, or nonessential navigation. `/session` is a focused protected identity/operations view.
+Assume public Sites access: anonymous callers get only public resources; identity, storage, deletion, and administration stay subject-scoped, authorized, and quota-bounded. The root negotiates JSON and a polished HTML operation map; selection never uses `User-Agent`. Keep `robots.txt` and social metadata crawlable. Add no marketing/dashboard/profile/navigation pages; `/session` is a focused protected view.
 
 Follow `docs/hypermedia-json-rest-api.md`. One resource URI has equivalent HTML and JSON selected by `Accept`, never `User-Agent`; `Content-Type` describes input. Do not split API/web routes. Preview `0.1` JSON uses `data`, semantic `links`, authorized `actions`, media type `application/vnd.aittadb+json; version=0.1`, JSON compatibility, and `AittaDB-API-Version`; stable breaking changes require a new version.
 
@@ -164,15 +163,15 @@ Every application endpoint supplies useful HTML and hypermedia JSON. OAuth/OIDC 
 
 Browser mutation adapters reject invalid origins before body reads, rate limiting, repository, R2, or maintenance, then require CSRF. Accept issuer-origin Sites dispatch and `Origin: null` only with `Sec-Fetch-Site: same-origin`. Use a bounded host-only `Secure`, `HttpOnly`, `SameSite=Lax` CSRF cookie for concurrent tabs. Fail closed otherwise.
 
-Storage HTML stays resource-oriented: collections render bounded lists/empty states, item navigation, and create/upload; item GET renders only actions valid for its URL key. Browser POST adapts to that same URL via validated `_method`; keys never come from override fields. Signed-in collection upload accepts only request/issuer-origin item `Location` and redirects on request origin; bearer and token-mode results retain `201`. No-JavaScript `?key=` navigation redirects only to an encoded same-origin item path. Never mix unrelated URLs in an operation selector or render JSON dumps as HTML results.
+Storage HTML is resource-oriented: collections render bounded lists/empty states, navigation, and create/upload; item GET renders only URL-key actions. Browser POST adapts through validated `_method`; keys never come from overrides. Signed-in uploads accept only request/issuer-origin item `Location`; bearer/token mode retains `201`. No-JavaScript `?key=` redirects only to an encoded same-origin item path. Never mix unrelated operations or render JSON dumps as HTML.
 
-`/auth-ui.js` only progressively hides/disables inactive fields, links required state to visibility, and upgrades navigation. HTML works without JavaScript; server validation is authoritative. Assets are same-origin, CSP-compatible, and perform no D1 work. Use semantic accessible responsive HTML, visible focus, clear errors, minimal JavaScript, no third-party runtime assets/trackers, and scoped shell CSS that does not break Swagger. Follow `docs/style-guide.md`.
+`/auth-ui.js` only progressively hides/disables inactive fields and upgrades navigation. HTML works without JavaScript; server validation is authoritative. Assets are same-origin, CSP-compatible, and D1-free. Use accessible responsive HTML, visible focus, clear errors, minimal JavaScript, no third-party runtime assets/trackers, and scoped Swagger-safe CSS. Follow `docs/style-guide.md`.
 
 Retain the reviewed `vendor/image-size-compat` override while Vinext's build-only dependency remains vulnerable; verify `npm ls image-size`, focused malformed-container tests, and the high-severity audit before changing it. Self-host Inter with system fallbacks; use the AittaDB navy/red-orange/teal contract and checked-in mark, boundary image, and social card. Shared HTML uses the common shell and GitHub footer unless protocol/binary output forbids it.
 
 ## Database and Migrations
 
-D1 schema must explicitly cover users, clients, redirects, scopes, authorization requests/codes, device grants, refresh families/tokens, consents, revoked access-token IDs, audit and application events, admin submissions, rate limits, storage records/files, repair/fence state, and deletion jobs. Rate increments are single-statement atomic. Index expiration, cleanup joins, and pages; select bounded cleanup oldest-first with a `rowid` tie-breaker and retain new empty refresh families through the documented race-prevention grace window.
+D1 schema covers users, clients, redirects/scopes, authorization/device/refresh state, consents, revocations, audit/events, admin submissions, rates, storage records/files, repair/fences, and deletion jobs. Rate increments are single-statement atomic. Index expiry, cleanup joins, and pages; select bounded cleanup oldest-first with a `rowid` tie-breaker and retain new empty refresh families through the documented grace window.
 
 Events retain 1-31,536,000 seconds (default 604,800); cleanup deletes at most 500 oldest expired rows and reports only category/count/limit.
 
@@ -188,7 +187,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes, publication, reads, and bounded waits; when off, reject before origin/body/CORS/auth/rate/repository/maintenance and omit controls. `ISSUER_URL` must be exactly `https://aittadb.com` without path/trailing slash; changes invalidate the old token boundary and need acceptance notes.
+`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, limits, write switch, admin subjects, and flags; missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Disabled Events rejects before protected work and omits controls. Production `ISSUER_URL` is `https://aittadb.com`; acceptance/forks use their own pathless HTTPS issuer. Changes invalidate the old token boundary and need acceptance notes.
 
 Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 
@@ -196,7 +195,7 @@ Generate local ES256 keys only by documented command. Ignored keys stay local; n
 
 Redact PII and every credential from logs. Use generic auth errors that do not reveal account existence. Minimal audits may contain event type, structured hashed actor attribution, client/request references, bounded coarse metadata, and timestamps. OAuth, identity, storage, and token responses use `Cache-Control: no-store` where sensitive.
 
-Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer policy, permissions policy, and production HTTPS HSTS. Bearer CORS binds the active audience client and exact origin; token CORS binds the submitted active client before credential consumption. Never use wildcard credentialed CORS or caller-controlled issuer/audience. Prebuffer accepted form/JSON bodies through stream limits before parsing or repositories; declared lengths never relax limits. Stream-bound other bodies and rate-limit OAuth, storage, Events, client authentication, and administration. See `docs/threat-model.md` and `SECURITY.md`.
+Security headers include restrictive CSP, `frame-ancestors 'none'`, no sniffing, referrer/permissions policy, and production HTTPS HSTS. Bearer CORS binds the active audience client and exact origin; token CORS binds the submitted client before credential consumption. Never use wildcard credentialed CORS or caller-controlled issuer/audience. Stream-bound bodies before parsing/repositories and rate-limit OAuth, storage, Events, client authentication, and administration. See `docs/threat-model.md` and `SECURITY.md`.
 
 ## Documentation Set
 
