@@ -77,36 +77,31 @@ Lead public descriptions with "source-available hosted application backend for t
 
 ## Unit Interfaces
 
-Units are reusable vendor-neutral primitives with bounded execution, isolation, failures, composition, and narrow dependencies:
+Semantic units. Co-locate code/tests; avoid dumping grounds. Prefer owned files/narrow composition points to avoid hot spots. Declarative registration; no registry/plugins without a second use.
 
 - HTTP handlers parse/limit/negotiate, apply CORS/security, and call domain services.
 - `UpstreamIdentityProvider` parses trusted identity; production injects Sites and tests inject mocks.
-- User repository owns email lookup, generated immutable UUIDs, and user metadata.
-- Client repository owns interactive/service type, name, redirects, origins, scopes, disablement, secret hashes, and rotation.
-- OAuth owns RFC 8628, Authorization Code/PKCE, Client Credentials, scopes, consent, revocation, and introspection.
-- OIDC owns discovery, JWKS, ID claims, nonce, UserInfo, issuer metadata, and verification.
-- Token repository owns hashed codes, grants, refresh state, subject-owned revocations, and expiry cleanup.
-- Consent, audit, and rate-limit repositories own narrow records. Audit actor attribution is a nullable canonical SHA-256 base64url field, never generic JSON.
-- Storage owns scoped records, finite ordinary/delete receipts, and file metadata; R2 uses generated keys.
-- Events owns quota-bounded immutable rows, atomic publication, and bounded reads/waits. Ownership comes only from validated tokens. Hash idempotency keys; waits require read+subscribe scopes, a bound cursor, and separate rate/deadline/read/cancellation limits. No fan-out or payload/type logs. Purge only the exact leased human subject in finite batches.
-- Account deletion follows `docs/account-deletion-jobs.md`. POST requires trusted identity/exact-email, origin, 1 KiB, CSRF, phrase, and bound encryption; admins/replay fail. GET authenticates the handle before D1 without identity resolution. Bounded leased phases purge credentials, records, events, and files; finalization clears audit attribution and requires no owned rows. Expose only coarse status. Same-email return creates a new UUID/empty namespaces; old JWTs may verify to `exp` but never authorize or identify it.
-- Storage HTML adapts protected forms to canonical `storageEndpoint` without duplicating scope, ownership, key, D1, or R2 logic.
-- Browser sessions map trusted identity to a short-lived internal token for reserved client `aittadb-browser-session-v1`; never log, render, return, or persist it. Keep that migration-seeded client hidden, admin-immutable, and invalid for external grants.
-- Crypto owns secure randomness, hashing, constant-time comparison, PKCE, JWT signing/validation, and JWKS.
-- Configuration owns parsing, defaults, required-secret checks, production/test separation, and typed feature availability. Disabled features fail before domain or repository work and disappear from HTML, hypermedia, and discovery.
-- Representation negotiation chooses HTML or JSON/binary; pages execute real route/domain logic, never demos.
+- User repository owns email lookup, UUIDs, and metadata; client repository owns type, redirects/origins/scopes, disablement, hashes, and rotation.
+- OAuth owns grants, consent, revocation, and introspection; OIDC owns discovery, JWKS, claims, nonce, UserInfo, and verification; token storage owns hashes, grants, revocations, expiry.
+- Consent, audit, and rate-limit repositories own narrow records. Audit actor attribution is nullable canonical SHA-256 base64url, never generic JSON.
+- Storage owns scoped records, finite receipts, and file metadata; R2 keys are generated. Events owns immutable publication/reads/waits: valid-token ownership, hashed idempotency, bounded read+subscribe cursor waits, no fan-out/payload logs, and exact leased-subject purge.
+- Account deletion follows `docs/account-deletion-jobs.md`: trusted exact-email POST needs origin/CSRF/phrase/bound encryption; admins/replay reject. GET authenticates the handle before D1/identity. Leased purge covers credentials/records/events/files; finalization clears audit attribution and needs no owned rows; status is coarse. Same email gets a UUID/empty namespace; old JWTs only verify to `exp`, never authorize/identify.
+- Storage HTML adapts forms to canonical `storageEndpoint` without duplicate authorization/storage logic; browser sessions map trusted identity to a short-lived hidden reserved-client token.
+- Crypto owns randomness, hashing, constant-time comparison, PKCE, JWTs, and JWKS. Configuration owns parsing/defaults/secrets/production-test separation/availability; disabled features fail before domain/repository work and vanish from every representation. Negotiation chooses HTML or JSON/binary; pages execute real routes, never demos.
 
-Use dependency injection where useful. Separate protocol-independent logic from HTTP and keep storage behind repository interfaces.
+Use narrow interfaces for services, repositories, adapters, handlers, boundary data, and props. Core depends on contracts; implementations depend on core. Inject explicitly; no globals, hidden singletons, cycles, or init-order behavior. Validate boundaries, export only needed contracts, use DI where it improves tests. Each task owns contract, code, tests, docs, and config/migrations.
 
-## TypeScript and Coding Rules
+## TypeScript and React Architecture
 
-Use TypeScript `strict`; avoid `any`. Parse unknown input with explicit guards and structured APIs. Prefer small modules, pure domain functions, existing local patterns, and conservative changes. Use succinct comments only for non-obvious blocks.
+Use strict TypeScript; no `any`. Validate `unknown` at boundaries; use guards, named types, generics, and exhaustive discriminated unions. Separate pure domain from effects. Use domain names; comments explain contracts, invariants, or non-obvious intent, never syntax.
 
-Before adding work, answer: (1) server primitive? (2) demonstrated problem? (3) useful across unrelated apps without provider rules? (4) extend an existing primitive? (5) smaller contract than its motivation? (6) externally composable through public protocols? (7) every new abstraction needed now? If mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation and propose the smallest general-purpose enabling primitive; request a decision only if none fits.
+Keep focused semantic files, not arbitrary one-liners. Prefer feature modules and narrow interfaces over central hot spots; keep refactors narrow. Use a small typed strategy/handler/adapter/factory/middleware for independent behaviors. No DI container/plugin system/layer for one simple implementation.
 
-Choose the smallest complete design; reuse primitives first. Add no framework, extension system, generic query language, workflow engine, or configuration layer without a concrete unmet requirement. Do not generalize one example without an independent contract, relocate complexity, or add non-server infrastructure. Prefer explicit models, narrow interfaces, and short composable operations. Keep behavior deterministic, bounded, observable, and testable; version necessary contract changes. Simplicity never weakens correctness, durability, security, privacy, authorization, or failure handling.
+React components have one visible responsibility and semantic accessible HTML. Prefer composition and typed props over configurable/nested variants. Keep data, validation, and transitions outside rendering; use hooks/services only for real reusable boundaries. Keep state local until shared; make loading, empty, unavailable, error, and success explicit. No UI dependency unless standardized or required.
 
-Use prepared SQL with one statement per `prepare()` and bound untrusted values. Never construct SQL identifiers or clauses from caller input. Use documented integer Unix seconds or ISO text consistently. Use Web-standard `Request`, `Response`, URL, streams, and Web Crypto in deployed code.
+Test independently: inject effects through parameters, constructors, props, or small factories, not globals; test observable component behavior; keep fixtures local; add defect regressions. Before coding, identify the boundary, edits, composition point, and parallel-safe ownership. Growing central conditionals, mixed rendering/networking/validation/persistence, broad utilities, leaked feature logic, concrete imports, or global setup signal the smallest needed refactor boundary.
+
+Before adding work, answer: (1) server primitive? (2) demonstrated problem? (3) reusable across unrelated apps? (4) extend one? (5) smaller vendor-neutral contract? (6) compose through public protocols? (7) every new abstraction needed now? If mainly an application feature, client implementation, provider integration, or speculative extension system, keep it outside this repository. If a request conflicts, stop before implementation; propose the smallest general-purpose enabling primitive and seek a decision only if none fits. Choose the smallest bounded, testable design; never weaken security, privacy, authorization, durability, or failure handling. Use prepared SQL with bound values, documented times, and Worker APIs.
 
 ## Cryptography and Authentication
 
