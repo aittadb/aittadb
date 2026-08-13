@@ -11,6 +11,7 @@ import {
 import { D1AuthStore } from "../../src/store/d1";
 import { MemoryAuthStore } from "../../src/store/memory";
 import type {
+  AuthStore,
   StorageFileMetadata,
   StorageLimits,
   StorageRecord,
@@ -283,6 +284,24 @@ test("D1 rate increments are atomic under concurrent calls", async () => {
     ),
     12,
   );
+  database.sqlite.close();
+});
+
+test("transaction admission rate boundaries match Memory and D1", async () => {
+  const database = await migratedDatabase();
+  const stores: Array<{ name: string; store: Pick<AuthStore, "rateLimit"> }> = [
+    { name: "memory", store: new MemoryAuthStore() },
+    { name: "d1", store: new D1AuthStore(database.d1) },
+  ];
+
+  for (const { name, store } of stores) {
+    await assertRateLimitBoundary(
+      store,
+      `storage:ip:${name}:transaction-admission`,
+      240,
+    );
+    await assertRateLimitBoundary(store, `storage:global:${name}`, 2_400);
+  }
   database.sqlite.close();
 });
 
@@ -835,4 +854,23 @@ function sqliteD1(database: DatabaseSync): D1Database {
       return statement;
     },
   };
+}
+
+async function assertRateLimitBoundary(
+  store: Pick<AuthStore, "rateLimit">,
+  key: string,
+  limit: number,
+): Promise<void> {
+  for (let index = 0; index < limit; index += 1) {
+    assert.equal(
+      await store.rateLimit(key, limit, 60, 100),
+      true,
+      `${key} request ${index + 1} must be admitted`,
+    );
+  }
+  assert.equal(
+    await store.rateLimit(key, limit, 60, 100),
+    false,
+    `${key} request ${limit + 1} must be rejected`,
+  );
 }

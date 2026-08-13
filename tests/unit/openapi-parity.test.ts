@@ -195,6 +195,25 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
   );
   assert.equal(mutationSchema.minItems, 1);
   assert.equal(mutationSchema.maxItems, 25);
+  const transactionResponses = operationResponses(
+    "/storage/record-protocol/transactions",
+    "post",
+  );
+  assert.match(
+    String(
+      asObject(transactionResponses["429"], "transaction rate limit")
+        .description,
+    ),
+    /before the request body was read/,
+  );
+  assert.ok(
+    "Retry-After" in
+      asObject(
+        asObject(transactionResponses["429"], "transaction rate limit").headers,
+        "transaction rate headers",
+      ),
+  );
+  assert.ok(!("413" in transactionResponses));
 
   for (const [path, method, statuses] of [
     ["/storage/record-protocol", "get", ["200", "406", "503"]],

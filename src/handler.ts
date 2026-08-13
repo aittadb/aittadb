@@ -362,14 +362,55 @@ export function createAittaDBWithStore(
       if (browserOriginRejection) {
         return finalizeResponse(request, browserOriginRejection, config);
       }
+      const transactionPost = isBoundedRecordTransactionPost(request, url);
+      let transactionCorsHeaders: Headers | null = null;
+      if (transactionPost && store) {
+        // Preserve CORS denial before admission, then reuse its headers later.
+        const resolvedCorsHeaders = await corsHeadersForRequest(
+          request,
+          url,
+          config,
+          store,
+        );
+        if (resolvedCorsHeaders instanceof Response) {
+          return finalizeResponse(request, resolvedCorsHeaders, config);
+        }
+        transactionCorsHeaders = resolvedCorsHeaders;
+        try {
+          const limited = await endpointRateLimit(
+            store,
+            request,
+            config,
+            "storage",
+            240,
+          );
+          if (limited) {
+            return finalizeResponse(
+              request,
+              limited,
+              config,
+              transactionCorsHeaders,
+            );
+          }
+        } catch {
+          return finalizeResponse(
+            request,
+            oauthError("server_error", "Unexpected server error", 500),
+            config,
+            transactionCorsHeaders,
+          );
+        }
+      }
       const prebuffered = await prebufferAcceptedRequestBody(request, url);
       if (prebuffered instanceof Response) {
         return finalizeResponse(request, prebuffered, config);
       }
       request = prebuffered;
-      const corsHeaders = isCorsControlledRoute(url.pathname)
-        ? await corsHeadersForRequest(request, url, config, store)
-        : new Headers();
+      const corsHeaders =
+        transactionCorsHeaders ??
+        (isCorsControlledRoute(url.pathname)
+          ? await corsHeadersForRequest(request, url, config, store)
+          : new Headers());
       if (corsHeaders instanceof Response)
         return finalizeResponse(request, corsHeaders, config);
       if (request.method === "OPTIONS")
@@ -520,6 +561,12 @@ export function createAittaDBWithStore(
 interface RequestBodyPolicy {
   maxBytes: number;
   tooLargeDescription: string;
+}
+
+function isBoundedRecordTransactionPost(request: Request, url: URL): boolean {
+  return (
+    request.method === "POST" && isBoundedRecordTransactionRoute(url.pathname)
+  );
 }
 
 const URL_ENCODED_POST_PATHS = new Set([
@@ -1480,14 +1527,16 @@ async function route(
     );
   }
   if (url.pathname.startsWith("/storage/")) {
-    const limited = await endpointRateLimit(
-      store,
-      request,
-      config,
-      "storage",
-      240,
-    );
-    if (limited) return limited;
+    if (!isBoundedRecordTransactionPost(request, url)) {
+      const limited = await endpointRateLimit(
+        store,
+        request,
+        config,
+        "storage",
+        240,
+      );
+      if (limited) return limited;
+    }
     const protocolResponse = await boundedRecordHttpEndpoint(
       request,
       url,

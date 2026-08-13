@@ -30,6 +30,25 @@ const ENTRY = `${ISSUER}/storage/record-protocol`;
 const RECORDS = `${ENTRY}/records`;
 const TRANSACTIONS = `${ENTRY}/transactions`;
 
+class TransactionAdmissionStore extends MemoryAuthStore {
+  readonly rateKeys: string[] = [];
+
+  constructor(private readonly rejectGlobal = false) {
+    super();
+  }
+
+  override async rateLimit(
+    key: string,
+    limit: number,
+    windowSeconds: number,
+    now: number,
+  ): Promise<boolean> {
+    this.rateKeys.push(key);
+    if (this.rejectGlobal && key === "storage:global") return false;
+    return super.rateLimit(key, limit, windowSeconds, now);
+  }
+}
+
 test("bounded record discovery is public, exact, and D1-free", async () => {
   const env = await testEnv();
   const app = createAittaDBWithStore(
@@ -400,6 +419,109 @@ test("bounded record routes enforce exact client CORS and feature availability",
   assert.deepEqual(observed.boundedCalls, []);
 });
 
+test("transaction admission is pre-body, CORS-aware, and charged once", async () => {
+  const rejectedStore = new TransactionAdmissionStore(true);
+  const rejectedFixture = await protocolFixture(undefined, rejectedStore);
+  const rejectedRequest = streamedTransactionRequest(rejectedFixture.token);
+  const rejected = await requiredResponse(
+    rejectedFixture.app.fetch(rejectedRequest.request),
+  );
+  assert.equal(rejected.status, 429);
+  assert.equal(
+    ((await rejected.json()) as { error: string }).error,
+    "slow_down",
+  );
+  assert.equal(rejectedRequest.pulls(), 0);
+  assert.equal(rejectedStore.rateKeys.length, 2);
+  assert.match(rejectedStore.rateKeys[0] ?? "", /^storage:ip:/);
+  assert.equal(rejectedStore.rateKeys[1], "storage:global");
+
+  const browserStore = new TransactionAdmissionStore(true);
+  const browserRequest = streamedBrowserTransactionRequest();
+  const browserRejected = await requiredResponse(
+    createTestAittaDB(await testEnv(), browserStore).fetch(
+      browserRequest.request,
+    ),
+  );
+  assert.equal(browserRejected.status, 429);
+  assert.equal(browserRequest.pulls(), 0);
+  assert.equal(browserStore.rateKeys.length, 2);
+
+  const corsStore = new TransactionAdmissionStore();
+  const corsFixture = await protocolFixture(undefined, corsStore);
+  const corsRequest = streamedTransactionRequest(corsFixture.token, {
+    origin: "https://foreign.example.test",
+  });
+  const corsRejected = await requiredResponse(
+    corsFixture.app.fetch(corsRequest.request),
+  );
+  assert.equal(corsRejected.status, 403);
+  assert.equal(corsRequest.pulls(), 0);
+  assert.deepEqual(corsStore.rateKeys, []);
+
+  const disabledStore = new TransactionAdmissionStore();
+  const disabledRequest = streamedTransactionRequest("invalid-token");
+  const disabled = createTestAittaDB(
+    await testEnv({ FEATURE_RECORDS_ENABLED: "false" }),
+    disabledStore,
+    null,
+  );
+  const disabledResponse = await requiredResponse(
+    disabled.fetch(disabledRequest.request),
+  );
+  assert.equal(disabledResponse.status, 503);
+  assert.equal(disabledRequest.pulls(), 0);
+  assert.deepEqual(disabledStore.rateKeys, []);
+
+  const unavailableRequest = streamedTransactionRequest("invalid-token");
+  const unavailable = createTestAittaDB(await testEnv(), null);
+  const unavailableResponse = await requiredResponse(
+    unavailable.fetch(unavailableRequest.request),
+  );
+  assert.equal(unavailableResponse.status, 503);
+  assert.equal(
+    ((await unavailableResponse.json()) as { error: string }).error,
+    "database_unavailable",
+  );
+  assert.ok(unavailableRequest.pulls() > 0);
+
+  const invalidCredentialStore = new TransactionAdmissionStore();
+  const invalidCredentialRequest = streamedTransactionRequest("invalid-token");
+  const invalidCredential = createTestAittaDB(
+    await testEnv(),
+    invalidCredentialStore,
+  );
+  const invalidCredentialResponse = await requiredResponse(
+    invalidCredential.fetch(invalidCredentialRequest.request),
+  );
+  assert.equal(invalidCredentialResponse.status, 401);
+  assert.ok(invalidCredentialRequest.pulls() > 0);
+  assert.equal(invalidCredentialStore.rateKeys.length, 2);
+
+  const admittedStore = new TransactionAdmissionStore();
+  const admittedFixture = await protocolFixture(undefined, admittedStore);
+  const admitted = await admittedFixture.postTransaction(
+    transaction("operation:admission", [
+      mutation("put", "settings", "admission", null, { accepted: true }),
+    ]),
+  );
+  assert.equal(admitted.status, 200);
+  assert.equal(
+    admittedStore.rateKeys.filter((key) => key.startsWith("storage:ip:"))
+      .length,
+    1,
+  );
+  assert.equal(
+    admittedStore.rateKeys.filter((key) => key === "storage:global").length,
+    1,
+  );
+  assert.equal(
+    admittedStore.rateKeys.filter((key) => key.startsWith("storage:write:"))
+      .length,
+    1,
+  );
+});
+
 interface ProtocolFixture {
   env: RuntimeEnv;
   config: AppConfig;
@@ -542,6 +664,74 @@ function browserTransactionRequest(
       transaction: JSON.stringify(command),
     }),
   });
+}
+
+function streamedTransactionRequest(
+  token: string,
+  headers: Record<string, string> = {},
+): { request: Request; pulls(): number } {
+  let pullCount = 0;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        pullCount += 1;
+        controller.enqueue(new TextEncoder().encode("{}"));
+        controller.close();
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers: {
+      accept: ACCEPT,
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      ...headers,
+    },
+    body,
+    duplex: "half",
+  };
+  return {
+    request: new Request(TRANSACTIONS, init),
+    pulls: () => pullCount,
+  };
+}
+
+function streamedBrowserTransactionRequest(): {
+  request: Request;
+  pulls(): number;
+} {
+  let pullCount = 0;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        pullCount += 1;
+        controller.enqueue(
+          new TextEncoder().encode(
+            form({ csrf_token: "not-read", transaction: "not-read" }),
+          ),
+        );
+        controller.close();
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const init: RequestInit & { duplex: "half" } = {
+    method: "POST",
+    headers: {
+      accept: "text/html",
+      "content-type": "application/x-www-form-urlencoded",
+      origin: ISSUER,
+      "sec-fetch-site": "same-origin",
+    },
+    body,
+    duplex: "half",
+  };
+  return {
+    request: new Request(TRANSACTIONS, init),
+    pulls: () => pullCount,
+  };
 }
 
 async function assertFixedError(

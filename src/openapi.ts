@@ -350,10 +350,11 @@ function boundedRecordAuthErrorResponse(description: string) {
   };
 }
 
-function boundedRecordRateLimitedResponse() {
+function boundedRecordRateLimitedResponse(
+  description = "The bounded record route rate limit was exceeded. Retry after Retry-After seconds.",
+) {
   return {
-    description:
-      "The bounded record route rate limit was exceeded. Retry after Retry-After seconds.",
+    description,
     headers: {
       "Retry-After": {
         description: "Seconds until this request family may be retried.",
@@ -1443,7 +1444,7 @@ export const openApiSpec = {
     "/storage/record-protocol/transactions": {
       post: {
         summary: "Atomically transact bounded records",
-        description: `${boundedRecordProtocolDescription} The canonical API request is application/json and must contain the exact bounded transaction command. A browser form may submit the same command as JSON text in application/x-www-form-urlencoded with CSRF protection; that adapter does not change the transaction semantics. All preconditions and quota checks use one pre-transaction state. Record effects and the durable idempotency receipt commit together or neither commits.`,
+        description: `${boundedRecordProtocolDescription} The canonical API request is application/json and must contain the exact bounded transaction command. A browser form may submit the same command as JSON text in application/x-www-form-urlencoded with CSRF protection; that adapter does not change the transaction semantics. After the Records feature and browser-origin gates, CORS and finite IP/deployment admission run before either accepted body is pulled. Exhaustion returns fixed slow_down without token verification, command decoding, or record/receipt lookup; admitted traffic reaches the existing namespace write admission once. All preconditions and quota checks use one pre-transaction state. Record effects and the durable idempotency receipt commit together or neither commits.`,
         security: [{ bearer: [] }],
         "x-aittadb-sites-session-supported": true,
         "x-aittadb-required-scopes": [
@@ -1489,7 +1490,9 @@ export const openApiSpec = {
           "412": boundedRecordErrorResponse(
             "A positive revision or absence precondition does not match the one consistent pre-transaction state.",
           ),
-          "429": boundedRecordRateLimitedResponse(),
+          "429": boundedRecordRateLimitedResponse(
+            "The finite transaction IP/deployment admission was exceeded before the request body was read. Retry after Retry-After seconds.",
+          ),
           "503": boundedRecordUnavailableResponse(
             "The transaction could not be completed and no record or receipt effect was committed.",
           ),

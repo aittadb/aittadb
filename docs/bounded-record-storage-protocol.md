@@ -120,6 +120,16 @@ durable operation receipt commit together, or none commit. Deletes can free
 capacity for puts in the same transaction because quotas use the complete
 candidate state.
 
+For `POST /storage/record-protocol/transactions`, the Records feature and
+browser-origin gates run first. CORS denial and the finite existing storage
+IP/deployment admission then run before an accepted JSON or form body is
+pulled. An exhausted admission returns the fixed `429 slow_down` response with
+`Retry-After: 60` and performs no token verification, command decoding, or
+record/receipt lookup. An admitted request reaches the existing authenticated
+namespace write admission once; this is not a second quota or a new rate-limit
+family. A missing database, invalid credential, and valid body-bound failure
+retain their existing fixed outcomes when admission allows the request.
+
 The D1 repository executes one bounded atomic batch. It first stores a pending
 receipt only after preflight succeeds, applies at most 25 guarded unique-key
 mutations, verifies every resulting revision/value/absence, and transitions the
