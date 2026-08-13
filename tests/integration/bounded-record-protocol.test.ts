@@ -215,6 +215,138 @@ test("bounded pages are deterministic and cursors are namespace-bound", async ()
   assert.equal(await firstMissing.text(), await secondMissing.text());
 });
 
+test("bounded transaction preconditions cannot distinguish foreign state from absence", async () => {
+  const owner = await protocolFixture();
+  const caller = await protocolFixture(owner.env, owner.store);
+  const collection = "isolation";
+  const ownerSeed = await owner.postTransaction(
+    transaction("owner:seed-isolation", [
+      mutation("put", collection, "foreign-check-null", null, {
+        owner: true,
+      }),
+      mutation("put", collection, "foreign-check-positive", null, {
+        owner: true,
+      }),
+      mutation("put", collection, "foreign-put", null, { owner: true }),
+      mutation("put", collection, "foreign-replace", null, {
+        owner: true,
+      }),
+      mutation("put", collection, "foreign-delete", null, { owner: true }),
+    ]),
+  );
+  assert.equal(ownerSeed.status, 200);
+
+  const [foreignNullCheck, absentNullCheck] = await Promise.all([
+    caller.postTransaction(
+      transaction("caller:check-foreign-null", [
+        mutation("check", collection, "foreign-check-null", null),
+      ]),
+    ),
+    caller.postTransaction(
+      transaction("caller:check-absent-null", [
+        mutation("check", collection, "absent-check-null", null),
+      ]),
+    ),
+  ]);
+  for (const response of [foreignNullCheck, absentNullCheck]) {
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      ((await response.json()) as TransactionDocument).data.records,
+      [null],
+    );
+  }
+
+  await assertEquivalentFixedErrors(
+    await caller.postTransaction(
+      transaction("caller:check-foreign-positive", [
+        mutation("check", collection, "foreign-check-positive", 1),
+      ]),
+    ),
+    await caller.postTransaction(
+      transaction("caller:check-absent-positive", [
+        mutation("check", collection, "absent-check-positive", 1),
+      ]),
+    ),
+    412,
+    "precondition_failed",
+  );
+
+  const [foreignPut, absentPut] = await Promise.all([
+    caller.postTransaction(
+      transaction("caller:put-foreign-null", [
+        mutation("put", collection, "foreign-put", null, { caller: true }),
+      ]),
+    ),
+    caller.postTransaction(
+      transaction("caller:put-absent-null", [
+        mutation("put", collection, "absent-put", null, { caller: true }),
+      ]),
+    ),
+  ]);
+  for (const response of [foreignPut, absentPut]) {
+    assert.equal(response.status, 200);
+    const document = (await response.json()) as TransactionDocument;
+    assert.equal(document.data.records[0]?.revision, 1);
+    assert.deepEqual(document.data.records[0]?.value, { caller: true });
+  }
+
+  await assertEquivalentFixedErrors(
+    await caller.postTransaction(
+      transaction("caller:replace-foreign", [
+        mutation("put", collection, "foreign-replace", 1, { caller: true }),
+      ]),
+    ),
+    await caller.postTransaction(
+      transaction("caller:replace-absent", [
+        mutation("put", collection, "absent-replace", 1, { caller: true }),
+      ]),
+    ),
+    412,
+    "precondition_failed",
+  );
+  await assertEquivalentFixedErrors(
+    await caller.postTransaction(
+      transaction("caller:delete-foreign", [
+        mutation("delete", collection, "foreign-delete", 1),
+      ]),
+    ),
+    await caller.postTransaction(
+      transaction("caller:delete-absent", [
+        mutation("delete", collection, "absent-delete", 1),
+      ]),
+    ),
+    412,
+    "precondition_failed",
+  );
+
+  const [foreignRead, absentRead] = await Promise.all([
+    caller.get(`${RECORDS}/${collection}/foreign-check-null`),
+    caller.get(`${RECORDS}/${collection}/absent-check-null`),
+  ]);
+  assert.equal(foreignRead.status, 404);
+  assert.equal(absentRead.status, 404);
+  assert.equal(await foreignRead.text(), await absentRead.text());
+
+  for (const id of [
+    "foreign-check-null",
+    "foreign-check-positive",
+    "foreign-put",
+    "foreign-replace",
+    "foreign-delete",
+  ]) {
+    const ownerRecord = await owner.get(`${RECORDS}/${collection}/${id}`);
+    assert.equal(ownerRecord.status, 200);
+    const ownerDocument = (await ownerRecord.json()) as RecordDocument;
+    assert.equal(ownerDocument.data.revision, 1);
+    assert.deepEqual(ownerDocument.data.value, { owner: true });
+  }
+  const callerRecord = await caller.get(`${RECORDS}/${collection}/foreign-put`);
+  assert.equal(callerRecord.status, 200);
+  assert.deepEqual(((await callerRecord.json()) as RecordDocument).data.value, {
+    caller: true,
+  });
+});
+
 test("authorization and strict request decoding fail without disclosure", async () => {
   const fixture = await protocolFixture();
   const malformedWithoutToken = await requiredResponse(
@@ -752,6 +884,19 @@ async function assertFixedError(
   assert.deepEqual(document.links, []);
   assert.deepEqual(document.actions, []);
   assert.doesNotMatch(text, /credential|Bearer|operation:|cursor|quota state/);
+}
+
+async function assertEquivalentFixedErrors(
+  foreign: Response,
+  absent: Response,
+  status: number,
+  code: string,
+): Promise<void> {
+  await Promise.all([
+    assertFixedError(foreign.clone(), status, code),
+    assertFixedError(absent.clone(), status, code),
+  ]);
+  assert.equal(await foreign.text(), await absent.text());
 }
 
 async function requiredResponse(

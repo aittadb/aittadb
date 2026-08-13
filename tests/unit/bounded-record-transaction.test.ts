@@ -1603,6 +1603,79 @@ test("service clients transact only in their isolated non-human namespace", asyn
   }
 });
 
+test("transaction preconditions bind both user and client namespace dimensions", async (t) => {
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const owner = await createSubject(
+          fixture.store,
+          `${adapter.name}-owner`,
+        );
+        const otherUser = await createSubject(
+          fixture.store,
+          `${adapter.name}-other-user`,
+        );
+        const ownerClient = await createClient(
+          fixture.store,
+          `${adapter.name}-owner-client`,
+        );
+        const otherClient = await createClient(
+          fixture.store,
+          `${adapter.name}-other-client`,
+        );
+        await fixture.seed(
+          record(owner, ownerClient.id, "items", "foreign", 1),
+        );
+
+        for (const [name, userId, clientId] of [
+          ["same-user-other-client", owner, otherClient.id],
+          ["other-user-same-client", otherUser, ownerClient.id],
+        ] as const) {
+          assert.deepEqual(
+            await fixture.store.transactBoundedStorageRecords(
+              userId,
+              clientId,
+              command(`${name}:check`, [check("items", "foreign", null)]),
+              OPEN_LIMITS,
+              50,
+            ),
+            { status: "created", records: [null] },
+          );
+          const created = await fixture.store.transactBoundedStorageRecords(
+            userId,
+            clientId,
+            command(`${name}:put`, [
+              put("items", "foreign", null, { namespace: name }),
+            ]),
+            OPEN_LIMITS,
+            51,
+          );
+          assert.equal(created.status, "created");
+          if (created.status !== "created") return;
+          assert.deepEqual(created.records, [
+            protocolRecord("items", "foreign", 1, { namespace: name }),
+          ]);
+        }
+
+        const ownerRecord = await fixture.store.getBoundedStorageRecord(
+          owner,
+          ownerClient.id,
+          "items",
+          "foreign",
+        );
+        assert.equal(ownerRecord?.revision, 1);
+        assert.equal(
+          ownerRecord?.valueJson,
+          JSON.stringify({ id: "foreign", revision: 1 }),
+        );
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
 test("D1 recovers an exact result after committed response loss", async () => {
   const fixture = await createD1Fixture();
   try {

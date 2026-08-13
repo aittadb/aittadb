@@ -362,7 +362,7 @@ export function boundedRecordDiscovery(input: {
             required: true,
             max_bytes: limits.max_transaction_bytes,
             description:
-              "One operation_id and an ordered mutations array of compare-and-set put, delete, or non-mutating check entries.",
+              "One operation_id and an ordered mutations array of compare-and-set put, delete, or non-mutating check entries. During precondition evaluation, only this authenticated caller's user/client namespace is observed, so another namespace's record is treated as absent before later admission and quota checks.",
           },
         ],
       },

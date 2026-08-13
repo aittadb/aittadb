@@ -78,7 +78,7 @@ const hypermediaVendorType = "application/vnd.aittadb+json; version=0.1";
 const boundedRecordProtocolMediaType = BOUNDED_RECORD_MEDIA_TYPE;
 
 const boundedRecordProtocolDescription =
-  "The bounded record-storage protocol is a versioned AittaDB primitive. It is scoped to the authenticated bearer token's local user and OAuth-client namespace; it never exposes deployment data, credentials, physical storage keys, or another namespace. Missing or denied records are intentionally non-disclosing. The operation targets are same-origin HTTPS resources returned by protocol discovery.";
+  "The bounded record-storage protocol is a versioned AittaDB primitive. It is scoped to the authenticated bearer token's local user and OAuth-client namespace; it never exposes deployment data, credentials, physical storage keys, or another namespace. Record reads are intentionally non-disclosing, and transaction preconditions observe only the caller namespace, treating another namespace's record as absent before later admission and quota checks. The operation targets are same-origin HTTPS resources returned by protocol discovery.";
 
 const boundedRecordAuthorization = {
   bearer: {
@@ -1444,7 +1444,7 @@ export const openApiSpec = {
     "/storage/record-protocol/transactions": {
       post: {
         summary: "Atomically transact bounded records",
-        description: `${boundedRecordProtocolDescription} The canonical API request is application/json and must contain the exact bounded transaction command. A browser form may submit the same command as JSON text in application/x-www-form-urlencoded with CSRF protection; that adapter does not change the transaction semantics. After the Records feature and browser-origin gates, CORS and finite IP/deployment admission run before either accepted body is pulled. Exhaustion returns fixed slow_down without token verification, command decoding, or record/receipt lookup; admitted traffic reaches the existing namespace write admission once. All preconditions and quota checks use one pre-transaction state. Record effects and the durable idempotency receipt commit together or neither commits.`,
+        description: `${boundedRecordProtocolDescription} The canonical API request is application/json and must contain the exact bounded transaction command. A browser form may submit the same command as JSON text in application/x-www-form-urlencoded with CSRF protection; that adapter does not change the transaction semantics. Every precondition is evaluated against one pre-transaction state from the authenticated caller namespace only; it cannot detect a record in another namespace. For the same later rate, admission, and quota state, a foreign-existing key and an absent caller key therefore receive the same mutation-specific precondition outcome. After the Records feature and browser-origin gates, CORS and finite IP/deployment admission run before either accepted body is pulled. Exhaustion returns fixed slow_down without token verification, command decoding, or record/receipt lookup; admitted traffic reaches the existing namespace write admission once. Record effects and the durable idempotency receipt commit together or neither commits.`,
         security: [{ bearer: [] }],
         "x-aittadb-sites-session-supported": true,
         "x-aittadb-required-scopes": [
@@ -1485,10 +1485,10 @@ export const openApiSpec = {
             "The authenticated bearer token does not contain all of storage.read, storage.write, and storage.delete.",
           ),
           "409": boundedRecordErrorResponse(
-            "The operation ID was used for different work, or a create mutation conflicts with an existing record.",
+            "The operation ID was used for different work, or a create mutation conflicts with an existing record in the authenticated caller namespace.",
           ),
           "412": boundedRecordErrorResponse(
-            "A positive revision or absence precondition does not match the one consistent pre-transaction state.",
+            "A positive revision or absence precondition does not match the one consistent pre-transaction state in the authenticated caller namespace.",
           ),
           "429": boundedRecordRateLimitedResponse(
             "The finite transaction IP/deployment admission was exceeded before the request body was read. Retry after Retry-After seconds.",

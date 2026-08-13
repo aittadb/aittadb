@@ -120,6 +120,24 @@ durable operation receipt commit together, or none commit. Deletes can free
 capacity for puts in the same transaction because quotas use the complete
 candidate state.
 
+Precondition evaluation uses only the authenticated caller's exact user/client
+namespace. A record in another namespace is not inspected and is therefore
+treated as an absent record in the caller namespace before later rate,
+admission, and quota checks:
+
+- `check` with `null` succeeds with `null` evidence for either case.
+- `check` with a positive revision returns fixed `412 precondition_failed` for
+  either case.
+- `put` with `null` creates a record only in the caller namespace for either
+  case.
+- `put` or `delete` with a positive revision returns fixed
+  `412 precondition_failed` for either case.
+
+Transaction responses may describe the caller's requested key and its own
+successful effect, but precondition evaluation never reveals whether another
+namespace already held it. Shared rate, admission, and quota controls still
+return their own fixed, non-disclosing outcomes.
+
 For `POST /storage/record-protocol/transactions`, the Records feature and
 browser-origin gates run first. CORS denial and the finite existing storage
 IP/deployment admission then run before an accepted JSON or form body is
@@ -197,8 +215,10 @@ and only a fixed `code` and message. Supported codes are `invalid_request`,
 Bearer authentication, insufficient scope, CORS, and rate admission remain
 their existing AittaDB HTTP/OAuth boundaries and reveal no record existence.
 
-Record authorization is non-disclosing. Once bearer authentication succeeds,
-denied and absent record operations have equivalent fixed `404 not_found`
-representations. Errors and logs never contain record keys or values,
-operation IDs, cursors, quota state, identities, credentials, internal paths,
-or backend exception text.
+Record reads are non-disclosing. Once bearer authentication succeeds, denied
+and absent record reads have equivalent fixed `404 not_found` representations.
+Transactions instead use the mutation-specific namespace-scoped precondition
+outcomes above and never distinguish a foreign-existing key from an absent
+caller key during precondition evaluation. Errors and logs never contain record
+keys or values, operation IDs, cursors, quota state, identities, credentials,
+internal paths, or backend exception text.

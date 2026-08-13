@@ -163,6 +163,10 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
     "storage.delete",
   ]);
   assert.equal(transaction["x-aittadb-sites-session-supported"], true);
+  assert.match(
+    String(transaction.description),
+    /foreign-existing key and an absent caller key/,
+  );
   const transactionBody = asObject(
     transaction.requestBody,
     "bounded transaction request body",
@@ -214,6 +218,19 @@ test("OpenAPI documents the bounded record-storage protocol 1.1 contract", () =>
       ),
   );
   assert.ok(!("413" in transactionResponses));
+  assert.match(
+    String(
+      asObject(transactionResponses["409"], "transaction conflict").description,
+    ),
+    /authenticated caller namespace/,
+  );
+  assert.match(
+    String(
+      asObject(transactionResponses["412"], "transaction precondition")
+        .description,
+    ),
+    /authenticated caller namespace/,
+  );
 
   for (const [path, method, statuses] of [
     ["/storage/record-protocol", "get", ["200", "406", "503"]],

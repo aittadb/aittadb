@@ -59,6 +59,10 @@ test("protocol 1.1 discovery freezes the exact generic capability contract", () 
   ]);
   assert.equal(document.actions[2]?.type, "application/json");
   assert.equal(document.actions[2]?.accept, BOUNDED_RECORD_MEDIA_TYPE);
+  assert.match(
+    String(document.actions[2]?.fields[0]?.description),
+    /caller's user\/client namespace/,
+  );
   assert.ok(
     document.links.every((link) => link.type === BOUNDED_RECORD_MEDIA_TYPE),
   );
