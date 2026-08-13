@@ -65,6 +65,11 @@ import {
   parseBoundedStorageTransactionResult,
   prepareBoundedStorageTransaction,
 } from "../bounded-record-transaction";
+import {
+  ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_RECEIPT_COLLECTION_ROWS,
+  ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_ROWS,
+  isSafeMaintenanceCollectionPrefix,
+} from "../acceptance-namespace-maintenance";
 import type { PreparedBoundedStorageTransaction } from "../bounded-record-transaction";
 import type {
   AccountDeletionJob,
@@ -78,6 +83,9 @@ import type {
   ApplicationEventInput,
   ApplicationEventLimits,
   ApplicationEventPage,
+  AcceptanceNamespaceMaintenanceInput,
+  AcceptanceNamespaceMaintenanceAudit,
+  AcceptanceNamespaceMaintenanceResult,
   AuditEventAttribution,
   AuthStore,
   AuthorizationCode,
@@ -717,12 +725,12 @@ const BOUNDED_TRANSACTION_INSERT_RECEIPT = `${BOUNDED_TRANSACTION_STATE}
 INSERT INTO bounded_storage_transaction_receipts (
   user_id, client_id, operation_id_hash, request_hash, attempt_hash,
   mutation_count, result_json, result_bytes, status, created_at, committed_at,
-  expires_at, admission_class
+  expires_at, admission_class, collection_names_json
 )
 SELECT
   ?1, ?2, ?3, ?4, ?5, admission.mutation_count,
   admission.result_json, admission.result_bytes, 'pending', ?8, NULL,
-  admission.receipt_expires_at, admission.receipt_admission_class
+  admission.receipt_expires_at, admission.receipt_admission_class, ?30
 FROM admission
 WHERE admission.subject_active = 1
   AND admission.client_active = 1
@@ -736,6 +744,145 @@ WHERE admission.subject_active = 1
   AND admission.record_quota_ok = 1
   AND admission.receipt_admission_class IS NOT NULL
 ON CONFLICT(user_id, client_id, operation_id_hash) DO NOTHING`;
+
+const BOUNDED_TRANSACTION_INSERT_RECEIPT_COLLECTIONS = `
+INSERT OR IGNORE INTO bounded_storage_transaction_receipt_collections (
+  user_id, client_id, operation_id_hash, collection
+)
+SELECT ?1, ?2, ?3, collection_name.value
+FROM json_each(?4) AS collection_name
+WHERE typeof(collection_name.value) = 'text'
+  AND EXISTS (
+    SELECT 1 FROM bounded_storage_transaction_receipts
+    WHERE user_id = ?1 AND client_id = ?2 AND operation_id_hash = ?3
+      AND attempt_hash = ?5 AND status = 'pending'
+  )`;
+
+/**
+ * Parameters: service client UUID, collection prefix, exclusive prefix upper
+ * bound, a 101-row resource candidate limit, and a 2,501-row receipt-membership
+ * discovery limit. The indexed receipt collection map keeps every query finite.
+ */
+const ACCEPTANCE_MAINTENANCE_CANDIDATES = `
+WITH eligible_service AS (
+  SELECT target_client.id
+  FROM oauth_clients AS target_client
+  JOIN users AS service_principal
+    ON service_principal.id = target_client.id
+   AND service_principal.principal_type = 'service'
+  WHERE target_client.id = ?1
+    AND target_client.type = 'confidential'
+    AND target_client.client_kind = 'service'
+    AND target_client.disabled_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM client_redirect_uris
+      WHERE client_id = target_client.id
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM client_origins
+      WHERE client_id = target_client.id
+    )
+),
+record_candidates AS (
+  SELECT
+    0 AS candidate_kind,
+    record.user_id,
+    record.client_id,
+    record.collection,
+    record.record_id,
+    NULL AS operation_id_hash
+  FROM bounded_storage_records AS record
+  JOIN eligible_service ON eligible_service.id = record.user_id
+                       AND eligible_service.id = record.client_id
+  WHERE record.collection >= ?2 AND record.collection < ?3
+  LIMIT ?4
+),
+receipt_collection_candidates AS (
+  SELECT
+    receipt_collection.user_id,
+    receipt_collection.client_id,
+    receipt_collection.operation_id_hash
+  FROM bounded_storage_transaction_receipt_collections AS receipt_collection
+  JOIN eligible_service
+    ON eligible_service.id = receipt_collection.user_id
+   AND eligible_service.id = receipt_collection.client_id
+  WHERE receipt_collection.collection >= ?2
+    AND receipt_collection.collection < ?3
+  LIMIT ?5
+),
+receipt_candidates AS (
+  SELECT DISTINCT
+    receipt_collection.user_id,
+    receipt_collection.client_id,
+    NULL AS collection,
+    NULL AS record_id,
+    receipt_collection.operation_id_hash
+  FROM receipt_collection_candidates AS receipt_collection
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM bounded_storage_transaction_receipt_collections AS other_collection
+    WHERE other_collection.user_id = receipt_collection.user_id
+      AND other_collection.client_id = receipt_collection.client_id
+      AND other_collection.operation_id_hash = receipt_collection.operation_id_hash
+      AND (other_collection.collection < ?2 OR other_collection.collection >= ?3)
+  )
+),
+acceptance_maintenance_candidates AS (
+  SELECT * FROM record_candidates
+  UNION ALL
+  SELECT 1 AS candidate_kind, * FROM receipt_candidates
+  LIMIT ?4
+)`;
+
+const ACCEPTANCE_MAINTENANCE_PREFLIGHT = `${ACCEPTANCE_MAINTENANCE_CANDIDATES}
+SELECT
+  (SELECT COUNT(*) FROM eligible_service) AS eligible_service,
+  (SELECT COUNT(*) FROM record_candidates) AS discovered_records,
+  (SELECT COUNT(*) FROM receipt_collection_candidates) AS discovered_receipt_collections,
+  COALESCE(SUM(CASE WHEN candidate_kind = 0 THEN 1 ELSE 0 END), 0) AS matching_records,
+  COALESCE(SUM(CASE WHEN candidate_kind = 1 THEN 1 ELSE 0 END), 0) AS matching_receipts
+FROM acceptance_maintenance_candidates`;
+
+const ACCEPTANCE_MAINTENANCE_AUDIT = `${ACCEPTANCE_MAINTENANCE_CANDIDATES}
+INSERT INTO audit_events (type, data_json, actor_subject_hash, created_at)
+SELECT
+  'admin.acceptance_namespace_maintenance.completed',
+  json_object(
+    'deleted_records', COALESCE(SUM(CASE WHEN candidate_kind = 0 THEN 1 ELSE 0 END), 0),
+    'deleted_transaction_receipts', COALESCE(SUM(CASE WHEN candidate_kind = 1 THEN 1 ELSE 0 END), 0),
+    'identity_source', 'subject'
+  ),
+  ?6,
+  ?7
+FROM acceptance_maintenance_candidates
+HAVING (SELECT COUNT(*) FROM eligible_service) = 1
+  AND (SELECT COUNT(*) FROM record_candidates) <= 100
+  AND (SELECT COUNT(*) FROM receipt_collection_candidates) < ?5
+  AND (SELECT COUNT(*) FROM acceptance_maintenance_candidates) <= 100`;
+
+const ACCEPTANCE_MAINTENANCE_DELETE_RECORDS = `${ACCEPTANCE_MAINTENANCE_CANDIDATES}
+DELETE FROM bounded_storage_records
+WHERE (user_id, client_id, collection, record_id) IN (
+  SELECT user_id, client_id, collection, record_id
+  FROM acceptance_maintenance_candidates
+  WHERE candidate_kind = 0
+)
+  AND (SELECT COUNT(*) FROM eligible_service) = 1
+  AND (SELECT COUNT(*) FROM record_candidates) <= 100
+  AND (SELECT COUNT(*) FROM receipt_collection_candidates) < ?5
+  AND (SELECT COUNT(*) FROM acceptance_maintenance_candidates) <= 100`;
+
+const ACCEPTANCE_MAINTENANCE_DELETE_RECEIPTS = `${ACCEPTANCE_MAINTENANCE_CANDIDATES}
+DELETE FROM bounded_storage_transaction_receipts
+WHERE (user_id, client_id, operation_id_hash) IN (
+  SELECT user_id, client_id, operation_id_hash
+  FROM acceptance_maintenance_candidates
+  WHERE candidate_kind = 1
+)
+  AND (SELECT COUNT(*) FROM eligible_service) = 1
+  AND (SELECT COUNT(*) FROM record_candidates) <= 100
+  AND (SELECT COUNT(*) FROM receipt_collection_candidates) < ?5
+  AND (SELECT COUNT(*) FROM acceptance_maintenance_candidates) <= 100`;
 
 const BOUNDED_TRANSACTION_PUT = `
 INSERT INTO bounded_storage_records (
@@ -2312,8 +2459,20 @@ export class D1AuthStore implements AuthStore {
       this.db.prepare(BOUNDED_TRANSACTION_PREFLIGHT).bind(...commonBindings),
       this.db
         .prepare(BOUNDED_TRANSACTION_INSERT_RECEIPT)
-        .bind(...commonBindings),
+        .bind(...commonBindings, prepared.collectionNamesJson),
     ];
+    const receiptCollectionIndex = statements.length;
+    statements.push(
+      this.db
+        .prepare(BOUNDED_TRANSACTION_INSERT_RECEIPT_COLLECTIONS)
+        .bind(
+          prepared.userId,
+          prepared.clientId,
+          prepared.operationIdHash,
+          prepared.collectionNamesJson,
+          prepared.attemptHash,
+        ),
+    );
     const mutationIndexes: number[] = [];
     for (const mutation of prepared.command.transaction.mutations) {
       const statement = boundedTransactionMutationStatement(
@@ -2374,6 +2533,14 @@ export class D1AuthStore implements AuthStore {
     }
     const receipt = firstBatchRow(results[receiptIndex]!);
     const inserted = mutationChanges(results[1]!);
+    const insertedReceiptCollections = mutationChanges(
+      results[receiptCollectionIndex]!,
+    );
+    const expectedReceiptCollections = new Set(
+      prepared.command.transaction.mutations.map(
+        (mutation) => mutation.key.collection,
+      ),
+    ).size;
     const committed = mutationChanges(results[commitIndex]!);
     const aborted = mutationChanges(results[abortIndex]!);
     const changedRecords = mutationIndexes.map((index) =>
@@ -2383,6 +2550,7 @@ export class D1AuthStore implements AuthStore {
     if (outcome === "created") {
       if (
         inserted !== 1 ||
+        insertedReceiptCollections !== expectedReceiptCollections ||
         committed !== 1 ||
         aborted !== 0 ||
         changedRecords.some((changes) => changes !== 1) ||
@@ -2410,6 +2578,7 @@ export class D1AuthStore implements AuthStore {
     if (outcome === "replayed") {
       if (
         inserted !== 0 ||
+        insertedReceiptCollections !== 0 ||
         committed !== 0 ||
         aborted !== 0 ||
         changedRecords.some((changes) => changes !== 0) ||
@@ -2437,6 +2606,7 @@ export class D1AuthStore implements AuthStore {
 
     if (
       inserted !== 0 ||
+      insertedReceiptCollections !== 0 ||
       committed !== 0 ||
       aborted !== 0 ||
       changedRecords.some((changes) => changes !== 0)
@@ -2444,6 +2614,100 @@ export class D1AuthStore implements AuthStore {
       return { status: "unavailable" };
     }
     return { status: outcome };
+  }
+
+  async purgeAcceptanceBoundedServiceNamespace(
+    input: Readonly<AcceptanceNamespaceMaintenanceInput>,
+    audit: Readonly<AcceptanceNamespaceMaintenanceAudit>,
+  ): Promise<AcceptanceNamespaceMaintenanceResult> {
+    if (!isSafeMaintenanceCollectionPrefix(input.collectionPrefix)) {
+      return { status: "unavailable" };
+    }
+    try {
+      assertAuditEventAttribution({ actorSubjectHash: audit.actorSubjectHash });
+    } catch {
+      return { status: "unavailable" };
+    }
+    if (!Number.isSafeInteger(audit.createdAt) || audit.createdAt < 0) {
+      return { status: "unavailable" };
+    }
+    if (!this.db.batch) return { status: "unavailable" };
+    const collectionUpperBound = acceptanceMaintenanceCollectionUpperBound(
+      input.collectionPrefix,
+    );
+    const preflightBindings = [
+      input.serviceClientId,
+      input.collectionPrefix,
+      collectionUpperBound,
+      ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_ROWS + 1,
+      ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_RECEIPT_COLLECTION_ROWS,
+    ];
+    const auditBindings = [
+      ...preflightBindings,
+      audit.actorSubjectHash,
+      audit.createdAt,
+    ];
+    let results: D1Result[];
+    try {
+      results = await this.db.batch([
+        this.db
+          .prepare(ACCEPTANCE_MAINTENANCE_PREFLIGHT)
+          .bind(...preflightBindings),
+        this.db.prepare(ACCEPTANCE_MAINTENANCE_AUDIT).bind(...auditBindings),
+        this.db
+          .prepare(ACCEPTANCE_MAINTENANCE_DELETE_RECORDS)
+          .bind(...preflightBindings),
+        this.db
+          .prepare(ACCEPTANCE_MAINTENANCE_DELETE_RECEIPTS)
+          .bind(...preflightBindings),
+        this.db
+          .prepare(ACCEPTANCE_MAINTENANCE_PREFLIGHT)
+          .bind(...preflightBindings),
+      ]);
+    } catch {
+      return { status: "unavailable" };
+    }
+    if (
+      results.length !== 5 ||
+      results.some((result) => result.success !== true)
+    ) {
+      return { status: "unavailable" };
+    }
+    const before = acceptanceMaintenanceCounts(results[0]!);
+    const after = acceptanceMaintenanceCounts(results[4]!);
+    if (!before || !after) return { status: "unavailable" };
+    if (!before.eligible || !after.eligible) {
+      return { status: "unavailable" };
+    }
+    if (
+      !before.recordDiscoveryBounded ||
+      !before.receiptCollectionDiscoveryBounded ||
+      !after.recordDiscoveryBounded ||
+      !after.receiptCollectionDiscoveryBounded ||
+      before.records + before.receipts >
+        ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_ROWS
+    ) {
+      return { status: "batch_too_large" };
+    }
+    if (mutationChanges(results[1]!) !== 1) return { status: "unavailable" };
+    if (after.records !== 0 || after.receipts !== 0) {
+      return { status: "unavailable" };
+    }
+    const deletedRecords = mutationChanges(results[2]!);
+    const deletedReceipts = mutationChanges(results[3]!);
+    if (
+      deletedRecords !== before.records ||
+      deletedReceipts !== before.receipts
+    ) {
+      return { status: "unavailable" };
+    }
+    return {
+      status: "completed",
+      deletedRecords,
+      deletedReceipts,
+      remainingRecords: after.records,
+      remainingReceipts: after.receipts,
+    };
   }
 
   async listStorageFiles(
@@ -2816,6 +3080,50 @@ function boundedTransactionBindings(
     prepared.deleteReceiptReserveLimits.namespaceMaxItems,
     prepared.deleteReceiptReserveLimits.namespaceMaxBytes,
   ];
+}
+
+function acceptanceMaintenanceCounts(result: D1Result): Readonly<{
+  eligible: boolean;
+  recordDiscoveryBounded: boolean;
+  receiptCollectionDiscoveryBounded: boolean;
+  records: number;
+  receipts: number;
+}> | null {
+  const row = firstBatchRow(result);
+  const eligibleService = row?.eligible_service;
+  const discoveredRecords = row?.discovered_records;
+  const discoveredReceiptCollections = row?.discovered_receipt_collections;
+  const records = row?.matching_records;
+  const receipts = row?.matching_receipts;
+  if (
+    (eligibleService !== 0 && eligibleService !== 1) ||
+    typeof discoveredRecords !== "number" ||
+    typeof discoveredReceiptCollections !== "number" ||
+    typeof records !== "number" ||
+    typeof receipts !== "number" ||
+    !Number.isSafeInteger(discoveredRecords) ||
+    !Number.isSafeInteger(discoveredReceiptCollections) ||
+    !Number.isSafeInteger(records) ||
+    !Number.isSafeInteger(receipts) ||
+    records < 0 ||
+    receipts < 0
+  ) {
+    return null;
+  }
+  return {
+    eligible: eligibleService === 1,
+    recordDiscoveryBounded:
+      discoveredRecords <= ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_ROWS,
+    receiptCollectionDiscoveryBounded:
+      discoveredReceiptCollections <
+      ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_RECEIPT_COLLECTION_ROWS,
+    records,
+    receipts,
+  };
+}
+
+function acceptanceMaintenanceCollectionUpperBound(prefix: string): string {
+  return `${prefix.slice(0, -1)}.`;
 }
 
 function boundedTransactionMutationStatement(

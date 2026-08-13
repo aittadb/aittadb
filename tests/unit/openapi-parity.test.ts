@@ -39,6 +39,8 @@ test("OpenAPI guard derives exact and delegated executable operations", async ()
     "POST /consent",
     "GET /admin/clients",
     "POST /admin/clients",
+    "GET /admin/maintenance/bounded-service-namespaces",
+    "POST /admin/maintenance/bounded-service-namespaces",
     "GET /events/{id}",
     "GET /storage/records",
     "POST /storage/records",

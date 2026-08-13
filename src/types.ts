@@ -53,6 +53,7 @@ export interface RuntimeEnv {
   FEATURE_OAUTH_APPS_ENABLED?: string;
   FEATURE_EVENTS_ENABLED?: string;
   ACCEPTANCE_PROOF_SAFETY_ENABLED?: string;
+  ACCEPTANCE_NAMESPACE_MAINTENANCE_ENABLED?: string;
   EVENT_RETENTION_SECONDS?: string;
   EVENTS_GLOBAL_MAX_ITEMS?: string;
   EVENTS_GLOBAL_MAX_BYTES?: string;
@@ -176,6 +177,7 @@ export interface AppConfig {
   boundedRecordReceiptRetentionSeconds: number;
   boundedRecordReceiptLimits: BoundedStorageReceiptLimits;
   acceptanceProofSafetyEnabled: boolean;
+  acceptanceNamespaceMaintenanceEnabled: boolean;
   adminSubjects: readonly string[];
   privacy: PrivacyConfig;
   isTest: boolean;
@@ -325,6 +327,32 @@ export type BoundedStorageTransactionResult =
         | "quota_exceeded"
         | "unavailable";
     }>;
+
+/** Internal input for the acceptance-only, administrator-operated cleanup primitive. */
+export interface AcceptanceNamespaceMaintenanceInput {
+  serviceClientId: string;
+  collectionPrefix: string;
+}
+
+/** Internal audit context committed with an acceptance-only maintenance mutation. */
+export interface AcceptanceNamespaceMaintenanceAudit {
+  actorSubjectHash: string;
+  createdAt: number;
+}
+
+/** Count-only result. It never carries namespace identifiers or stored values. */
+export type AcceptanceNamespaceMaintenanceResult =
+  | Readonly<{
+      status: "completed";
+      deletedRecords: number;
+      deletedReceipts: number;
+      remainingRecords: number;
+      remainingReceipts: number;
+    }>
+  | Readonly<{
+      status: "batch_too_large";
+    }>
+  | Readonly<{ status: "unavailable" }>;
 
 export interface StorageFileMetadata {
   userId: string;
@@ -697,6 +725,10 @@ export interface AuthStore
     now: number,
     options?: Readonly<BoundedStorageTransactionOptions>,
   ): Promise<BoundedStorageTransactionResult>;
+  purgeAcceptanceBoundedServiceNamespace(
+    input: Readonly<AcceptanceNamespaceMaintenanceInput>,
+    audit: Readonly<AcceptanceNamespaceMaintenanceAudit>,
+  ): Promise<AcceptanceNamespaceMaintenanceResult>;
 
   listStorageFiles(
     userId: string,

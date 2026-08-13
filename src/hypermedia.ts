@@ -52,6 +52,7 @@ export interface HypermediaField {
   max?: number;
   min_length?: number;
   max_length?: number;
+  pattern?: string;
   max_bytes?: number;
   options?: HypermediaFieldOption[];
   visible_when?: HypermediaFieldCondition;

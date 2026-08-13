@@ -119,6 +119,7 @@ import {
 import {
   accountDeletionAcceptedPage,
   accountDeletionStatusPage,
+  acceptanceNamespaceMaintenancePage,
   adminClientsPage,
   authUiJs,
   authUiCss,
@@ -204,6 +205,11 @@ import {
   ACCEPTANCE_PROOF_SAFETY_PATH,
   acceptanceProofSafetyResponse,
 } from "./proof-safety";
+import {
+  ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH,
+  isEligibleMaintenanceServiceClient,
+  parseAcceptanceNamespaceMaintenanceInput,
+} from "./acceptance-namespace-maintenance";
 
 export interface AittaDBApp {
   fetch(request: Request): Promise<Response | null>;
@@ -247,6 +253,23 @@ export function createAittaDBWithStore(
         return finalizeResponse(
           request,
           acceptanceProofSafetyResponse(request, url, config),
+          config,
+        );
+      }
+      if (
+        !config.acceptanceNamespaceMaintenanceEnabled &&
+        url.pathname === ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH
+      ) {
+        const negotiationError = hypermediaNegotiationError(request);
+        return finalizeResponse(
+          request,
+          negotiationError
+            ? hypermediaError(request, "not_acceptable", negotiationError, 406)
+            : featureUnavailableResponse(
+                request,
+                config,
+                "Acceptance maintenance",
+              ),
           config,
         );
       }
@@ -579,6 +602,7 @@ const URL_ENCODED_POST_PATHS = new Set([
   "/device/decision",
   "/consent",
   "/admin/clients",
+  ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH,
 ]);
 
 async function prebufferAcceptedRequestBody(
@@ -709,6 +733,11 @@ async function route(
       signedInUser &&
       config.adminSubjects.includes(signedInUser.id),
     );
+    const showAcceptanceMaintenance = Boolean(
+      config.acceptanceNamespaceMaintenanceEnabled &&
+      signedInUser &&
+      config.adminSubjects.includes(signedInUser.id),
+    );
     const metadata = {
       service: "AittaDB",
       description:
@@ -830,6 +859,15 @@ async function route(
             }),
           ]
         : []),
+      ...(showAcceptanceMaintenance
+        ? [
+            link(
+              "acceptance-namespace-maintenance",
+              `${config.issuerUrl}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+              { type: HYPERMEDIA_MEDIA_TYPE },
+            ),
+          ]
+        : []),
     ];
     const actions = [
       action(
@@ -910,6 +948,17 @@ async function route(
             ),
           ]
         : []),
+      ...(showAcceptanceMaintenance
+        ? [
+            action(
+              "manage-acceptance-service-namespace",
+              "Maintain acceptance service namespace",
+              "GET",
+              `${config.issuerUrl}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
     ];
     const document = resourceDocument({
       type: "service",
@@ -919,7 +968,13 @@ async function route(
       actions,
     });
     return negotiateHypermediaRepresentation(request, "html") === "html"
-      ? html(serviceHomePage(metadata, { showAdmin, signedIn }))
+      ? html(
+          serviceHomePage(metadata, {
+            showAdmin,
+            showAcceptanceMaintenance,
+            signedIn,
+          }),
+        )
       : hypermediaJson(request, document);
   }
   if (url.pathname === "/health" && request.method === "GET") {
@@ -1586,6 +1641,28 @@ async function route(
   if (url.pathname === "/admin/clients" && request.method === "POST") {
     return adminClientsPost(request, config, store, identityProvider);
   }
+  if (
+    url.pathname === ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH &&
+    request.method === "GET"
+  ) {
+    return acceptanceNamespaceMaintenanceGet(
+      request,
+      config,
+      store,
+      identityProvider,
+    );
+  }
+  if (
+    url.pathname === ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH &&
+    request.method === "POST"
+  ) {
+    return acceptanceNamespaceMaintenancePost(
+      request,
+      config,
+      store,
+      identityProvider,
+    );
+  }
   return oauthError("not_found", "No AittaDB route matches this request", 404);
 }
 
@@ -1649,6 +1726,9 @@ async function localSessionEndpoint(
   }
   const showAdmin =
     config.features.oauthApps && config.adminSubjects.includes(user.id);
+  const showAcceptanceMaintenance =
+    config.acceptanceNamespaceMaintenanceEnabled &&
+    config.adminSubjects.includes(user.id);
   const csrf = csrfTokenForRequest(request);
   const canRequestAccountDeletion =
     accountDeletionAvailable && !config.adminSubjects.includes(user.id);
@@ -1718,6 +1798,15 @@ async function localSessionEndpoint(
             link("client-administration", `${config.issuerUrl}/admin/clients`, {
               type: HYPERMEDIA_MEDIA_TYPE,
             }),
+          ]
+        : []),
+      ...(showAcceptanceMaintenance
+        ? [
+            link(
+              "acceptance-namespace-maintenance",
+              `${config.issuerUrl}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+              { type: HYPERMEDIA_MEDIA_TYPE },
+            ),
           ]
         : []),
       link(
@@ -1806,6 +1895,17 @@ async function localSessionEndpoint(
             ),
           ]
         : []),
+      ...(showAcceptanceMaintenance
+        ? [
+            action(
+              "manage-acceptance-service-namespace",
+              "Maintain acceptance service namespace",
+              "GET",
+              `${config.issuerUrl}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+              { authorization: { scheme: "sites-session" }, fields: [] },
+            ),
+          ]
+        : []),
       ...(accountDeletionConfirmation
         ? [
             action(
@@ -1878,6 +1978,7 @@ async function localSessionEndpoint(
                 confirmationPhrase: ACCOUNT_DELETION_CONFIRMATION_PHRASE,
               }
             : undefined,
+          showAcceptanceMaintenance,
         ),
         { headers: { "set-cookie": csrfCookie(csrf) } },
       )
@@ -3264,6 +3365,150 @@ async function adminClientsPost(
   );
 }
 
+async function acceptanceNamespaceMaintenanceGet(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore,
+  identityProvider: UpstreamIdentityProvider,
+): Promise<Response> {
+  const limited = await endpointRateLimit(store, request, config, "admin", 30);
+  if (limited) return limited;
+  const admin = await requireAdminIdentity(
+    request,
+    config,
+    store,
+    identityProvider,
+  );
+  if (admin instanceof Response) return admin;
+  const serviceClients = (await store.listClients()).filter(
+    isEligibleMaintenanceServiceClient,
+  );
+  return acceptanceNamespaceMaintenanceResponse(
+    request,
+    config,
+    serviceClients,
+    csrfTokenForRequest(request),
+    createAdminSubmissionToken(),
+  );
+}
+
+async function acceptanceNamespaceMaintenancePost(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  store: AuthStore,
+  identityProvider: UpstreamIdentityProvider,
+): Promise<Response> {
+  const limited = await endpointRateLimit(store, request, config, "admin", 30);
+  if (limited) return limited;
+  const admin = await requireAdminIdentity(
+    request,
+    config,
+    store,
+    identityProvider,
+  );
+  if (admin instanceof Response) return admin;
+  if (!requireSameOrigin(request, config.issuerUrl)) {
+    return acceptanceNamespaceMaintenanceError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "Same-origin form submission is required",
+      403,
+    );
+  }
+  let form: URLSearchParams;
+  try {
+    form = await readForm(request);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === "unsupported_media_type") {
+      return acceptanceNamespaceMaintenanceError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Unsupported content type",
+        415,
+      );
+    }
+    if (message === "request_too_large") {
+      return acceptanceNamespaceMaintenanceError(
+        request,
+        config.issuerUrl,
+        "invalid_request",
+        "Request is too large",
+        413,
+      );
+    }
+    throw error;
+  }
+  if (!validCsrf(request, form)) {
+    return acceptanceNamespaceMaintenanceError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "CSRF validation failed",
+      403,
+    );
+  }
+  const input = parseAcceptanceNamespaceMaintenanceInput(form);
+  if (!input) {
+    return acceptanceNamespaceMaintenanceError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "Maintenance input is invalid",
+      400,
+    );
+  }
+  const submissionToken = await claimAdminSubmission(
+    form,
+    admin.user.id,
+    store,
+  );
+  if (!submissionToken) {
+    return acceptanceNamespaceMaintenanceError(
+      request,
+      config.issuerUrl,
+      "invalid_request",
+      "Administrative submission is unavailable or already used",
+      409,
+    );
+  }
+  const result = await store.purgeAcceptanceBoundedServiceNamespace(input, {
+    actorSubjectHash: await sha256(admin.user.id),
+    createdAt: nowSeconds(),
+  });
+  if (result.status === "unavailable") {
+    return acceptanceNamespaceMaintenanceError(
+      request,
+      config.issuerUrl,
+      "not_found",
+      "Maintenance target is unavailable",
+      404,
+    );
+  }
+  if (result.status === "batch_too_large") {
+    return acceptanceNamespaceMaintenanceError(
+      request,
+      config.issuerUrl,
+      "conflict",
+      "Maintenance target exceeds the bounded request limit",
+      409,
+    );
+  }
+  const serviceClients = (await store.listClients()).filter(
+    isEligibleMaintenanceServiceClient,
+  );
+  return acceptanceNamespaceMaintenanceResponse(
+    request,
+    config,
+    serviceClients,
+    csrfTokenForRequest(request),
+    createAdminSubmissionToken(),
+    result,
+  );
+}
+
 async function requireAdminIdentity(
   request: Request,
   config: ReturnType<typeof loadConfig>,
@@ -3372,6 +3617,150 @@ async function auditAdminMutation(
     nowSeconds(),
     { actorSubjectHash: await sha256(admin.user.id) },
   );
+}
+
+function acceptanceNamespaceMaintenanceResponse(
+  request: Request,
+  config: ReturnType<typeof loadConfig>,
+  serviceClients: readonly ClientView[],
+  csrf: string,
+  submissionToken: string,
+  result: Readonly<{
+    deletedRecords: number;
+    deletedReceipts: number;
+    remainingRecords: number;
+    remainingReceipts: number;
+  }> | null = null,
+): Response {
+  const headers = new Headers({ "set-cookie": csrfCookie(csrf) });
+  if (acceptsHtml(request)) {
+    return html(
+      acceptanceNamespaceMaintenancePage(
+        serviceClients,
+        csrf,
+        submissionToken,
+        result,
+      ),
+      { headers },
+    );
+  }
+  const clientOptions = serviceClients.map((client) => ({
+    value: client.id,
+    title: client.name,
+  }));
+  return hypermediaJson(
+    request,
+    resourceDocument({
+      type: "acceptance-namespace-maintenance",
+      id: `${config.issuerUrl}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+      data: {
+        max_rows: 100,
+        eligible_service_client_count: serviceClients.length,
+        ...(result
+          ? {
+              operation_result: {
+                deleted_records: result.deletedRecords,
+                deleted_transaction_receipts: result.deletedReceipts,
+                remaining_records: result.remainingRecords,
+                remaining_transaction_receipts: result.remainingReceipts,
+              },
+            }
+          : {}),
+      },
+      links: [
+        link(
+          "self",
+          `${config.issuerUrl}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+          { type: HYPERMEDIA_MEDIA_TYPE },
+        ),
+        link("service", config.issuerUrl, { type: HYPERMEDIA_MEDIA_TYPE }),
+        link("client-administration", `${config.issuerUrl}/admin/clients`, {
+          type: HYPERMEDIA_MEDIA_TYPE,
+        }),
+      ],
+      actions: clientOptions.length
+        ? [
+            action(
+              "purge-bounded-service-namespace",
+              "Remove bounded acceptance namespace data",
+              "POST",
+              `${config.issuerUrl}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+              {
+                type: "application/x-www-form-urlencoded",
+                authorization: { scheme: "sites-session" },
+                fields: [
+                  field("csrf_token", "CSRF token", "string", "body", {
+                    required: true,
+                    secret: true,
+                    value: csrf,
+                  }),
+                  field(
+                    "submission_token",
+                    "One-time submission token",
+                    "string",
+                    "body",
+                    {
+                      required: true,
+                      secret: true,
+                      value: submissionToken,
+                      description:
+                        "Use this value once and refresh the resource after use.",
+                    },
+                  ),
+                  field(
+                    "service_client_id",
+                    "Isolated service client",
+                    "string",
+                    "body",
+                    { required: true, options: clientOptions },
+                  ),
+                  field(
+                    "collection_prefix",
+                    "Collection prefix",
+                    "string",
+                    "body",
+                    {
+                      required: true,
+                      min_length: 31,
+                      max_length: 31,
+                      pattern: "^proof-[a-f0-9]{24}-$",
+                      description:
+                        "Exactly proof-, 24 lower-case hexadecimal characters, and a hyphen.",
+                    },
+                  ),
+                ],
+              },
+            ),
+          ]
+        : [],
+    }),
+    { headers },
+  );
+}
+
+function acceptanceNamespaceMaintenanceError(
+  request: Request,
+  issuer: string,
+  error: string,
+  description: string,
+  status: number,
+): Response {
+  if (acceptsHtml(request)) {
+    return html(
+      errorPage(titleForError(error, status), description, { status, error }),
+      { status },
+    );
+  }
+  return hypermediaError(request, error, description, status, {
+    links: [
+      link("service", issuer, { type: HYPERMEDIA_MEDIA_TYPE }),
+      link(
+        "acceptance-namespace-maintenance",
+        `${issuer}${ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH}`,
+        { type: HYPERMEDIA_MEDIA_TYPE },
+      ),
+    ],
+  });
 }
 
 function adminClientsResponse(
@@ -3776,6 +4165,7 @@ const BROWSER_ONLY_MUTATION_ROUTES = new Set([
   "/device/decision",
   "/consent",
   "/admin/clients",
+  ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH,
 ]);
 
 const DUAL_PROTOCOL_BROWSER_ROUTES = new Set([

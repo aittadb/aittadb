@@ -67,7 +67,11 @@ export function serviceHomePage(
     capabilities: readonly string[];
     plannedCapabilities: readonly string[];
   },
-  options: { showAdmin?: boolean; signedIn?: boolean } = {},
+  options: {
+    showAdmin?: boolean;
+    showAcceptanceMaintenance?: boolean;
+    signedIn?: boolean;
+  } = {},
 ): string {
   const privateResources =
     metadata.features.records && metadata.features.files
@@ -144,7 +148,7 @@ export function serviceHomePage(
       imageUrl: `${metadata.issuer}/og.png`,
       url: metadata.issuer,
     },
-    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> ChatGPT provides browser sign-in inside ChatGPT Sites; AittaDB creates a separate local identity, issues its own credentials, and never receives or forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a>${recordOperation}${fileOperation}${eventsOperation}${statisticsOperation}<a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>`,
+    body: `<section class="info-grid" aria-label="Service metadata"><div><span>Hosting platform</span><strong>${escapeHtml(metadata.hostingPlatform)}</strong></div><div><span>Service and issuer URL</span><code>${escapeHtml(metadata.issuer)}</code></div><div><span>Session issuer</span><strong>${escapeHtml(metadata.sessionIssuer)} only</strong></div><div><span>Feature availability</span><strong>${escapeHtml(featureStatus)}</strong></div></section><p class="note"><strong>Source-available under FSL-1.1-MIT.</strong> ChatGPT provides browser sign-in inside ChatGPT Sites; AittaDB creates a separate local identity, issues its own credentials, and never receives or forwards ChatGPT credentials. <a class="note-cta" href="https://github.com/aittadb/aittadb#licensing">Licensing and platform details</a></p><section aria-labelledby="operations-heading"><h2 id="operations-heading">Available operations</h2><div class="operation-grid"><a href="/session"><strong>My AittaDB</strong><span>${sessionOperationCopy}</span></a>${recordOperation}${fileOperation}${eventsOperation}${statisticsOperation}<a href="/privacy"><strong>Privacy Policy</strong><span>See how this deployment handles identity, application data, files, and security records.</span></a>${options.showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}${options.showAcceptanceMaintenance ? `<a href="/admin/maintenance/bounded-service-namespaces"><strong>Acceptance maintenance</strong><span>Perform a bounded, audited cleanup of an isolated service namespace.</span></a>` : ""}</div></section>`,
     actions: [
       options.signedIn
         ? {
@@ -175,6 +179,7 @@ export function sessionPage(
     confirmationToken: string;
     confirmationPhrase: string;
   },
+  showAcceptanceMaintenance = false,
 ): string {
   const recordOperation = recordsEnabled
     ? `<a href="/storage/records"><strong>My JSON records</strong><span>Use this identity's isolated D1 records, or test an explicit client token.</span></a><a href="/storage/record-protocol"><strong>Atomic record protocol</strong><span>Use bounded reads and revision-checked transactions in this identity's isolated namespace.</span></a>`
@@ -209,7 +214,7 @@ export function sessionPage(
             : "Your AittaDB identity and sessions.",
     visualSummary:
       "ChatGPT establishes the upstream sign-in. AittaDB uses its own immutable user ID for sessions and persistent storage.",
-    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace${userInfoEnabled ? " and identity claims" : ""}.${userInfoEnabled ? " Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes." : ""}</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}${fileOperation}${eventsOperation}${userInfoOperation}${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}</div></section>${accountDeletionOperation}`,
+    body: `<section class="info-grid" aria-label="Authenticated AittaDB identity"><div><span>Display name</span><strong>${escapeHtml(user.displayName)}</strong></div><div><span>Email signal</span><strong>${escapeHtml(user.email)}</strong></div><div><span>AittaDB subject</span><code>${escapeHtml(user.id)}</code></div><div><span>Identity created</span><time datetime="${new Date(user.createdAt * 1000).toISOString()}">${escapeHtml(new Date(user.createdAt * 1000).toISOString())}</time></div></section><p class="note">This local subject is the immutable <code>sub</code> used in AittaDB-issued sessions. Your current sign-in can access its own persistent AittaDB namespace${userInfoEnabled ? " and identity claims" : ""}.${userInfoEnabled ? " Third-party OAuth clients remain separate and still require registered client details, explicit consent, and local scopes." : ""}</p><section aria-labelledby="session-operations-heading"><h2 id="session-operations-heading">Available operations</h2><div class="operation-grid">${recordOperation}${fileOperation}${eventsOperation}${userInfoOperation}${showAdmin ? `<a href="/admin/clients"><strong>Application clients</strong><span>Register and manage OAuth clients for this allowlisted administrator account.</span></a>` : ""}${showAcceptanceMaintenance ? `<a href="/admin/maintenance/bounded-service-namespaces"><strong>Acceptance maintenance</strong><span>Perform a bounded, audited cleanup of an isolated service namespace.</span></a>` : ""}</div></section>${accountDeletionOperation}`,
     actions: [
       ...(recordsEnabled
         ? [{ href: "/storage/records", label: "Open my records" }]
@@ -498,6 +503,52 @@ export function adminClientsPage(
       "Redirects, scopes, origins, secrets, and active grants remain bounded per registered client.",
     tone: result?.secret ? "warning" : result ? "success" : "default",
     body: `${adminResultNotice(result)}<form method="post" action="/admin/clients" class="stacked-form" data-conditional-form><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="submission_token" value="${escapeHtml(submissionToken)}"><label for="name">Client name</label><input id="name" name="name" maxlength="120" required><label for="type">Client type</label><select id="type" name="type"><option value="public">public</option><option value="confidential">confidential</option><option value="service">service</option></select>${conditionalField("type:public,confidential", `<label for="redirect_uris">Redirect URIs, one per line</label><textarea id="redirect_uris" name="redirect_uris" data-required-when-visible="true"></textarea><label for="interactive_scopes">Allowed scopes</label><input id="interactive_scopes" name="interactive_scopes" value="openid email profile offline_access storage.read storage.write storage.delete" aria-describedby="interactive-scopes-help"><p class="note" id="interactive-scopes-help">Available AittaDB scopes: <code>${escapeHtml(interactiveScopes.join(" "))}</code></p>`)}${conditionalField("type:service", `<label for="service_scopes">Allowed AittaDB data scopes</label><input id="service_scopes" name="service_scopes" value="storage.read storage.write storage.delete" aria-describedby="service-scopes-help"><p class="note" id="service-scopes-help">Available service scopes: <code>${escapeHtml(serviceScopes.join(" "))}</code>. Service clients use no redirect URI or browser origin and receive no user identity claims, ID token, or refresh token.</p>`)}${conditionalField("type:public,confidential", `<label for="origins">Allowed browser origins, one per line</label><textarea id="origins" name="origins"></textarea>`)}<div class="actions"><button type="submit">Create client</button></div></form><section class="table-wrap" aria-label="Registered clients"><h2>Clients</h2><table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Scopes</th><th>Actions</th></tr></thead><tbody>${rows || `<tr><td colspan="6">No clients registered yet.</td></tr>`}</tbody></table></section>`,
+  });
+}
+
+export function acceptanceNamespaceMaintenancePage(
+  serviceClients: readonly ClientView[],
+  csrf: string,
+  submissionToken: string,
+  result: Readonly<{
+    deletedRecords: number;
+    deletedReceipts: number;
+    remainingRecords: number;
+    remainingReceipts: number;
+  }> | null = null,
+): string {
+  const clientOptions = serviceClients
+    .map(
+      (client) =>
+        `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name)}</option>`,
+    )
+    .join("");
+  const resultNotice = result
+    ? `<section class="info-grid" aria-label="Maintenance result"><div><span>Records removed</span><strong>${result.deletedRecords}</strong></div><div><span>Transaction receipts removed</span><strong>${result.deletedReceipts}</strong></div><div><span>Matching records remaining</span><strong>${result.remainingRecords}</strong></div><div><span>Matching receipts remaining</span><strong>${result.remainingReceipts}</strong></div></section>`
+    : "";
+  const form = clientOptions
+    ? `<form method="post" action="/admin/maintenance/bounded-service-namespaces" class="stacked-form"><input type="hidden" name="csrf_token" value="${escapeHtml(csrf)}"><input type="hidden" name="submission_token" value="${escapeHtml(submissionToken)}"><label for="service-client-id">Isolated service client</label><select id="service-client-id" name="service_client_id" required>${clientOptions}</select><label for="collection-prefix">Collection prefix</label><input id="collection-prefix" name="collection_prefix" autocomplete="off" pattern="proof-[a-f0-9]{24}-" minlength="31" maxlength="31" aria-describedby="collection-prefix-help" required><p class="note" id="collection-prefix-help">Use the disposable proof prefix: <code>proof-</code>, 24 lower-case hexadecimal characters, then a hyphen. A request can remove at most 100 matching records and transaction receipts from the selected service namespace.</p><div class="actions"><button class="danger" type="submit">Remove matching acceptance data</button></div></form>`
+    : `<p class="note">No active isolated service clients are available for this acceptance-only maintenance operation.</p>`;
+  return pageDocument({
+    title: "Acceptance namespace maintenance",
+    eyebrow: "Administration",
+    heading: "Acceptance namespace maintenance",
+    summary:
+      "Purge a small, explicit collection prefix from one active isolated service namespace. This operation never accesses user namespaces, files, secrets, or deployment configuration.",
+    visualEyebrow: "Bounded maintenance",
+    visualHeading: "One service namespace. One narrow repair.",
+    visualSummary:
+      "AittaDB verifies the administrator session, selected service client, exact disposable-proof prefix, and bounded candidate set before it removes any matching record metadata or transaction receipts.",
+    tone: result ? "success" : "warning",
+    body: `${resultNotice}${form}`,
+    actions: [
+      { href: "/session", label: "My session" },
+      {
+        href: "/admin/clients",
+        label: "Client administration",
+        secondary: true,
+      },
+    ],
   });
 }
 

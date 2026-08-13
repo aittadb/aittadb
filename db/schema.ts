@@ -17,6 +17,7 @@ export const schemaTables = [
   "storage_records",
   "bounded_storage_records",
   "bounded_storage_transaction_receipts",
+  "bounded_storage_transaction_receipt_collections",
   "storage_files",
   "storage_file_write_fences",
   "storage_file_orphan_repairs",

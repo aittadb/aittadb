@@ -329,6 +329,92 @@ test("receipt admission migration backfills and locks indexed classes", async ()
   }
 });
 
+test("receipt collection-name migration backfills and locks maintenance metadata", async () => {
+  const sqlite = await migratedDatabase(
+    "0021_bounded_storage_transaction_receipt_admission.sql",
+  );
+  try {
+    sqlite.exec(
+      "INSERT INTO users (id, email, display_name, created_at, updated_at) VALUES ('maintenance-user', 'maintenance@example.test', 'Maintenance', 1, 1); INSERT INTO oauth_clients (id, type, name, secret_hash, disabled_at, created_at) VALUES ('maintenance-client', 'public', 'Maintenance', NULL, NULL, 1);",
+    );
+    for (const [operation, resultJson] of [
+      ["s", "[null]"],
+      [
+        "v",
+        '[{"key":{"collection":"proof-0123456789abcdef01234567-records","id":"record"},"revision":1,"value":{}}]',
+      ],
+    ] as const) {
+      sqlite
+        .prepare(
+          "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at, expires_at, admission_class) VALUES (?, ?, ?, ?, ?, 1, ?, ?, 'pending', 100, NULL, 200, 'ordinary')",
+        )
+        .run(
+          "maintenance-user",
+          "maintenance-client",
+          ...[operation, "t", "u"].map((value) => value.repeat(43)),
+          resultJson,
+          new TextEncoder().encode(resultJson).byteLength,
+        );
+    }
+    sqlite.exec(
+      await readFile(
+        new URL(
+          "../../db/migrations/0022_bounded_storage_receipt_collection_names.sql",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    );
+    assert.equal(
+      sqlite
+        .prepare(
+          "SELECT collection_names_json FROM bounded_storage_transaction_receipts WHERE user_id = 'maintenance-user'",
+        )
+        .get()?.collection_names_json,
+      "[]",
+    );
+    assert.deepEqual(
+      sqlite
+        .prepare(
+          "SELECT operation_id_hash, collection FROM bounded_storage_transaction_receipt_collections ORDER BY operation_id_hash ASC",
+        )
+        .all()
+        .map((row) => ({
+          operation_id_hash: String(row.operation_id_hash),
+          collection: String(row.collection),
+        })),
+      [
+        {
+          operation_id_hash: "v".repeat(43),
+          collection: "proof-0123456789abcdef01234567-records",
+        },
+      ],
+    );
+    const receiptCollectionPlan = sqlite
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT operation_id_hash FROM bounded_storage_transaction_receipt_collections WHERE user_id = 'maintenance-user' AND client_id = 'maintenance-client' AND collection >= 'proof-0123456789abcdef01234567-' AND collection < 'proof-0123456789abcdef01234567.' LIMIT 2501",
+      )
+      .all()
+      .map((row) => String(row.detail))
+      .join(" ");
+    assert.match(
+      receiptCollectionPlan,
+      /idx_bounded_receipt_collections_namespace/,
+    );
+    assert.throws(() =>
+      sqlite.exec(
+        `UPDATE bounded_storage_transaction_receipts SET status = 'committed', committed_at = 100, collection_names_json = '["proof-0123456789abcdef01234567-records"]' WHERE operation_id_hash = '${"s".repeat(43)}'`,
+      ),
+    );
+    sqlite.exec(
+      `UPDATE bounded_storage_transaction_receipts SET status = 'committed', committed_at = 100 WHERE operation_id_hash = '${"s".repeat(43)}'`,
+    );
+    assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally {
+    sqlite.close();
+  }
+});
+
 test("bounded transactions atomically preserve order and durable idempotency", async (t) => {
   for (const adapter of adapters()) {
     await t.test(adapter.name, async () => {
@@ -1711,7 +1797,7 @@ test("D1 recovers an exact result after committed response loss", async () => {
       assert.equal(replayed.records.length, 25);
     }
     assert.equal(await fixture.receiptCount(owner), 1);
-    assert.equal(fixture.controls.maxBatchStatements, 30);
+    assert.equal(fixture.controls.maxBatchStatements, 31);
     assert.ok(
       fixture.controls.maxObservedBoundParameters <= D1_MAX_BOUND_PARAMETERS,
     );
@@ -2073,7 +2159,7 @@ test("D1 completes every 25-entry final-state verification shape within platform
       assert.equal(mixed.records[8]?.revision, 1);
       assert.equal(mixed.records[24], null);
     }
-    assert.equal(fixture.controls.maxBatchStatements, 30);
+    assert.equal(fixture.controls.maxBatchStatements, 31);
     assert.ok(
       fixture.controls.maxObservedBoundParameters <= D1_MAX_BOUND_PARAMETERS,
     );
@@ -2138,7 +2224,7 @@ test("D1 preflights 25-entry quota overflow and delete-funded puts without parti
     assert.equal(funded.status, "created");
     if (funded.status === "created") assert.equal(funded.records.length, 25);
     assert.equal(await fixture.receiptCount(owner), 1);
-    assert.equal(fixture.controls.maxBatchStatements, 30);
+    assert.equal(fixture.controls.maxBatchStatements, 31);
     assert.ok(
       fixture.controls.maxObservedBoundParameters <= D1_MAX_BOUND_PARAMETERS,
     );
@@ -2203,6 +2289,378 @@ test("account deletion purges durable transaction receipts before finalization",
   }
 });
 
+test("acceptance maintenance removes only a bounded matching service namespace", async (t) => {
+  const prefix = "proof-0123456789abcdef01234567-";
+  for (const adapter of adapters()) {
+    await t.test(adapter.name, async () => {
+      const fixture = await adapter.create();
+      try {
+        const service = await fixture.store.createClient(
+          {
+            type: "service",
+            name: `${adapter.name}-maintenance-owner`,
+            redirectUris: [],
+            scopes: ["storage.read", "storage.write", "storage.delete"],
+            origins: [],
+          },
+          "synthetic-maintenance-owner-hash",
+          1,
+        );
+        const outsider = await fixture.store.createClient(
+          {
+            type: "service",
+            name: `${adapter.name}-maintenance-outsider`,
+            redirectUris: [],
+            scopes: ["storage.read"],
+            origins: [],
+          },
+          "synthetic-maintenance-outsider-hash",
+          1,
+        );
+        for (const [subject, client, collection, id, operationId] of [
+          [
+            service.id,
+            service.id,
+            `${prefix}records`,
+            "target",
+            "maintenance-target",
+          ],
+          [
+            service.id,
+            service.id,
+            "unrelated-records",
+            "retain",
+            "maintenance-unrelated",
+          ],
+          [
+            outsider.id,
+            outsider.id,
+            `${prefix}records`,
+            "outsider",
+            "maintenance-outsider",
+          ],
+        ] as const) {
+          assert.equal(
+            (
+              await fixture.store.transactBoundedStorageRecords(
+                subject,
+                client,
+                command(operationId, [
+                  put(collection, id, null, { active: true }),
+                ]),
+                OPEN_LIMITS,
+                20,
+              )
+            ).status,
+            "created",
+          );
+        }
+        assert.equal(
+          (
+            await fixture.store.transactBoundedStorageRecords(
+              service.id,
+              service.id,
+              command("maintenance-mixed", [
+                put(`${prefix}mixed`, "target", null, { active: true }),
+                put("unrelated-records", "mixed", null, { active: true }),
+              ]),
+              OPEN_LIMITS,
+              20,
+            )
+          ).status,
+          "created",
+        );
+        assert.equal(await fixture.receiptCount(service.id), 3);
+        const result =
+          await fixture.store.purgeAcceptanceBoundedServiceNamespace(
+            {
+              serviceClientId: service.id,
+              collectionPrefix: prefix,
+            },
+            maintenanceAudit(),
+          );
+        assert.deepEqual(result, {
+          status: "completed",
+          deletedRecords: 2,
+          deletedReceipts: 1,
+          remainingRecords: 0,
+          remainingReceipts: 0,
+        });
+        assert.equal(
+          await fixture.store.getBoundedStorageRecord(
+            service.id,
+            service.id,
+            `${prefix}records`,
+            "target",
+          ),
+          null,
+        );
+        assert.ok(
+          await fixture.store.getBoundedStorageRecord(
+            service.id,
+            service.id,
+            "unrelated-records",
+            "retain",
+          ),
+        );
+        assert.equal(
+          await fixture.store.getBoundedStorageRecord(
+            service.id,
+            service.id,
+            `${prefix}mixed`,
+            "target",
+          ),
+          null,
+        );
+        assert.ok(
+          await fixture.store.getBoundedStorageRecord(
+            service.id,
+            service.id,
+            "unrelated-records",
+            "mixed",
+          ),
+        );
+        assert.ok(
+          await fixture.store.getBoundedStorageRecord(
+            outsider.id,
+            outsider.id,
+            `${prefix}records`,
+            "outsider",
+          ),
+        );
+        assert.equal(await fixture.receiptCount(service.id), 2);
+        assert.equal(await fixture.receiptCount(outsider.id), 1);
+      } finally {
+        fixture.close();
+      }
+    });
+  }
+});
+
+test("acceptance maintenance rejects an oversized candidate set without partial deletion", async () => {
+  const fixture = await createD1Fixture();
+  const prefix = "proof-fedcba9876543210fedcba98-";
+  try {
+    const service = await fixture.store.createClient(
+      {
+        type: "service",
+        name: "d1-maintenance-bound",
+        redirectUris: [],
+        scopes: ["storage.read", "storage.write", "storage.delete"],
+        origins: [],
+      },
+      "synthetic-maintenance-bound-hash",
+      1,
+    );
+    for (let index = 0; index < 51; index += 1) {
+      assert.equal(
+        (
+          await fixture.store.transactBoundedStorageRecords(
+            service.id,
+            service.id,
+            command(`maintenance-bound-${index}`, [
+              put(`${prefix}records`, `record-${index}`, null, { index }),
+            ]),
+            OPEN_LIMITS,
+            30 + index,
+          )
+        ).status,
+        "created",
+      );
+    }
+    assert.deepEqual(
+      await fixture.store.purgeAcceptanceBoundedServiceNamespace(
+        {
+          serviceClientId: service.id,
+          collectionPrefix: prefix,
+        },
+        maintenanceAudit(),
+      ),
+      { status: "batch_too_large" },
+    );
+    assert.ok(
+      await fixture.store.getBoundedStorageRecord(
+        service.id,
+        service.id,
+        `${prefix}records`,
+        "record-0",
+      ),
+    );
+    assert.equal(await fixture.receiptCount(service.id), 51);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 acceptance maintenance bounds record discovery before an oversized purge", async () => {
+  const fixture = await createD1Fixture();
+  const prefix = "proof-0123456789abcdef01234567-";
+  try {
+    const service = await fixture.store.createClient(
+      {
+        type: "service",
+        name: "d1-maintenance-record-overflow",
+        redirectUris: [],
+        scopes: ["storage.read", "storage.write", "storage.delete"],
+        origins: [],
+      },
+      "synthetic-maintenance-record-overflow-hash",
+      1,
+    );
+    for (let index = 0; index <= 100; index += 1) {
+      await fixture.seed(
+        record(
+          service.id,
+          service.id,
+          `${prefix}records`,
+          `record-${index}`,
+          1,
+        ),
+      );
+    }
+    assert.deepEqual(
+      await fixture.store.purgeAcceptanceBoundedServiceNamespace(
+        { serviceClientId: service.id, collectionPrefix: prefix },
+        maintenanceAudit(),
+      ),
+      { status: "batch_too_large" },
+    );
+    assert.equal(fixture.auditCount(), 0);
+    assert.ok(
+      await fixture.store.getBoundedStorageRecord(
+        service.id,
+        service.id,
+        `${prefix}records`,
+        "record-0",
+      ),
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 acceptance maintenance bounds receipt-membership discovery before deletion", async () => {
+  const fixture = await createD1Fixture();
+  const prefix = "proof-89abcdef0123456789abcdef-";
+  try {
+    const service = await fixture.store.createClient(
+      {
+        type: "service",
+        name: "d1-maintenance-receipt-membership-overflow",
+        redirectUris: [],
+        scopes: ["storage.read", "storage.write", "storage.delete"],
+        origins: [],
+      },
+      "synthetic-maintenance-receipt-membership-overflow-hash",
+      1,
+    );
+    fixture.seedReceiptMembershipOverflow(service.id, prefix);
+
+    assert.deepEqual(
+      await fixture.store.purgeAcceptanceBoundedServiceNamespace(
+        { serviceClientId: service.id, collectionPrefix: prefix },
+        maintenanceAudit(),
+      ),
+      { status: "batch_too_large" },
+    );
+    assert.equal(fixture.auditCount(), 0);
+    assert.equal(await fixture.receiptCount(service.id), 100);
+  } finally {
+    fixture.close();
+  }
+});
+
+test("D1 acceptance maintenance couples audit, deletion, and service-principal qualification", async () => {
+  const fixture = await createD1Fixture();
+  const prefix = "proof-abcdef0123456789abcdef01-";
+  try {
+    const service = await fixture.store.createClient(
+      {
+        type: "service",
+        name: "d1-maintenance-atomic-audit",
+        redirectUris: [],
+        scopes: ["storage.read", "storage.write", "storage.delete"],
+        origins: [],
+      },
+      "synthetic-maintenance-atomic-audit-hash",
+      1,
+    );
+    assert.equal(
+      (
+        await fixture.store.transactBoundedStorageRecords(
+          service.id,
+          service.id,
+          command("maintenance-atomic-audit", [
+            put(`${prefix}records`, "target", null, { active: true }),
+          ]),
+          OPEN_LIMITS,
+          20,
+        )
+      ).status,
+      "created",
+    );
+
+    fixture.controls.failBatchIndex = 2;
+    assert.deepEqual(
+      await fixture.store.purgeAcceptanceBoundedServiceNamespace(
+        { serviceClientId: service.id, collectionPrefix: prefix },
+        maintenanceAudit(),
+      ),
+      { status: "unavailable" },
+    );
+    assert.equal(fixture.auditCount(), 0);
+    assert.ok(
+      await fixture.store.getBoundedStorageRecord(
+        service.id,
+        service.id,
+        `${prefix}records`,
+        "target",
+      ),
+    );
+
+    fixture.setServicePrincipalType(service.id, "user");
+    assert.deepEqual(
+      await fixture.store.purgeAcceptanceBoundedServiceNamespace(
+        { serviceClientId: service.id, collectionPrefix: prefix },
+        maintenanceAudit(),
+      ),
+      { status: "unavailable" },
+    );
+    assert.equal(fixture.auditCount(), 0);
+    assert.ok(
+      await fixture.store.getBoundedStorageRecord(
+        service.id,
+        service.id,
+        `${prefix}records`,
+        "target",
+      ),
+    );
+
+    fixture.setServicePrincipalType(service.id, "service");
+    assert.equal(
+      (
+        await fixture.store.purgeAcceptanceBoundedServiceNamespace(
+          { serviceClientId: service.id, collectionPrefix: prefix },
+          maintenanceAudit(),
+        )
+      ).status,
+      "completed",
+    );
+    assert.equal(fixture.auditCount(), 1);
+    assert.equal(
+      await fixture.store.getBoundedStorageRecord(
+        service.id,
+        service.id,
+        `${prefix}records`,
+        "target",
+      ),
+      null,
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
 interface Fixture {
   store: AuthStore;
   seed(record: BoundedStorageRecord): Promise<void>;
@@ -2236,6 +2694,12 @@ interface D1Controls {
 
 interface D1Fixture extends Fixture {
   controls: D1Controls;
+  auditCount(): number;
+  seedReceiptMembershipOverflow(
+    serviceClientId: string,
+    collectionPrefix: string,
+  ): void;
+  setServicePrincipalType(id: string, type: "user" | "service"): void;
 }
 
 function adapters(): Array<{
@@ -2334,6 +2798,60 @@ async function createD1Fixture(): Promise<D1Fixture> {
   return {
     store: new D1AuthStore(d1),
     controls,
+    auditCount: () =>
+      Number(
+        sqlite.prepare("SELECT COUNT(*) AS count FROM audit_events").get()
+          ?.count ?? 0,
+      ),
+    setServicePrincipalType: (id, type) => {
+      sqlite
+        .prepare("UPDATE users SET principal_type = ? WHERE id = ?")
+        .run(type, id);
+    },
+    seedReceiptMembershipOverflow: (serviceClientId, collectionPrefix) => {
+      const resultJson = JSON.stringify(Array.from({ length: 25 }, () => null));
+      const resultBytes = new TextEncoder().encode(resultJson).byteLength;
+      const insertReceipt = sqlite.prepare(
+        "INSERT INTO bounded_storage_transaction_receipts (user_id, client_id, operation_id_hash, request_hash, attempt_hash, mutation_count, result_json, result_bytes, status, created_at, committed_at, expires_at, admission_class, collection_names_json) VALUES (?, ?, ?, ?, ?, 25, ?, ?, 'committed', 10, 10, 11, 'ordinary', '[]')",
+      );
+      const insertCollection = sqlite.prepare(
+        "INSERT INTO bounded_storage_transaction_receipt_collections (user_id, client_id, operation_id_hash, collection) VALUES (?, ?, ?, ?)",
+      );
+      const operationHashes: string[] = [];
+      for (let receiptIndex = 0; receiptIndex < 100; receiptIndex += 1) {
+        const operationIdHash = `m${receiptIndex.toString(36).padStart(42, "0")}`;
+        operationHashes.push(operationIdHash);
+        insertReceipt.run(
+          serviceClientId,
+          serviceClientId,
+          operationIdHash,
+          "r".repeat(43),
+          "t".repeat(43),
+          resultJson,
+          resultBytes,
+        );
+        for (
+          let collectionIndex = 0;
+          collectionIndex < 25;
+          collectionIndex += 1
+        ) {
+          insertCollection.run(
+            serviceClientId,
+            serviceClientId,
+            operationIdHash,
+            `${collectionPrefix}receipt-${receiptIndex}-${collectionIndex}`,
+          );
+        }
+      }
+      // This test-only malformed extra map row proves the 2,501-row sentinel
+      // rejects a corrupt or legacy receipt map before any candidate is deleted.
+      insertCollection.run(
+        serviceClientId,
+        serviceClientId,
+        operationHashes[0]!,
+        `${collectionPrefix}overflow`,
+      );
+    },
     async seed(value) {
       sqlite
         .prepare(
@@ -2463,6 +2981,10 @@ function command(
   mutations: readonly BoundedRecordMutation[],
 ): BoundedRecordTransactionCommand {
   return { transaction: { operation_id: operationId, mutations } };
+}
+
+function maintenanceAudit() {
+  return { actorSubjectHash: "a".repeat(43), createdAt: 100 };
 }
 
 function transactionOptions(

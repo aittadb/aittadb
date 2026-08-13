@@ -2357,6 +2357,98 @@ export const openApiSpec = {
         },
       },
     },
+    "/admin/maintenance/bounded-service-namespaces": {
+      get: {
+        summary: "Inspect bounded acceptance service-namespace maintenance",
+        description:
+          "An acceptance-only administrative primitive. It is available only when ACCEPTANCE_NAMESPACE_MAINTENANCE_ENABLED is true for the exact approved non-production issuer with Records and OAuth Apps enabled. A trusted ChatGPT Sites session whose immutable local AittaDB subject is allowlisted may select only an active service client with no browser origins or redirect URIs. The representation exposes a bounded cleanup form and count-only result model; it never returns stored values, credentials, receipt hashes, namespace identifiers in result data, deployment settings, or user namespaces.",
+        "x-aittadb-sites-identity-required": true,
+        responses: {
+          "200": {
+            description:
+              "Acceptance-only bounded namespace maintenance resource",
+            content: hypermediaContent(
+              "#/components/schemas/AcceptanceNamespaceMaintenanceDocument",
+            ),
+          },
+          "302": { description: "Continue through Sites-owned sign-in" },
+          "401": {
+            description: "Trusted Sites identity is missing",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "Signed-in identity is not allowlisted",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "Acceptance maintenance is disabled or unavailable before identity, request-body, repository, or cleanup work.",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "406": notAcceptableResponse,
+        },
+      },
+      post: {
+        summary: "Purge one bounded acceptance service namespace prefix",
+        description:
+          "CSRF-protected same-origin administrative mutation for one active isolated service namespace. The request requires a one-time submission token and the exact disposable proof collection prefix format: proof-, 24 lower-case hexadecimal characters, and a hyphen. AittaDB preflights records and transaction receipts, rejects candidate sets over 100 rows, and deletes only a fully bounded matching set. The response contains counts only. This operation cannot access human namespaces, files, raw D1/R2 resources, configuration, or secrets.",
+        "x-aittadb-sites-identity-required": true,
+        requestBody: {
+          description: browserMutationOriginDescription,
+          required: true,
+          content: {
+            "application/x-www-form-urlencoded": {
+              schema: {
+                $ref: "#/components/schemas/AcceptanceNamespaceMaintenanceInput",
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Completed count-only acceptance maintenance result",
+            content: hypermediaContent(
+              "#/components/schemas/AcceptanceNamespaceMaintenanceDocument",
+            ),
+          },
+          "302": { description: "Continue through Sites-owned sign-in" },
+          "400": {
+            description: "Maintenance input is invalid",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "401": {
+            description: "Trusted Sites identity is missing",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "403": {
+            description: "Allowlist, CSRF, or same-origin rejection",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "404": {
+            description: "The selected maintenance target is unavailable",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "409": {
+            description:
+              "The one-time submission was already used or the candidate set exceeds the bounded maintenance limit.",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "413": boundedFormTooLargeResponse,
+          "415": {
+            description: "Maintenance form media type is unsupported",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "429": rateLimitedResponse(true),
+          "503": {
+            description:
+              "Acceptance maintenance is disabled or unavailable before identity, request-body, repository, or cleanup work.",
+            content: hypermediaContent("#/components/schemas/HypermediaError"),
+          },
+          "406": notAcceptableResponse,
+        },
+      },
+    },
     "/openapi.json": {
       get: {
         summary: "OpenAPI 3.1 JSON",
@@ -2459,6 +2551,7 @@ export const openApiSpec = {
           max: { type: "number" },
           min_length: { type: "integer", minimum: 0 },
           max_length: { type: "integer", minimum: 0 },
+          pattern: { type: "string" },
           max_bytes: { type: "integer", minimum: 0 },
           options: {
             type: "array",
@@ -3936,6 +4029,86 @@ export const openApiSpec = {
           },
         },
         additionalProperties: false,
+      },
+      AcceptanceNamespaceMaintenanceInput: {
+        type: "object",
+        required: [
+          "csrf_token",
+          "submission_token",
+          "service_client_id",
+          "collection_prefix",
+        ],
+        properties: {
+          csrf_token: { type: "string" },
+          submission_token: {
+            type: "string",
+            minLength: 32,
+            maxLength: 32,
+            description:
+              "One-time value from the current maintenance representation. Its hash is stored only to reject replay.",
+          },
+          service_client_id: {
+            type: "string",
+            format: "uuid",
+            description:
+              "One active isolated service client advertised by the current administrative representation.",
+          },
+          collection_prefix: {
+            type: "string",
+            minLength: 31,
+            maxLength: 31,
+            pattern: "^proof-[a-f0-9]{24}-$",
+            description:
+              "One disposable proof collection prefix: proof-, 24 lower-case hexadecimal characters, and a hyphen. It never identifies files, user namespaces, or physical storage keys.",
+          },
+        },
+        additionalProperties: false,
+      },
+      AcceptanceNamespaceMaintenanceDocument: {
+        allOf: [
+          { $ref: "#/components/schemas/HypermediaDocument" },
+          {
+            type: "object",
+            properties: {
+              type: { const: "acceptance-namespace-maintenance" },
+              data: {
+                type: "object",
+                required: ["max_rows", "eligible_service_client_count"],
+                properties: {
+                  max_rows: { type: "integer", const: 100 },
+                  eligible_service_client_count: {
+                    type: "integer",
+                    minimum: 0,
+                  },
+                  operation_result: {
+                    type: "object",
+                    readOnly: true,
+                    required: [
+                      "deleted_records",
+                      "deleted_transaction_receipts",
+                      "remaining_records",
+                      "remaining_transaction_receipts",
+                    ],
+                    properties: {
+                      deleted_records: { type: "integer", minimum: 0 },
+                      deleted_transaction_receipts: {
+                        type: "integer",
+                        minimum: 0,
+                      },
+                      remaining_records: { type: "integer", const: 0 },
+                      remaining_transaction_receipts: {
+                        type: "integer",
+                        const: 0,
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        ],
       },
       OAuthClientOperationInput: {
         type: "object",

@@ -47,6 +47,7 @@ export interface PreparedBoundedStorageTransaction {
   requestHash: string;
   attemptHash: string;
   mutationsJson: string;
+  collectionNamesJson: string;
   maxResultBytes: number;
   receiptExpiresAt: number;
   receiptLimits: Readonly<BoundedStorageReceiptLimits>;
@@ -62,6 +63,7 @@ export interface BoundedStorageTransactionReceipt {
   requestHash: string;
   resultJson: string;
   resultBytes: number;
+  collectionNamesJson: string;
   createdAt: number;
   expiresAt: number;
   admissionClass: BoundedStorageReceiptAdmissionClass;
@@ -104,6 +106,15 @@ export async function prepareBoundedStorageTransaction(input: {
     sha256(randomToken()),
   ]);
   const mutationsJson = JSON.stringify(command.transaction.mutations);
+  const collectionNamesJson = JSON.stringify(
+    [
+      ...new Set(
+        command.transaction.mutations.map(
+          (mutation) => mutation.key.collection,
+        ),
+      ),
+    ].sort(),
+  );
   return Object.freeze({
     userId: input.userId,
     clientId: input.clientId,
@@ -112,6 +123,7 @@ export async function prepareBoundedStorageTransaction(input: {
     requestHash,
     attemptHash,
     mutationsJson,
+    collectionNamesJson,
     maxResultBytes: boundedRecordResultMaxBytes(
       command.transaction.mutations.length,
     ),

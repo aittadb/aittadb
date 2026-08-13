@@ -181,7 +181,7 @@ Document every REST and browser method, parameter, body, response, OAuth error, 
 
 ## Configuration, Secrets, Logs
 
-`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events enables its scopes, publication, reads, and bounded waits; when off, reject before origin/body/CORS/auth/rate/repository/maintenance and omit controls. Production `ISSUER_URL` is `https://aittadb.com`; acceptance/forks use their own pathless HTTPS issuer. Changes invalidate the old token boundary and need acceptance notes.
+`.env.example` names variables without values. Configure issuer/signing, lifetimes, origins, finite limits, write switch, admin subjects, and flags. Missing secrets or malformed flags fail closed. Records, Files, and Statistics default on; OAuth Apps and Events off. Events gates before origin/body/CORS/auth/rate/repository work. Acceptance maintenance is default-off, exact-issuer-only, Sites-session-admin-only, prefix-bounded, count-only; follow `docs/sites-maintenance.md`. Production `ISSUER_URL` is `https://aittadb.com`; acceptance/forks use their own pathless HTTPS issuer. Changes invalidate the old token boundary and need acceptance notes.
 
 Generate local ES256 keys only by documented command. Ignored keys stay local; never print, commit, or put them in public hosting metadata. Bootstrap by signing in at `/session`, then configure that deployment-local UUID in `ADMIN_SUBJECTS`; never use email or names. Keep upstream email-reassignment risk explicit.
 
@@ -238,7 +238,7 @@ Implementation DoD: contract/code/negative tests/user+developer docs/passing for
 
 Keep the primary worktree checkpointed: stage and make focused commits for intended changes promptly; push after checks. Planning commits may be direct. Preserve unrelated work; reset/checkout needs approval. Run `npm run validate` before handoff. Feature PRs target `develop`; keep at most one `main` PR from `develop`; no merge without approval; close superseded PRs unmerged. Never leave intended changes loose at handoff. Without push access, retain/report commits.
 
-Outside test, deployment needs approval. Push validated `develop` to the Sites mirror with a short-lived env-only credential; never command args, Git config, files, logs, or source. Deploy/verify acceptance before the identical production commit/build; archives differ only by target `project_id`. Compare commits, apply migrations, verify status, and claim E2E only after hosted tests.
+Outside test, deployment needs approval. Push validated `develop` to the Sites mirror with a short-lived env-only credential; never command args, Git config, files, logs, or source. Use ChatGPT Sites, not direct Cloudflare administration. Deploy/verify acceptance before the identical production commit/build; archives differ only by target `project_id`. Compare commits, apply migrations, verify status, and claim E2E only after hosted tests.
 
 ## Maintaining This File
 
@@ -249,5 +249,5 @@ Update `AGENTS.md` for architecture, interface, command, constraint, security, s
 GPT-5.6 Sol Ultra is primary architect, orchestrator, integrator, and final decision-maker: it owns requirements, decomposition/dependencies, conflict resolution, review, validation, and the final diff. Direct work is coordination, integration, or irreducible.
 
 - Use Luna for scoped search/logs/docs and fully specified routine code/tests; Terra for multi-file/state/debug; Sol High/Max for architecture, security, protocol, persistence, hard debugging, and review. Escalate rather than retry. Luna never owns unresolved product, protocol, auth, data-integrity, concurrency, or cross-cutting decisions.
-- Parallelize only independent isolated worktrees; no overlap. Each unit owns code/tests/docs, and workers report files, validation, assumptions, risks, and next action. Primary integrates, resolves, validates, and accepts only reviewed complete commits; coordination files may be edited directly.
+- Parallelize only independent work. Implementation subagents MUST edit only isolated Git worktrees; no overlap. Each unit owns code/tests/docs and workers report files, validation, assumptions, risks, and next action. Primary integrates, resolves, validates, and accepts only reviewed, complete, validated agent commits. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly.
 - AittaDB, Aitta Social Hub, Aitta Social, and Invest have separate Terra Ultra owners. Never inspect, direct, or assume another project's state; when input or action is needed, print one concise paste-ready prompt for the user naming the project, goal, facts, requested evidence, and exact reply needed.

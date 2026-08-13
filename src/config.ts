@@ -197,6 +197,20 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
       "ACCEPTANCE_PROOF_SAFETY_ENABLED requires a recognized non-production HTTPS issuer with Records and OAuth Apps enabled",
     );
   }
+  const acceptanceNamespaceMaintenanceEnabled = readBoolean(
+    env.ACCEPTANCE_NAMESPACE_MAINTENANCE_ENABLED,
+    false,
+  );
+  if (
+    acceptanceNamespaceMaintenanceEnabled &&
+    (!isAcceptanceProofSafetyIssuer(issuerUrl) ||
+      !features.records ||
+      !features.oauthApps)
+  ) {
+    throw new Error(
+      "ACCEPTANCE_NAMESPACE_MAINTENANCE_ENABLED requires a recognized non-production HTTPS issuer with Records and OAuth Apps enabled",
+    );
+  }
 
   return {
     issuerUrl,
@@ -295,6 +309,7 @@ export function loadConfig(env: RuntimeEnv, requestUrl: string): AppConfig {
     boundedRecordReceiptRetentionSeconds,
     boundedRecordReceiptLimits,
     acceptanceProofSafetyEnabled,
+    acceptanceNamespaceMaintenanceEnabled,
     adminSubjects: readAdminSubjects(env.ADMIN_SUBJECTS),
     privacy: readPrivacyConfig(env),
     isTest,

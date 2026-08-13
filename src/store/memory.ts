@@ -62,6 +62,12 @@ import {
   prepareBoundedStorageTransaction,
   serializeBoundedStorageTransactionResult,
 } from "../bounded-record-transaction";
+import {
+  ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_ROWS,
+  isEligibleMaintenanceServiceClient,
+  isSafeMaintenanceCollectionPrefix,
+  receiptIsBoundedToMaintenanceCollectionPrefix,
+} from "../acceptance-namespace-maintenance";
 import type {
   BoundedStorageReceiptAdmissionClass,
   BoundedStorageTransactionReceipt,
@@ -78,6 +84,9 @@ import type {
   ApplicationEventInput,
   ApplicationEventLimits,
   ApplicationEventPage,
+  AcceptanceNamespaceMaintenanceAudit,
+  AcceptanceNamespaceMaintenanceInput,
+  AcceptanceNamespaceMaintenanceResult,
   AuditEventAttribution,
   AuthStore,
   BoundedStorageReceiptLimits,
@@ -1496,6 +1505,7 @@ export class MemoryAuthStore implements AuthStore {
       operationIdHash: prepared.operationIdHash,
       requestHash: prepared.requestHash,
       ...receipt,
+      collectionNamesJson: prepared.collectionNamesJson,
       createdAt: now,
       expiresAt: prepared.receiptExpiresAt,
       admissionClass,
@@ -1506,6 +1516,75 @@ export class MemoryAuthStore implements AuthStore {
         receipt.resultJson,
         prepared.command,
       ),
+    };
+  }
+
+  async purgeAcceptanceBoundedServiceNamespace(
+    input: Readonly<AcceptanceNamespaceMaintenanceInput>,
+    audit: Readonly<AcceptanceNamespaceMaintenanceAudit>,
+  ): Promise<AcceptanceNamespaceMaintenanceResult> {
+    if (!isSafeMaintenanceCollectionPrefix(input.collectionPrefix)) {
+      return { status: "unavailable" };
+    }
+    try {
+      assertAuditEventAttribution({ actorSubjectHash: audit.actorSubjectHash });
+    } catch {
+      return { status: "unavailable" };
+    }
+    if (!Number.isSafeInteger(audit.createdAt) || audit.createdAt < 0) {
+      return { status: "unavailable" };
+    }
+    const client = this.clients.get(input.serviceClientId);
+    if (
+      !client ||
+      !isEligibleMaintenanceServiceClient(client) ||
+      !this.servicePrincipals.has(input.serviceClientId)
+    ) {
+      return { status: "unavailable" };
+    }
+    const records = Array.from(this.boundedStorageRecords.entries()).filter(
+      ([, record]) =>
+        record.userId === input.serviceClientId &&
+        record.clientId === input.serviceClientId &&
+        record.collection.startsWith(input.collectionPrefix),
+    );
+    const receipts = Array.from(
+      this.boundedStorageTransactionReceipts.entries(),
+    ).filter(
+      ([, receipt]) =>
+        receipt.userId === input.serviceClientId &&
+        receipt.clientId === input.serviceClientId &&
+        receiptIsBoundedToMaintenanceCollectionPrefix(
+          receipt,
+          input.collectionPrefix,
+        ),
+    );
+    if (
+      records.length + receipts.length >
+      ACCEPTANCE_NAMESPACE_MAINTENANCE_MAX_ROWS
+    ) {
+      return { status: "batch_too_large" };
+    }
+    for (const [key] of records) this.boundedStorageRecords.delete(key);
+    for (const [key] of receipts) {
+      this.boundedStorageTransactionReceipts.delete(key);
+    }
+    this.audits.push({
+      type: "admin.acceptance_namespace_maintenance.completed",
+      data: {
+        deleted_records: records.length,
+        deleted_transaction_receipts: receipts.length,
+        identity_source: "subject",
+      },
+      actorSubjectHash: audit.actorSubjectHash,
+      now: audit.createdAt,
+    });
+    return {
+      status: "completed",
+      deletedRecords: records.length,
+      deletedReceipts: receipts.length,
+      remainingRecords: 0,
+      remainingReceipts: 0,
     };
   }
 

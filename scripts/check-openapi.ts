@@ -205,6 +205,18 @@ const RESPONSE_REQUIREMENTS: readonly ResponseRequirement[] = [
   response("/admin/clients", "get", "200", HYPERMEDIA_HTML),
   response("/admin/clients", "post", "200", HYPERMEDIA_JSON),
   response("/admin/clients", "post", "303"),
+  response(
+    "/admin/maintenance/bounded-service-namespaces",
+    "get",
+    "200",
+    HYPERMEDIA_HTML,
+  ),
+  response(
+    "/admin/maintenance/bounded-service-namespaces",
+    "post",
+    "200",
+    HYPERMEDIA_HTML,
+  ),
 
   // Successful protocol payloads remain standards-defined rather than wrapped.
   response("/.well-known/openid-configuration", "get", "200", STANDARD_HTML),
@@ -239,6 +251,9 @@ const REQUEST_REQUIREMENTS: readonly RequestRequirement[] = [
   request("/device/decision", "post", [FORM_MEDIA]),
   request("/consent", "post", [FORM_MEDIA]),
   request("/admin/clients", "post", [FORM_MEDIA]),
+  request("/admin/maintenance/bounded-service-namespaces", "post", [
+    FORM_MEDIA,
+  ]),
 ];
 
 export function extractImplementedOperations(
@@ -286,6 +301,18 @@ export function extractImplementedOperations(
     )
   ) {
     addOperation(operations, { path: "/events", method: "get" });
+  }
+  for (const method of ["get", "post"] as const) {
+    if (
+      new RegExp(
+        `url\\.pathname\\s*===\\s*ACCEPTANCE_NAMESPACE_MAINTENANCE_PATH[\\s\\S]{0,120}request\\.method\\s*===\\s*["']${method.toUpperCase()}["']`,
+      ).test(handlerSource)
+    ) {
+      addOperation(operations, {
+        path: "/admin/maintenance/bounded-service-namespaces",
+        method,
+      });
+    }
   }
   return [...operations.values()].sort(compareOperations);
 }
