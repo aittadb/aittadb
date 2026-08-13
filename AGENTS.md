@@ -253,12 +253,8 @@ Update `AGENTS.md` when architecture/interfaces/commands/constraints/security/st
 
 ## Multi-agent execution
 
-GPT-5.6 Sol Ultra is primary architect/orchestrator/integrator/final decision-maker; owns requirements analysis/architecture, task decomposition/dependency ordering, conflict resolution, final review/validation.
+Cost-effective subagent-first: primary architects, orchestrates, integrates, and decides. For nontrivial work, split independent streams; delegate most investigation, implementation, tests, docs, debugging, and review with scope/files/constraints/DoD; resolve conflicts and validate. Direct work is coordination, integration, inseparable/trivial work; never spawn for a quota.
 
-- Use GPT-5.6 Luna Max only for small fully specified tasks with clear scope/acceptance criteria/file ownership/tests and no unresolved architecture. Never delegate ambiguous product/protocol/authorization/data-integrity/concurrency/cross-cutting decisions to Luna.
-- Use GPT-5.6 Terra High for read-only exploration/dependency mapping/investigation while boundaries are unclear.
-- Use GPT-5.6 Sol High or Max for independent architecture/security/correctness/integration review.
-- Parallelize only independent work; Implementation subagents MUST edit only isolated Git worktrees. Never overlap files/shared behavior/tightly coupled components.
-- Each delegation is one implementation/relevant-tests/docs task; subagents report changed files/validation/assumptions/unresolved risks.
-- Primary inspects/integrates all returned work, resolves findings, runs full relevant validation suite, reviews final combined diff, and accepts only reviewed, complete, validated agent commits. Coordination files such as `PLAN.md`, `ROADMAP.md`, `BACKLOG.md`, and `CHANGELOG.md` MAY be edited directly.
-- Prefer routing if selectable; otherwise intended.
+- Least-cost capable model: Luna low for search/logs/commands/docs; Luna medium/high for specified routine code/tests (high only edge cases); Terra medium/high for multi-file/state/debug; Sol high/xhigh for architecture/security/protocol/persistence/hard debugging/independent review; Sol max: exceptional high-risk uncertainty. Escalate, not retry unsuitable workers; use `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol` when selectable, closest equivalent otherwise.
+- Luna never owns unresolved product/protocol/auth/data-integrity/concurrency/cross-cutting decisions. Parallelize independent units in isolated worktrees; no overlap. Each implementation delegation owns code/tests/docs.
+- Workers report files, validation, assumptions, risks, next action. Lifecycle: Sol plan -> Luna/Terra workers -> independent Sol review -> least-cost remediation -> risk-proportionate re-review. Primary inspects work, resolves findings, runs relevant validation, reviews diff. Coordination docs may be direct.
